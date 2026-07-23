@@ -1,0 +1,31 @@
+{
+  "_provenance": {
+    "source": "zh-settings-providers.json",
+    "timestamp": "2026-07-23T11:55:24.537Z",
+    "reason": "extra-vs-en-providers"
+  },
+  "settings.exa.enabled.description": "Exa 搜索工具的总开关",
+  "settings.exa.enabled.label": "Exa",
+  "settings.task.isolation.commits.options.ai.label": "AI 生成",
+  "tabs.providers.groups.0": "服务",
+  "tabs.providers.groups.1": "Fireworks",
+  "tabs.providers.groups.2": "小型模型",
+  "tabs.providers.groups.3": "协议",
+  "tabs.providers.groups.4": "隐私",
+  "tabs.providers.groups.Timeouts": "超时",
+  "tabs.providers.groups.5": "超时",
+  "settings.providers.webSearchGeminiModel.label": "Gemini 网页搜索模型",
+  "settings.providers.webSearchGeminiModel.description": "Gemini Google 搜索接地使用的模型 ID。默认为 gemini-2.5-flash。",
+  "settings.speech.enhanced.label": "增强语音改写",
+  "settings.speech.enhanced.description": "在合成前使用 tiny/smol 模型将助手输出改写为自然口语（描述代码、删除链接和 markdown）。失败时回退到机械清理。",
+  "settings.providers.kimiApiFormat.options.auto.label": "自动",
+  "settings.providers.kimiApiFormat.options.auto.description": "使用模型服务端声明的协议",
+  "settings.providers.streamFirstEventTimeoutSeconds.options.-1.label": "自动",
+  "settings.providers.streamFirstEventTimeoutSeconds.options.-1.description": "使用提供方默认值和 PI_* 超时环境变量",
+  "settings.providers.streamFirstEventTimeoutSeconds.options.0.label": "关",
+  "settings.providers.streamFirstEventTimeoutSeconds.options.0.description": "禁用首事件超时",
+  "settings.providers.streamIdleTimeoutSeconds.options.-1.label": "自动",
+  "settings.providers.streamIdleTimeoutSeconds.options.-1.description": "使用提供方默认值和 PI_* 超时环境变量",
+  "settings.providers.streamIdleTimeoutSeconds.options.0.label": "关",
+  "settings.providers.streamIdleTimeoutSeconds.options.0.description": "禁用空闲超时"
+}

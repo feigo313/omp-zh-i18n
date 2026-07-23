@@ -1,0 +1,13 @@
+{
+  "_provenance": {
+    "source": "zh-settings-files.json",
+    "timestamp": "2026-07-23T11:55:24.531Z",
+    "reason": "extra-vs-en-files"
+  },
+  "tabs.files.groups.0": "编辑",
+  "tabs.files.groups.1": "读取",
+  "tabs.files.groups.2": "读取摘要",
+  "tabs.files.groups.3": "LSP",
+  "settings.edit.enforceSeenLines.label": "强制已见行保护",
+  "settings.edit.enforceSeenLines.description": "拒绝基于先前 read/search 从未完整显示过的行进行的编辑操作。"
+}

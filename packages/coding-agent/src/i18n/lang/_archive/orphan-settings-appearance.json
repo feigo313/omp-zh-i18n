@@ -1,0 +1,20 @@
+{
+  "_provenance": {
+    "source": "zh-settings-appearance.json",
+    "timestamp": "2026-07-23T11:55:24.534Z",
+    "reason": "extra-vs-en-appearance"
+  },
+  "settings.collab.displayName.label": "显示名称",
+  "settings.images.describeForTextModels.label": "为纯文本模型描述图片",
+  "settings.power.sleepPrevention.options.display.label": "阻止显示器睡眠",
+  "tabs.appearance.groups.0": "主题",
+  "tabs.appearance.groups.1": "状态栏",
+  "tabs.appearance.groups.2": "显示",
+  "tabs.appearance.groups.3": "图片",
+  "settings.tui.scrollbackRebuild.label": "重写滚动历史",
+  "settings.tui.scrollbackRebuild.description": "当块的最终形态替换其实时预览时，擦除并回放终端滚动历史。关闭时（默认），过时的预览副本保留在历史中，最终内容附加在下方。",
+  "settings.display.collapseCompacted.label": "折叠已压缩历史",
+  "settings.display.collapseCompacted.description": "在实时对话中，将压缩前的历史折叠到摘要分隔线后面；关闭则保留完整对话并保持分隔线标记。",
+  "settings.tui.imeSafeCursor.label": "IME 安全提示布局",
+  "settings.tui.imeSafeCursor.description": "将提示的底部边框移到单独行，防止 macOS IME 编辑文字时将其位移。"
+}

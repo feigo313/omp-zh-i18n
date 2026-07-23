@@ -1,0 +1,10 @@
+{
+  "session.compaction.complete": "压缩完成",
+  "session.compaction.failed": "压缩失败",
+  "runtime.compaction.complete": "压缩完成。Token: {before} -> {after}（节省 {saved}）",
+  "runtime.compaction.complete.simple": "压缩完成。",
+  "runtime.compaction.failed": "压缩失败：{error}",
+  "compact.modes.soft.description": "使用活跃模型本地压缩（跳过远程端点）",
+  "compact.modes.remote.description": "通过远程端点/提供商原生压缩",
+  "compact.modes.snapcompact.description": "将历史归档为密集位图图像，由模型回读（无需 LLM 调用）"
+}
