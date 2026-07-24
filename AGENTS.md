@@ -1,9 +1,9 @@
 # Development Rules
 
 > **Local (this machine / Orca handoff)**  
-> Project entry: `CLAUDE.md` · **Execution SoT**: `docs/local/ACTIVE-TASK-i18n-zh.md`  
-> Current work: i18n zh realign for coding-agent `17.0.8` — edit only `packages/coding-agent/src/i18n/lang/zh-*.json` unless asked otherwise.  
-> Review history (not execution SoT): `docs/local/i18n-zh-translation-plan-review.md`  
+> Project entry: `CLAUDE.md` · **Paused SoT**: `docs/local/STATUS-2026-07-24-paused.md`  
+> Public: https://github.com/feigo313/omp-zh-i18n · baseline coding-agent **17.1.0** · irregular updates.  
+> Default: no new i18n work until user asks; then edit `packages/coding-agent/src/i18n/lang` (+ needed wiring).  
 > (Everything below is upstream Oh My Pi agent rules.)
 
 ## Default Context
