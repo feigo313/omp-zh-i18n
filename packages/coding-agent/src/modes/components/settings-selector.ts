@@ -547,7 +547,7 @@ export class SettingsSelectorComponent implements Component {
 		const tabLines = this.#tabBar.render(innerWidth);
 		const searching = this.#searchList !== null;
 		const showPreview = !searching && this.#currentTabId === "appearance";
-		const previewLines = showPreview ? ["", theme.fg("muted", "Preview:"), this.#getStatusPreviewString()] : [];
+		const previewLines = showPreview ? ["", theme.fg("muted", interceptUIString("ui.settings.preview", "Preview:")), this.#getStatusPreviewString()] : [];
 
 		// Fixed chrome: top border, tabs, divider, [search row], divider, hint, bottom border.
 		const fixedRows = 1 + tabLines.length + 1 + (searching ? 1 : 0) + 1 + 1 + 1;
@@ -909,6 +909,11 @@ export class SettingsSelectorComponent implements Component {
 			const option = def.options.find(o => o.value === rawValue);
 			if (option?.label) return option.label;
 		}
+		// Runtime theme lists inject options only inside the submenu; list view still
+		// needs the translated theme title (themes.<id>.label).
+		if (path === "theme.dark" || path === "theme.light") {
+			return i18n.t(`themes.${rawValue}.label`, rawValue);
+		}
 		if (path === "compaction.thresholdPercent" && (rawValue === "-1" || rawValue === "")) {
 			return "default";
 		}
@@ -937,7 +942,10 @@ export class SettingsSelectorComponent implements Component {
 				return baseOpt || { value: level, label: level };
 			});
 		} else if (def.path === "theme.dark" || def.path === "theme.light") {
-			options = this.context.availableThemes.map(t => ({ value: t, label: t }));
+			options = this.context.availableThemes.map(t => ({
+				value: t,
+				label: i18n.t(`themes.${t}.label`, t),
+			}));
 		}
 
 		// Preview handlers

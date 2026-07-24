@@ -72,4 +72,66 @@
 `settings.mcp.renderMarkdownResults.label/description`
 
 ## D. zh-ui
-`ui.agentHub.agentHub` → 代理中心
+`ui.agentHub.agentHub` → 代理中心（已修：代理中心）
+
+## E. P1 主题名字（**已修** MiMo task_e2973a59fdaf）
+
+| 位置 | 设置 → 外观 → 深色/浅色主题选项列表 |
+|---|---|
+| 修复 | `settings-selector.ts` → `i18n.t(\`themes.${id}.label\`)`；en/zh-settings-appearance 各 **100** 条 `themes.*.label` |
+| 抽检 | titanium→钛色，light→浅色，dark→深色；zh 无纯英文残留 |
+
+## F. P1 模型 Prewalk 分组（**已修** 2026-07-23）
+
+| 位置 | 设置 → **模型** → 分组标题 |
+|---|---|
+| 修复 | `tabs.model.groups.Prewalk` → EN `Prewalk` / ZH **预走查**（en+zh-settings-model.json） |
+
+## G. P1 模型·采样·服务层级选项未翻译（用户记录，**未修**，待 MiMo 批次）
+
+| UI | 模型 → 采样 → 服务层级 OpenAI / Anthropic / Google / 子代理（+ 顾问） |
+|---|---|
+| label 现状 | `settings.tier.*.label` 已有「服务层级 — …」中文（品牌名可保留） |
+| **缺口** | **options 全缺**：en/zh-settings-model 无任何 `settings.tier.*.options.*` |
+| 源 | `packages/coding-agent/src/config/service-tier.ts` → `SERVICE_TIER_OPENAI_OPTIONS` 等 |
+| 须补 | 各 path 的 options value 的 label+description 中文；存储 value 保持 none/auto/… |
+| OpenAI | none, auto, default, flex, scale, priority |
+| Anthropic | none, priority |
+| Google | none, flex, priority |
+| Subagent / Advisor | inherit, none, auto, default, flex, scale, priority |
+
+## H. P1 模型·提示词·Model Role Storage 标题/选项（用户记录，**未修**）
+
+| UI | 模型 → 提示词 → **Model Role Storage** |
+|---|---|
+| 缺口 | en/zh **无** `settings.modelRoleStorage.*` 全套 |
+| 须补 | `.label` / `.description`；`.options.global|project.label|description` |
+| schema | `settings-schema.ts` `modelRoleStorage`（group: Prompt） |
+| 建议 ZH | 模型角色存储；全局；按项目 |
+
+## I. P1 交互·语音·语音模型 / 提交触发 options（用户记录，**未修**）
+
+| UI | 交互 → 语音 → **语音模型**、**语音转文字提交触发** |
+|---|---|
+| 字段 label | 已中文 |
+| **缺口** | **options 全缺**（interaction en/zh 无 `stt.modelName.options.*` / `stt.submitTrigger.options.*`） |
+| 源 | `stt/models.ts`（fast/balanced/turbo/parakeet）；`stt/submit-trigger.ts`（never/release/release-complete/say-submit） |
+| 用户策略 | **模型名**可保留英文；**模型 description 必中文**；**触发 label+description 全中文** |
+
+## J. P1 记忆·记忆模型 options（用户记录，**未修**）
+
+| UI | 记忆 → **记忆模型**（`settings.providers.memoryModel`） |
+|---|---|
+| 字段 label | 已有「记忆 模型」 |
+| **缺口** | **options 全缺** |
+| 源 | `tiny/models.ts` `TINY_MEMORY_MODEL_OPTIONS` / `TINY_MEMORY_LOCAL_MODELS` |
+| values | online, qwen3-1.7b, llama3.2:3b, gemma-3-1b, qwen2.5-1.5b, lfm2-1.2b |
+| 用户策略 | **名称可不译**；**介绍（description）必中文** |
+
+## K. P1 记忆·Mnemopi 分组名（用户记录，**未修**）
+
+| UI | 记忆 → 分组标题 **Mnemopi** |
+|---|---|
+| 缺口 | `tabs.memory.groups.Mnemopi` = `Mnemopi`（en/zh 相同，无中文） |
+| 建议 ZH | **记忆派**（与 `settings.memory.backend.options.mnemopi.label` 一致） |
+| 备注 | 字段级 mnemopi.* 多数字幕已有中文；主要是**分组标题** |

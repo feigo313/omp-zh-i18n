@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "version": "1.0",
+    "language": "zh",
+    "lastUpdated": "2026-06-28"
+  },
+  "tips.tired_of_typing_keep_going": "厌倦了输入 \"keep going\"？只需发送一个 '.' 即可",
+  "tips.btw_side_question": "你可以用 /btw 来问一个旁支问题",
+  "tips.tan_background_agent": "使用 /tan 将当前对话分支到后台代理",
+  "tips.ctrl_d_exit": "Ctrl+D 可以退出，但你的草稿会被保存！",
+  "tips.ompt_stats": "用 `omp stats` 看看你最常用哪个模型",
+  "tips.task_isolation": "试试任务隔离来创建 CoW worktree",
+  "tips.completion_nested": "需要便宜的嵌套模型调用？用 `completion(x...)`。有大量任务？让 clanker 来处理！",
+  "tips.spaghetti_code": "代码写得像意大利面？试试用 /omfg 吐槽一下",
+  "tips.multi_session": "你知道吗？每个 kitty/tmux/cmux/zellij/wezterm 分屏都有自己的会话 — `omp -c` 自动恢复对应的会话",
+  "tips.ultrathink": "在消息中加入 `ultrathink` 触发更深层的多步推理 — 输入时会有彩虹光效",
+  "tips.orchestrate": "在消息中说 `orchestrate` 来驱动多阶段并行子代理任务 — 输入时会有光效",
+  "tips.workflowz": "在消息中说 `workflowz` 来用并行子代理驱动 eval 任务 — 输入时会有光效",
+  "tips.multi_account": "登录同一提供商的多个账号 — 再次 `/login` — omp 会自动负载均衡",
+  "tips.auth_broker": "运行一次 `omp auth-broker serve`，所有机器都能拉取实时令牌 — 刷新密钥不离开主机；`omp auth-gateway` 作为兼容 OpenAI 的代理",
+  "tips.switch_provider": "按 alt+p（或 /switch）切换提供商，按 ctrl+p 循环切换角色模型",
+  "tips.ctrl_r_history": "按 ctrl+r 搜索你的提示历史并重用之前的消息",
+  "tips.force_read": "`/force read` 让下一次只用读取工具，当模型总选错时很有用",
+  "tips.copy_code": "`/copy code` 复制最后一个代码块到剪贴板 — `/copy cmd` 复制最后一个 shell/python 命令",
+  "tips.shake": "`/shake` 将大型工具结果从上下文中移除以释放 token，无需完整 /compact — `/shake images` 只移除图片",
+  "tips.collab": "实时协作：`/collab` 通过端到端加密中继分享你的会话 — 队友运行 `/join <link>` 即可查看工具调用和提示代理",
+  "tips.inspect_transcript": "按 ← ← 深入查看运行中或已完成的代理，检查其工具调用和对话记录",
+  "tips.usage_reset": "遇到 Codex 频率限制？`/usage reset` 使用已保存的重置积分立即恢复配额",
+  "tips.pi_dialect": "没有原生 tool_calling？推理提供商解析出错？设置 `PI_DIALECT=glm|kimi|anthropic…` 在本地处理！",
+  "tips.advisor": "开启 `/advisor` 附加第二个模型来审查每一轮并悄悄注入建议 [NEW]"
+}

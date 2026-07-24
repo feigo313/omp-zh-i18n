@@ -1,10 +1,16 @@
 # ACTIVE: 补全 schema 未进 en/zh 的设置项 + 清残留英文
 
-> **状态**：待 MiMo 严格执行  
-> **更新**：2026-07-23  
+> **状态**：主清单已修；**残留 P1 待办**（主题名字）  
+> **更新**：2026-07-23 晚  
 > **SoT**：本文件 + 清单 `docs/local/i18n-untranslated-inventory-2026-07-23.md`  
-> **Worker**：仅 **MiMo**（复用 `term_b95371fe-…`，禁止新开）  
-> **校验**：Coord（Grok）自检；**不要 Kimi**
+> **Worker**：仅 **MiMo**（复用已有终端，禁止新开）  
+> **校验**：Coord（Grok）自检；**不要 Kimi**  
+
+### 追加遗漏（未修）
+
+- **P1 主题名字**：外观 → 深色/浅色主题 **选项列表中的主题名**（titanium/light/…）全部未翻译。详见 `docs/local/i18n-changelog-2026-07-23.md` §已知遗漏。
+- **P1 模型 Prewalk 分组**：**已修** — `tabs.model.groups.Prewalk` = 预走查。
+- **P1 主题名字**（仍开）：外观深色/浅色主题选项列表中的主题名未译。
 
 ---
 
