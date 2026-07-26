@@ -1,9 +1,9 @@
-# omp-zh-i18n — 阶段收尾（暂停）
+# omp-zh-i18n — 17.1.0-zh.1 阶段收尾（暂停）
 
 > **状态**：本阶段工作结束，默认不再开新任务。有上游版本/用户反馈再续。  
-> **日期**：2026-07-24  
+> **日期**：2026-07-26
 > **GitHub**：https://github.com/feigo313/omp-zh-i18n  
-> **本地**：`G:\oh-my-pi-i18n` · branch `master` @ `416ee0f`（已与 `origin/master` 对齐）
+> **本地**：`G:\oh-my-pi-i18n` · branch `master`（本阶段已发布，默认暂停）
 
 ## 交付物
 
@@ -14,6 +14,7 @@
 | 更新节奏 | **不定期**（不承诺跟每个上游小版本） |
 | 主改动 | `packages/coding-agent/src/i18n/lang/zh-*.json` + 必要 en SoT / interceptor / schema options / settings-selector |
 | 范围 | 欢迎/设置一二级三级、插件页、主题名、枚举值列、常用 UI chrome |
+| 当前发布 | GitHub prerelease `v17.1.0-zh.1`；README 已含中文界面实拍 |
 
 ## 本阶段完成摘要
 
@@ -32,8 +33,9 @@
 ## 续作时怎么开
 
 ```text
-读 docs/local/STATUS-2026-07-24-paused.md 与 README.md。
-对照上游 omp 新版本 en-settings / settings-schema，扫 missing key 再补 zh。
+仅在上游出现**大版本**、用户报告明显中文回退，或用户明确要求时重开。
+先读本文件、README.md 和 docs/local/WORKLOG-2026-07-26.md。
+对照上游的新 en-settings / settings-schema，扫 missing key 再补 zh。
 只改 packages/coding-agent/src/i18n/lang（及明确要求的接线）；默认不写 ~/.omp/lang；勿把 lan 改名为 lang。
 ```
 
