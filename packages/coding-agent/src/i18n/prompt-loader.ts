@@ -12,6 +12,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { getLanguage } from "./index";
+
 /** 包内 bundled prompt 翻译目录 */
 const BUNDLED_PROMPTS_DIR = join(fileURLToPath(import.meta.url), "..", "lang", "prompts");
 
@@ -34,8 +36,8 @@ const promptCache = new Map<string, string>();
  * const systemPrompt = loadTranslatedPrompt("system/system-prompt", originalPrompt);
  */
 export function loadTranslatedPrompt(promptPath: string, originalContent: string): string {
-	// 确定语言
-	const lang = detectLanguage();
+	// 委托主 i18n 系统检测语言（OMP_LANG → config.yml → en）
+	const lang = getLanguage();
 
 	// 如果是英文，直接返回原文
 	if (lang === "en") {
@@ -54,7 +56,7 @@ export function loadTranslatedPrompt(promptPath: string, originalContent: string
 	if (existsSync(translatedPath)) {
 		try {
 			const translated = readFileSync(translatedPath, "utf-8");
-			promptCache.set(cacheKey, translated);
+			promptCache.set(promptPath, translated);
 			return translated;
 		} catch (error) {
 			// 加载失败，回退到原文
@@ -65,28 +67,8 @@ export function loadTranslatedPrompt(promptPath: string, originalContent: string
 	}
 
 	// 找不到翻译，返回原文
-	promptCache.set(cacheKey, originalContent);
+	promptCache.set(promptPath, originalContent);
 	return originalContent;
-}
-
-/**
- * 检测语言设置
- */
-function detectLanguage(): string {
-	// 优先使用 OMP_LANG
-	if (process.env.OMP_LANG) {
-		return process.env.OMP_LANG;
-	}
-
-	// 其次使用系统 LANG
-	const sysLang = process.env.LANG?.split(".")[0];
-	if (sysLang) {
-		// 处理 zh_CN -> zh
-		return sysLang.split("_")[0];
-	}
-
-	// 默认英文
-	return "en";
 }
 
 /**
