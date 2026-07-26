@@ -2,6 +2,8 @@
 
 **Oh My Pi（`omp`）中文界面汉化项目** — 独立维护，面向中文用户。
 
+![omp](./assets/hero.png)
+
 | 项 | 说明 |
 |---|---|
 | 基线 | `@oh-my-pi/pi-coding-agent` **17.1.0** |
@@ -10,6 +12,14 @@
 | 范围 | 欢迎页、设置一/二/三级、插件页、主题名、常用 UI chrome |
 
 上游产品：[Oh My Pi](https://github.com/can1357/oh-my-pi)（MIT）。本仓库在其源码基础上维护中文 `lang` 与必要的 i18n 接线改动；**不承诺**跟随每一个上游小版本同日更新。官方升级后若出现英文回退（缺 key），属预期现象。
+
+## 界面预览
+
+以下为 OMP 的真实 TUI 运行画面；本项目在同一界面中提供中文菜单、设置项和常用 UI 文案。
+
+![OMP 欢迎与模型界面](./assets/models.webp)
+
+![OMP 工具执行界面](./assets/task.webp)
 
 ## 快速开始
 
