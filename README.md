@@ -13,13 +13,23 @@
 
 上游产品：[Oh My Pi](https://github.com/can1357/oh-my-pi)（MIT）。本仓库在其源码基础上维护中文 `lang` 与必要的 i18n 接线改动；**不承诺**跟随每一个上游小版本同日更新。官方升级后若出现英文回退（缺 key），属预期现象。
 
-## 界面预览
+## 中文界面预览
 
-以下为 OMP 的真实 TUI 运行画面；本项目在同一界面中提供中文菜单、设置项和常用 UI 文案。
+以下为本仓库 17.1.0-zh.1 的真实运行画面，覆盖欢迎页与常用设置页。
 
-![OMP 欢迎与模型界面](./assets/models.webp)
+### 欢迎页
 
-![OMP 工具执行界面](./assets/task.webp)
+![中文欢迎页](./assets/screenshots/welcome.png)
+
+### 设置页
+
+![外观设置](./assets/screenshots/settings-appearance.png)
+
+![模型设置](./assets/screenshots/settings-model.png)
+
+![交互设置](./assets/screenshots/settings-interaction.png)
+
+![工具设置](./assets/screenshots/settings-tools.png)
 
 ## 快速开始
 
