@@ -2,11 +2,11 @@ name: CI
 
 on:
    push:
-      branches: [main]
+      branches: [main, master]
       paths:
          - "packages/**"
    pull_request:
-      branches: [main]
+      branches: [main, master]
       paths:
          - "packages/**"
    workflow_dispatch:
