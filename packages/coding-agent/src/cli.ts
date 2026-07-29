@@ -317,7 +317,11 @@ export async function runCli(argv: string[]): Promise<void> {
 		// finishes. If we await i18n.init() first, those early messages can be dropped
 		// and the worker can hang.
 		if (resolvedArgv[0]?.startsWith("__omp_worker_")) {
-			await runWorkerEntrypoint(resolvedArgv[0]);
+			const dispatched = await runWorkerEntrypoint(resolvedArgv[0]);
+			if (!dispatched) {
+				process.stderr.write(`Error: unknown worker selector: ${resolvedArgv[0]}\n`);
+				process.exitCode = 1;
+			}
 			return;
 		}
 
