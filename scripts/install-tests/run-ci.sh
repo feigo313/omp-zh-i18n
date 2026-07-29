@@ -44,8 +44,15 @@ find_tarball() {
 
 section "Binary install smoke"
 bun --cwd=packages/natives run build
-bun --cwd=packages/coding-agent run build
 
+# The compiled binary's embedded-addon.js extraction may fail (bundled
+# archive path resolution in Bun --compile). As a fallback, place the
+# native addon where the binary's nativeDir path expects it.
+mkdir -p packages/coding-agent/native
+cp packages/natives/native/pi_natives.*.node packages/coding-agent/native/ 2>/dev/null || true
+cp packages/natives/native/embedded-addons.*.tar.gz packages/coding-agent/native/ 2>/dev/null || true
+
+bun --cwd=packages/coding-agent run build
 BINARY_DIR="$WORK_DIR/binary-bin"
 mkdir -p "$BINARY_DIR"
 cp packages/coding-agent/dist/omp "$BINARY_DIR/omp"
