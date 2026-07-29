@@ -21,6 +21,8 @@
   "settings.exa.enabled.label": "Exa",
   "settings.exa.searchDelayMs.description": "Minimum delay between Exa web search requests in milliseconds; set 0 to disable pacing",
   "settings.exa.searchDelayMs.label": "Exa Search Delay",
+  "settings.live.voice.description": "Voice used by Codex-backed realtime voice sessions",
+  "settings.live.voice.label": "Live Voice",
   "settings.provider.appendOnlyContext.description": "Cache system prompt + tool specs and keep an append-only message log so provider prefix caches (DeepSeek, Xiaomi/SGLang, Anthropic) hit at maximum rate. Auto enables for known prefix-cache providers.",
   "settings.provider.appendOnlyContext.label": "Append-Only Context",
   "settings.provider.appendOnlyContext.options.auto.description": "Enable for known prefix-cache providers (recommended)",
