@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { formatCompact, formatInteger, formatPercent } from "../data/formatters";
 import { buildAgentTokenShare } from "../data/view-models";
-import type { TranslationFn } from "../i18n";
+import { type TranslationFn, useLocale } from "../i18n";
 import type { AgentType, AgentTypeStats } from "../types";
 
 /**

@@ -444,6 +444,8 @@ export interface RunOptions {
 	commands: CommandEntry[];
 	/** Custom help renderer. Receives fully-populated config. */
 	help?: (config: CliConfig) => Promise<void> | void;
+	/** i18n translator for CLI help text. */
+	translator?: Translator;
 }
 
 /** Find a command entry by exact name or alias. */
@@ -469,7 +471,7 @@ export async function run(opts: RunOptions): Promise<void> {
 		if (opts.help) {
 			await opts.help(config);
 		} else {
-			renderRootHelp(config);
+			renderRootHelp(config, opts.translator);
 		}
 		return;
 	}
@@ -487,7 +489,7 @@ export async function run(opts: RunOptions): Promise<void> {
 		const entry = findEntry(opts.commands, commandId);
 		if (entry) {
 			const Cmd = await loadEntry(entry);
-			renderCommandHelp(bin, entry.name, Cmd);
+			renderCommandHelp(bin, entry.name, Cmd, opts.translator);
 		} else {
 			process.stderr.write(`Unknown command: ${commandId}\n`);
 		}

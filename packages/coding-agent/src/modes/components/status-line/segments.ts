@@ -680,6 +680,7 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	subagents: subagentsSegment,
 	token_in: tokenInSegment,
 	token_out: tokenOutSegment,
+	token_io: tokenInSegment,
 	token_total: tokenTotalSegment,
 	token_rate: tokenRateSegment,
 	cost: costSegment,
