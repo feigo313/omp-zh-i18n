@@ -21,6 +21,8 @@
   "settings.exa.enabled.label": "Exa",
   "settings.exa.searchDelayMs.description": "Exa 网页搜索请求间最小延迟（毫秒）；设为 0 禁用限速",
   "settings.exa.searchDelayMs.label": "Exa 搜索延迟",
+  "settings.live.voice.description": "Codex 后端实时语音会话使用的音色",
+  "settings.live.voice.label": "实时语音音色",
   "settings.provider.appendOnlyContext.description": "缓存系统提示词 + 工具规格并维护仅追加消息日志，使提供方前缀缓存（DeepSeek、小米/SGLang、Anthropic）以最大命中率生效。已知前缀缓存提供方自动启用。",
   "settings.provider.appendOnlyContext.label": "只追加上下文",
   "settings.provider.appendOnlyContext.options.auto.description": "为已知前缀缓存提供方启用（推荐）",
