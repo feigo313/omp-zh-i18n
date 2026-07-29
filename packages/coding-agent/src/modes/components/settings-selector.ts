@@ -495,17 +495,29 @@ export class SettingsSelectorComponent implements Component {
 
 	#footerHintText(): string {
 		if (this.#searchList) {
-			return interceptUIString("ui.settings.footer.search", "Enter to change · Tab to jump tabs · Esc to exit search");
+			return interceptUIString(
+				"ui.settings.footer.search",
+				"Enter to change · Tab to jump tabs · Esc to exit search",
+			);
 		}
 		if (this.#currentTabId === "plugins") {
 			return interceptUIString("ui.settings.footer.plugins", "Tab to switch tabs · Esc to close");
 		}
 		if (this.#currentList?.sectionFocused) {
-			return interceptUIString("ui.settings.footer.sectionFocus", "↑/↓ to jump sections · Tab/Enter to settings · ←/→ to switch tabs · Esc to close");
+			return interceptUIString(
+				"ui.settings.footer.sectionFocus",
+				"↑/↓ to jump sections · Tab/Enter to settings · ←/→ to switch tabs · Esc to close",
+			);
 		}
 		const nav = this.#hasSectionJump
-			? interceptUIString("ui.settings.footer.withSections", "Enter/Space to change · Tab to jump sections · ←/→ to switch tabs · Type to search · Esc to close")
-			: interceptUIString("ui.settings.footer.withoutSections", "Enter/Space to change · Tab to switch tabs · Type to search · Esc to close");
+			? interceptUIString(
+					"ui.settings.footer.withSections",
+					"Enter/Space to change · Tab to jump sections · ←/→ to switch tabs · Type to search · Esc to close",
+				)
+			: interceptUIString(
+					"ui.settings.footer.withoutSections",
+					"Enter/Space to change · Tab to switch tabs · Type to search · Esc to close",
+				);
 		return nav;
 	}
 
@@ -547,7 +559,9 @@ export class SettingsSelectorComponent implements Component {
 		const tabLines = this.#tabBar.render(innerWidth);
 		const searching = this.#searchList !== null;
 		const showPreview = !searching && this.#currentTabId === "appearance";
-		const previewLines = showPreview ? ["", theme.fg("muted", interceptUIString("ui.settings.preview", "Preview:")), this.#getStatusPreviewString()] : [];
+		const previewLines = showPreview
+			? ["", theme.fg("muted", interceptUIString("ui.settings.preview", "Preview:")), this.#getStatusPreviewString()]
+			: [];
 
 		// Fixed chrome: top border, tabs, divider, [search row], divider, hint, bottom border.
 		const fixedRows = 1 + tabLines.length + 1 + (searching ? 1 : 0) + 1 + 1 + 1;

@@ -5,8 +5,8 @@
  * 此模块会立即执行初始化逻辑
  */
 
-import { i18n } from "./index";
 import { logger } from "@oh-my-pi/pi-utils";
+import { i18n } from "./index";
 
 // 立即初始化 i18n 系统
 i18n.init();

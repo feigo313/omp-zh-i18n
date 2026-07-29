@@ -882,11 +882,15 @@ export function countRecentErrors(cutoff?: number | null, model?: string): numbe
 	if (!db) return 0;
 	const hasCutoff = cutoff !== undefined && cutoff !== null;
 	if (model) {
-		const stmt = db.prepare(`SELECT COUNT(*) as count FROM messages WHERE stop_reason = 'error' AND model = ? ${hasCutoff ? "AND timestamp >= ?" : ""}`);
+		const stmt = db.prepare(
+			`SELECT COUNT(*) as count FROM messages WHERE stop_reason = 'error' AND model = ? ${hasCutoff ? "AND timestamp >= ?" : ""}`,
+		);
 		const row = (hasCutoff ? stmt.get(model, cutoff) : stmt.get(model)) as { count: number } | undefined;
 		return row?.count ?? 0;
 	}
-	const stmt = db.prepare(`SELECT COUNT(*) as count FROM messages WHERE stop_reason = 'error' ${hasCutoff ? "AND timestamp >= ?" : ""}`);
+	const stmt = db.prepare(
+		`SELECT COUNT(*) as count FROM messages WHERE stop_reason = 'error' ${hasCutoff ? "AND timestamp >= ?" : ""}`,
+	);
 	const row = (hasCutoff ? stmt.get(cutoff) : stmt.get()) as { count: number } | undefined;
 	return row?.count ?? 0;
 }

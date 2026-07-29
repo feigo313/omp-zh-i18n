@@ -12,7 +12,19 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { getAgentDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
-
+import enJson from "./lang/en.json" with { type: "json" };
+import enCommands from "./lang/en-commands.json" with { type: "json" };
+import enSettingsAppearance from "./lang/en-settings-appearance.json" with { type: "json" };
+import enSettingsContext from "./lang/en-settings-context.json" with { type: "json" };
+import enSettingsFiles from "./lang/en-settings-files.json" with { type: "json" };
+import enSettingsFull from "./lang/en-settings-full.json" with { type: "json" };
+import enSettingsInteraction from "./lang/en-settings-interaction.json" with { type: "json" };
+import enSettingsMemory from "./lang/en-settings-memory.json" with { type: "json" };
+import enSettingsModel from "./lang/en-settings-model.json" with { type: "json" };
+import enSettingsProviders from "./lang/en-settings-providers.json" with { type: "json" };
+import enSettingsShell from "./lang/en-settings-shell.json" with { type: "json" };
+import enSettingsTasks from "./lang/en-settings-tasks.json" with { type: "json" };
+import enSettingsTools from "./lang/en-settings-tools.json" with { type: "json" };
 // 静态导入翻译文件（编译时嵌入到二进制）
 import zhCommands from "./lang/zh-commands.json" with { type: "json" };
 import zhHotkeys from "./lang/zh-hotkeys.json" with { type: "json" };
@@ -29,19 +41,6 @@ import zhSettingsTasks from "./lang/zh-settings-tasks.json" with { type: "json" 
 import zhSettingsTools from "./lang/zh-settings-tools.json" with { type: "json" };
 import zhTips from "./lang/zh-tips.json" with { type: "json" };
 import zhUi from "./lang/zh-ui.json" with { type: "json" };
-import enCommands from "./lang/en-commands.json" with { type: "json" };
-import enSettingsAppearance from "./lang/en-settings-appearance.json" with { type: "json" };
-import enSettingsContext from "./lang/en-settings-context.json" with { type: "json" };
-import enSettingsFiles from "./lang/en-settings-files.json" with { type: "json" };
-import enSettingsFull from "./lang/en-settings-full.json" with { type: "json" };
-import enSettingsInteraction from "./lang/en-settings-interaction.json" with { type: "json" };
-import enSettingsMemory from "./lang/en-settings-memory.json" with { type: "json" };
-import enSettingsModel from "./lang/en-settings-model.json" with { type: "json" };
-import enSettingsProviders from "./lang/en-settings-providers.json" with { type: "json" };
-import enSettingsShell from "./lang/en-settings-shell.json" with { type: "json" };
-import enSettingsTasks from "./lang/en-settings-tasks.json" with { type: "json" };
-import enSettingsTools from "./lang/en-settings-tools.json" with { type: "json" };
-import enJson from "./lang/en.json" with { type: "json" };
 
 /** 包内 bundled 翻译目录 */
 const BUNDLED_LAN_DIR = path.join(import.meta.dir, "lang");
@@ -415,14 +414,18 @@ async function loadCachedRate(): Promise<ExchangeRateCache> {
 		if (typeof data.rate === "number" && data.rate > 0 && typeof data.timestamp === "number") {
 			return data as ExchangeRateCache;
 		}
-	} catch { /* ignore */ }
+	} catch {
+		/* ignore */
+	}
 	return { rate: DEFAULT_RATE, timestamp: 0 };
 }
 
 async function persistRate(rate: number): Promise<void> {
 	try {
 		await Bun.write(EXCHANGE_RATE_CACHE_FILE, JSON.stringify({ rate, timestamp: Date.now() }));
-	} catch { /* cache unavailable */ }
+	} catch {
+		/* cache unavailable */
+	}
 }
 
 async function fetchRateOnce(): Promise<void> {
