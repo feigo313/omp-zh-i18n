@@ -20,7 +20,6 @@ import {
 	Text,
 } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
-import { interceptUIString } from "../../i18n/interceptor";
 import { clearPluginRootsAndCaches, resolveOrDefaultProjectRegistryPath } from "../../discovery/helpers";
 import { PluginManager } from "../../extensibility/plugins/manager";
 import type { InstalledPluginSummary } from "../../extensibility/plugins/marketplace";
@@ -32,6 +31,7 @@ import {
 	MarketplaceManager,
 } from "../../extensibility/plugins/marketplace";
 import type { InstalledPlugin, PluginSettingSchema } from "../../extensibility/plugins/types";
+import { interceptUIString } from "../../i18n/interceptor";
 import { getSelectListTheme, getSettingsListTheme, theme } from "../../modes/theme/theme";
 import { shortenPath } from "../../tools/render-utils";
 import { DynamicBorder } from "./dynamic-border";
@@ -113,15 +113,39 @@ export class PluginListComponent extends Container {
 
 		// Title
 		this.addChild(new DynamicBorder());
-		this.addChild(new Text(theme.bold(theme.fg("accent", `  ${interceptUIString("ui.plugins.title", "Plugins")}`)), 0, 0));
+		this.addChild(
+			new Text(theme.bold(theme.fg("accent", `  ${interceptUIString("ui.plugins.title", "Plugins")}`)), 0, 0),
+		);
 		this.addChild(new Spacer(1));
 
 		if (entries.length === 0) {
-			this.addChild(new Text(theme.fg("muted", `  ${interceptUIString("ui.plugins.noPluginsInstalled", "No plugins installed")}`), 0, 0));
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("dim", `  ${interceptUIString("ui.plugins.installNpm", "Install npm plugins:        omp plugin install <package>")}`), 0, 0));
 			this.addChild(
-				new Text(theme.fg("dim", `  ${interceptUIString("ui.plugins.installMarketplace", "Install marketplace plugins: omp plugin install <name>@<marketplace>")}`), 0, 0),
+				new Text(
+					theme.fg("muted", `  ${interceptUIString("ui.plugins.noPluginsInstalled", "No plugins installed")}`),
+					0,
+					0,
+				),
+			);
+			this.addChild(new Spacer(1));
+			this.addChild(
+				new Text(
+					theme.fg(
+						"dim",
+						`  ${interceptUIString("ui.plugins.installNpm", "Install npm plugins:        omp plugin install <package>")}`,
+					),
+					0,
+					0,
+				),
+			);
+			this.addChild(
+				new Text(
+					theme.fg(
+						"dim",
+						`  ${interceptUIString("ui.plugins.installMarketplace", "Install marketplace plugins: omp plugin install <name>@<marketplace>")}`,
+					),
+					0,
+					0,
+				),
 			);
 			this.addChild(new Spacer(1));
 			this.addChild(new DynamicBorder());
@@ -153,7 +177,16 @@ export class PluginListComponent extends Container {
 
 		this.addChild(this.#selectList);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", `  ${interceptUIString("ui.plugins.enterToConfigure", "Enter to configure · Esc to go back")}`), 0, 0));
+		this.addChild(
+			new Text(
+				theme.fg(
+					"dim",
+					`  ${interceptUIString("ui.plugins.enterToConfigure", "Enter to configure · Esc to go back")}`,
+				),
+				0,
+				0,
+			),
+		);
 		this.addChild(new DynamicBorder());
 	}
 
@@ -274,7 +307,9 @@ export class PluginDetailComponent extends Container {
 				items.push({
 					id: `feature:${featName}`,
 					label: `  ${featName}`,
-					description: feat.description || interceptUIString("ui.plugins.enableFeature", `Enable ${featName} feature`),
+					description:
+						feat.description ||
+						interceptUIString("ui.plugins.enableFeature", `Enable ${featName} feature`, { name: featName }),
 					currentValue: isEnabled ? "true" : "false",
 					values: ["true", "false"],
 				});
@@ -287,13 +322,17 @@ export class PluginDetailComponent extends Container {
 
 			for (const [key, schema] of Object.entries(manifest.settings)) {
 				const currentValue = settings[key] ?? schema.default;
-				const displayValue = schema.secret && currentValue ? "••••••••" : String(currentValue ?? interceptUIString("ui.plugins.notSet", "(not set)"));
+				const displayValue =
+					schema.secret && currentValue
+						? "••••••••"
+						: String(currentValue ?? interceptUIString("ui.plugins.notSet", "(not set)"));
 
 				if (schema.type === "boolean") {
 					items.push({
 						id: `config:${key}`,
 						label: `  ${key}`,
-						description: schema.description || interceptUIString("ui.plugins.configureKey", `Configure ${key}`),
+						description:
+							schema.description || interceptUIString("ui.plugins.configureKey", `Configure ${key}`, { key }),
 						currentValue: currentValue ? "true" : "false",
 						values: ["true", "false"],
 					});
@@ -301,12 +340,14 @@ export class PluginDetailComponent extends Container {
 					items.push({
 						id: `config:${key}`,
 						label: `  ${key}`,
-						description: schema.description || interceptUIString("ui.plugins.configureKey", `Configure ${key}`),
+						description:
+							schema.description || interceptUIString("ui.plugins.configureKey", `Configure ${key}`, { key }),
 						currentValue: String(currentValue ?? schema.default ?? ""),
 						submenu: (cv, done) =>
 							new ConfigEnumSubmenu(
 								key,
-								schema.description || interceptUIString("ui.plugins.selectValueFor", `Select value for ${key}`),
+								schema.description ||
+									interceptUIString("ui.plugins.selectValueFor", `Select value for ${key}`, { key }),
 								schema.values,
 								cv,
 								value => {
@@ -321,7 +362,8 @@ export class PluginDetailComponent extends Container {
 					items.push({
 						id: `config:${key}`,
 						label: `  ${key}`,
-						description: schema.description || interceptUIString("ui.plugins.configureKey", `Configure ${key}`),
+						description:
+							schema.description || interceptUIString("ui.plugins.configureKey", `Configure ${key}`, { key }),
 						currentValue: displayValue,
 						submenu: (cv, done) =>
 							new ConfigInputSubmenu(
@@ -372,7 +414,13 @@ export class PluginDetailComponent extends Container {
 
 		this.addChild(this.#settingsList);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", `  ${interceptUIString("ui.plugins.enterToEdit", "Enter to edit · Esc to go back")}`), 0, 0));
+		this.addChild(
+			new Text(
+				theme.fg("dim", `  ${interceptUIString("ui.plugins.enterToEdit", "Enter to edit · Esc to go back")}`),
+				0,
+				0,
+			),
+		);
 		this.addChild(new DynamicBorder());
 	}
 
@@ -413,7 +461,10 @@ export class MarketplacePluginDetailComponent extends Container {
 		this.addChild(new Text(theme.bold(theme.fg("accent", `  ${plugin.id}`)), 0, 0));
 
 		const subtitleParts = [`[${plugin.scope}]`];
-		if (plugin.shadowedBy) subtitleParts.push(`${theme.status.shadowed} ${interceptUIString("ui.plugins.shadowedBy", "shadowed by")} ${plugin.shadowedBy}`);
+		if (plugin.shadowedBy)
+			subtitleParts.push(
+				`${theme.status.shadowed} ${interceptUIString("ui.plugins.shadowedBy", "shadowed by")} ${plugin.shadowedBy}`,
+			);
 		this.addChild(new Text(theme.fg("muted", `  ${subtitleParts.join(" ")}`), 0, 0));
 		this.addChild(new Spacer(1));
 
@@ -421,7 +472,10 @@ export class MarketplacePluginDetailComponent extends Container {
 			{
 				id: "__enabled__",
 				label: interceptUIString("ui.plugins.enabled", "Enabled"),
-				description: interceptUIString("ui.plugins.enableOrDisableMarketplace", "Enable or disable this marketplace plugin"),
+				description: interceptUIString(
+					"ui.plugins.enableOrDisableMarketplace",
+					"Enable or disable this marketplace plugin",
+				),
 				currentValue: enabled ? "true" : "false",
 				values: ["true", "false"],
 			},
@@ -450,23 +504,74 @@ export class MarketplacePluginDetailComponent extends Container {
 		// Read-only metadata. SettingsList rejects items without `values`/`submenu`,
 		// so we render the metadata as plain text rows beneath the toggle.
 		const unknownLabel = interceptUIString("ui.plugins.unknown", "(unknown)");
-		this.addChild(new Text(theme.fg("dim", `  ${interceptUIString("ui.plugins.metaVersion", "version       ")} ${entry?.version ?? unknownLabel}`), 0, 0));
-		this.addChild(new Text(theme.fg("dim", `  ${interceptUIString("ui.plugins.metaScope", "scope         ")} ${plugin.scope}`), 0, 0));
 		this.addChild(
 			new Text(
-				theme.fg("dim", `  ${interceptUIString("ui.plugins.metaInstallPath", "install path  ")} ${entry?.installPath ? shortenPath(entry.installPath) : unknownLabel}`),
+				theme.fg(
+					"dim",
+					`  ${interceptUIString("ui.plugins.metaVersion", "version       ")} ${entry?.version ?? unknownLabel}`,
+				),
 				0,
 				0,
 			),
 		);
-		this.addChild(new Text(theme.fg("dim", `  ${interceptUIString("ui.plugins.metaInstalledAt", "installed at  ")} ${entry?.installedAt ?? unknownLabel}`), 0, 0));
-		this.addChild(new Text(theme.fg("dim", `  ${interceptUIString("ui.plugins.metaLastUpdated", "last updated  ")} ${entry?.lastUpdated ?? unknownLabel}`), 0, 0));
+		this.addChild(
+			new Text(
+				theme.fg("dim", `  ${interceptUIString("ui.plugins.metaScope", "scope         ")} ${plugin.scope}`),
+				0,
+				0,
+			),
+		);
+		this.addChild(
+			new Text(
+				theme.fg(
+					"dim",
+					`  ${interceptUIString("ui.plugins.metaInstallPath", "install path  ")} ${entry?.installPath ? shortenPath(entry.installPath) : unknownLabel}`,
+				),
+				0,
+				0,
+			),
+		);
+		this.addChild(
+			new Text(
+				theme.fg(
+					"dim",
+					`  ${interceptUIString("ui.plugins.metaInstalledAt", "installed at  ")} ${entry?.installedAt ?? unknownLabel}`,
+				),
+				0,
+				0,
+			),
+		);
+		this.addChild(
+			new Text(
+				theme.fg(
+					"dim",
+					`  ${interceptUIString("ui.plugins.metaLastUpdated", "last updated  ")} ${entry?.lastUpdated ?? unknownLabel}`,
+				),
+				0,
+				0,
+			),
+		);
 		if (entry?.gitCommitSha) {
-			this.addChild(new Text(theme.fg("dim", `  ${interceptUIString("ui.plugins.metaGitSha", "git sha       ")} ${entry.gitCommitSha}`), 0, 0));
+			this.addChild(
+				new Text(
+					theme.fg(
+						"dim",
+						`  ${interceptUIString("ui.plugins.metaGitSha", "git sha       ")} ${entry.gitCommitSha}`,
+					),
+					0,
+					0,
+				),
+			);
 		}
 
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", `  ${interceptUIString("ui.plugins.enterToToggle", "Enter to toggle · Esc to go back")}`), 0, 0));
+		this.addChild(
+			new Text(
+				theme.fg("dim", `  ${interceptUIString("ui.plugins.enterToToggle", "Enter to toggle · Esc to go back")}`),
+				0,
+				0,
+			),
+		);
 		this.addChild(new DynamicBorder());
 	}
 
@@ -515,7 +620,13 @@ class ConfigEnumSubmenu extends Container {
 
 		this.addChild(this.#selectList);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", `  ${interceptUIString("ui.plugins.enterToSelect", "Enter to select · Esc to cancel")}`), 0, 0));
+		this.addChild(
+			new Text(
+				theme.fg("dim", `  ${interceptUIString("ui.plugins.enterToSelect", "Enter to select · Esc to cancel")}`),
+				0,
+				0,
+			),
+		);
 	}
 
 	handleInput(data: string): void {
@@ -573,7 +684,13 @@ class ConfigInputSubmenu extends Container {
 
 		this.addChild(this.#input);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", `  ${interceptUIString("ui.plugins.enterToSave", "Enter to save · Esc to cancel")}`), 0, 0));
+		this.addChild(
+			new Text(
+				theme.fg("dim", `  ${interceptUIString("ui.plugins.enterToSave", "Enter to save · Esc to cancel")}`),
+				0,
+				0,
+			),
+		);
 	}
 
 	handleInput(data: string): void {

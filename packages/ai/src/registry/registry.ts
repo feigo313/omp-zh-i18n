@@ -1,6 +1,7 @@
 import type { KnownProvider } from "@oh-my-pi/pi-catalog";
 import { aimlApiProvider } from "./aimlapi";
 import { alibabaCodingPlanProvider } from "./alibaba-coding-plan";
+import { alibabaTokenPlanProvider } from "./alibaba-token-plan";
 import { amazonBedrockProvider } from "./amazon-bedrock";
 import { anthropicProvider } from "./anthropic";
 import { azureProvider } from "./azure";
@@ -28,6 +29,7 @@ import { kimiCodeProvider } from "./kimi-code";
 import { litellmProvider } from "./litellm";
 import { llamaCppProvider } from "./llama-cpp";
 import { lmStudioProvider } from "./lm-studio";
+import { metaProvider } from "./meta";
 import { minimaxProvider } from "./minimax";
 import { minimaxCodeProvider } from "./minimax-code";
 import { minimaxCodeCnProvider } from "./minimax-code-cn";
@@ -49,6 +51,8 @@ import { perplexityProvider } from "./perplexity";
 import { qianfanProvider } from "./qianfan";
 import { qwenPortalProvider } from "./qwen-portal";
 import { sakanaProvider } from "./sakana";
+import { siliconflowProvider } from "./siliconflow";
+import { siliconflowCnProvider } from "./siliconflow-cn";
 import { syntheticProvider } from "./synthetic";
 import { tavilyProvider } from "./tavily";
 import { togetherProvider } from "./together";
@@ -64,7 +68,7 @@ import { xiaomiProvider } from "./xiaomi";
 import { xiaomiTokenPlanAmsProvider } from "./xiaomi-token-plan-ams";
 import { xiaomiTokenPlanCnProvider } from "./xiaomi-token-plan-cn";
 import { xiaomiTokenPlanSgpProvider } from "./xiaomi-token-plan-sgp";
-import { zaiProvider } from "./zai";
+import { zaiCodingPlanProvider, zaiProvider } from "./zai";
 import { zenmuxProvider } from "./zenmux";
 import { zhipuCodingPlanProvider } from "./zhipu-coding-plan";
 
@@ -80,6 +84,7 @@ const ALL = [
 	openaiCodexProvider,
 	anthropicProvider,
 	zaiProvider,
+	zaiCodingPlanProvider,
 	kimiCodeProvider,
 	openrouterProvider,
 	githubCopilotProvider,
@@ -92,6 +97,7 @@ const ALL = [
 	gitlabDuoProvider,
 	gitLabDuoWorkflowProvider,
 	alibabaCodingPlanProvider,
+	alibabaTokenPlanProvider,
 	aimlApiProvider,
 	zhipuCodingPlanProvider,
 	umansProvider,
@@ -105,6 +111,7 @@ const ALL = [
 	xiaomiTokenPlanCnProvider,
 	firepassProvider,
 	deepseekProvider,
+	metaProvider,
 	moonshotProvider,
 	cerebrasProvider,
 	basetenProvider,
@@ -116,6 +123,8 @@ const ALL = [
 	perplexityProvider,
 	qianfanProvider,
 	veniceProvider,
+	siliconflowProvider,
+	siliconflowCnProvider,
 	syntheticProvider,
 	nanogptProvider,
 	waferServerlessProvider,

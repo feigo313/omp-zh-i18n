@@ -9,8 +9,8 @@ import {
 	getCostDashboardStats,
 	getDashboardStats,
 	getModelDashboardStats,
-	getModelList,
 	getOverviewStats,
+	getProviderDashboardStats,
 	getRecentErrors,
 	getRecentRequests,
 	getRequestDetails,
@@ -223,34 +223,21 @@ export async function handleApi(req: Request): Promise<Response> {
 		return Response.json(stats);
 	}
 
+	if (path === "/api/stats/providers") {
+		const stats = await getProviderDashboardStats(range);
+		return Response.json(stats);
+	}
+
 	if (path === "/api/stats/recent") {
 		const limit = url.searchParams.get("limit");
-		const offset = url.searchParams.get("offset");
-		const model = url.searchParams.get("model");
-		const stats = await getRecentRequests(
-			limit ? parseInt(limit, 10) : undefined,
-			offset ? parseInt(offset, 10) : undefined,
-			model || undefined,
-		);
+		const stats = await getRecentRequests(limit ? parseInt(limit, 10) : undefined);
 		return Response.json(stats);
 	}
 
 	if (path === "/api/stats/errors") {
 		const limit = url.searchParams.get("limit");
-		const offset = url.searchParams.get("offset");
-		const model = url.searchParams.get("model");
-		const stats = await getRecentErrors(
-			range,
-			limit ? parseInt(limit, 10) : undefined,
-			offset ? parseInt(offset, 10) : undefined,
-			model || undefined,
-		);
+		const stats = await getRecentErrors(range, limit ? parseInt(limit, 10) : undefined);
 		return Response.json(stats);
-	}
-
-	if (path === "/api/stats/models-list") {
-		const models = await getModelList();
-		return Response.json(models);
 	}
 
 	if (path === "/api/stats/models") {

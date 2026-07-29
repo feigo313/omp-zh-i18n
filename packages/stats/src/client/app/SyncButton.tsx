@@ -1,7 +1,6 @@
 import { RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { sync } from "../api";
-import { useTranslation } from "../i18n";
 
 export interface SyncButtonProps {
 	onSyncStart?: () => void;
@@ -14,7 +13,6 @@ export interface SyncButtonProps {
 }
 
 export function SyncButton({ onSyncStart, onSyncComplete, className = "" }: SyncButtonProps) {
-	const { t } = useTranslation();
 	const [syncing, setSyncing] = useState(false);
 	const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -36,7 +34,7 @@ export function SyncButton({ onSyncStart, onSyncComplete, className = "" }: Sync
 			};
 			setStatus({
 				type: "success",
-				message: t("sync.synced", { count: result.processed }),
+				message: `Synced: ${result.processed} new request${result.processed === 1 ? "" : "s"} found.`,
 			});
 			if (onSyncComplete) {
 				onSyncComplete({ success: true, data: result });
@@ -45,7 +43,7 @@ export function SyncButton({ onSyncStart, onSyncComplete, className = "" }: Sync
 			const errorMessage = err instanceof Error ? err.message : String(err);
 			setStatus({
 				type: "error",
-				message: t("sync.failed", { error: errorMessage }),
+				message: `Sync failed: ${errorMessage}`,
 			});
 			if (onSyncComplete) {
 				onSyncComplete({ success: false, error: errorMessage });
@@ -70,7 +68,7 @@ export function SyncButton({ onSyncStart, onSyncComplete, className = "" }: Sync
 				aria-busy={syncing}
 			>
 				<RefreshCw size={14} className={`stats-sync-icon ${syncing ? "stats-spin" : ""}`} />
-				{syncing ? t("sync.syncing") : t("sync.syncDb")}
+				{syncing ? "Syncing..." : "Sync DB"}
 			</button>
 		</div>
 	);

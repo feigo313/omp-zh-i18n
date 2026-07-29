@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 import os
 import shutil
 import signal
@@ -11,6 +13,7 @@ import time
 import unittest
 
 from omp_rpc import RpcClient, RpcCommandError, RpcConcurrencyError, RpcError, host_tool
+from omp_rpc.client import _RpcFrameDecoder
 
 
 FAKE_SERVER = textwrap.dedent(
@@ -67,6 +70,8 @@ FAKE_SERVER = textwrap.dedent(
         }
 
     registered_host_tools = []
+    host_event_tool_call_id = "toolu_host_1"
+    host_event_tool_name = "echo_host"
 
     def current_state():
         return {
@@ -388,12 +393,42 @@ FAKE_SERVER = textwrap.dedent(
                 continue
             if message == "needs host tool":
                 print(json.dumps({"type": "agent_start"}), flush=True)
+                host_event_tool_call_id = "toolu_host_1"
+                host_event_tool_name = "echo_host"
                 print(
                     json.dumps(
                         {
                             "type": "host_tool_call",
                             "id": "host-call-1",
                             "toolCallId": "toolu_host_1",
+                            "toolName": "echo_host",
+                            "arguments": {"message": "hello"},
+                        }
+                    ),
+                    flush=True,
+                )
+                continue
+            if message == "needs xd host tool":
+                print(json.dumps({"type": "agent_start"}), flush=True)
+                host_event_tool_call_id = "toolu_write_1"
+                host_event_tool_name = "write"
+                print(
+                    json.dumps(
+                        {
+                            "type": "tool_execution_start",
+                            "toolCallId": "toolu_write_1",
+                            "toolName": "write",
+                            "args": {"path": "xd://echo_host", "content": '{"message": "hello"}'},
+                        }
+                    ),
+                    flush=True,
+                )
+                print(
+                    json.dumps(
+                        {
+                            "type": "host_tool_call",
+                            "id": "host-call-2",
+                            "toolCallId": "toolu_write_1",
                             "toolName": "echo_host",
                             "arguments": {"message": "hello"},
                         }
@@ -415,8 +450,8 @@ FAKE_SERVER = textwrap.dedent(
                 json.dumps(
                     {
                         "type": "tool_execution_update",
-                        "toolCallId": "toolu_host_1",
-                        "toolName": "echo_host",
+                        "toolCallId": host_event_tool_call_id,
+                        "toolName": host_event_tool_name,
                         "args": {"message": "hello"},
                         "partialResult": command["partialResult"],
                     }
@@ -428,8 +463,8 @@ FAKE_SERVER = textwrap.dedent(
                 json.dumps(
                     {
                         "type": "tool_execution_end",
-                        "toolCallId": "toolu_host_1",
-                        "toolName": "echo_host",
+                        "toolCallId": host_event_tool_call_id,
+                        "toolName": host_event_tool_name,
                         "result": command["result"],
                         "isError": command.get("isError", False),
                     }
@@ -439,6 +474,157 @@ FAKE_SERVER = textwrap.dedent(
             print(json.dumps({"type": "agent_end", "messages": []}), flush=True)
         else:
             respond(request_id, command_type, success=False, error=f"unsupported: {command_type}")
+    """
+)
+
+
+V2_MESSAGES_SERVER = textwrap.dedent(
+    """
+    import base64
+    import json
+    import os
+    import sys
+
+    message = {
+        "role": "user",
+        "content": [{"type": "text", "text": "x" * (1024 * 1024)}],
+        "timestamp": 1,
+    }
+
+    def emit(payload):
+        encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        if len(encoded) <= 1024 * 1024:
+            print(encoded.decode("utf-8"), flush=True)
+            return
+        chunk_size = 256 * 1024
+        count = (len(encoded) + chunk_size - 1) // chunk_size
+        for index in range(count):
+            chunk = encoded[index * chunk_size : (index + 1) * chunk_size]
+            print(
+                json.dumps(
+                    {
+                        "type": "rpc_chunk",
+                        "chunkId": "test-page",
+                        "index": index,
+                        "count": count,
+                        "byteLength": len(encoded),
+                        "data": base64.b64encode(chunk).decode("ascii"),
+                    },
+                    separators=(",", ":"),
+                ),
+                flush=True,
+            )
+
+    print(
+        json.dumps(
+            {
+                "type": "ready",
+                "protocolVersion": 1,
+                "supportedProtocolVersions": [1, 2],
+                "maxFrameBytes": 1024 * 1024,
+                "maxReassembledFrameBytes": 64 * 1024 * 1024,
+            }
+        ),
+        flush=True,
+    )
+
+    for raw_line in sys.stdin:
+        command = json.loads(raw_line)
+        request_id = command["id"]
+        command_type = command["type"]
+        if command_type == "negotiate_protocol":
+            emit(
+                {
+                    "id": request_id,
+                    "type": "response",
+                    "command": command_type,
+                    "success": True,
+                    "data": {"protocolVersion": 2},
+                }
+            )
+        elif command_type == "get_messages_page":
+            if os.environ.get("V2_MESSAGES_BUSY") == "1":
+                emit(
+                    {
+                        "id": request_id,
+                        "type": "response",
+                        "command": command_type,
+                        "success": False,
+                        "error": "Cannot page messages while the session is changing",
+                        "code": "session_busy",
+                    }
+                )
+                continue
+            if os.environ.get("V2_MESSAGES_STALE") == "1":
+                if command.get("cursor") is not None:
+                    emit(
+                        {
+                            "id": request_id,
+                            "type": "response",
+                            "command": command_type,
+                            "success": False,
+                            "error": "RPC message cursor is stale",
+                            "code": "stale_cursor",
+                        }
+                    )
+                    continue
+                emit(
+                    {
+                        "id": request_id,
+                        "type": "response",
+                        "command": command_type,
+                        "success": True,
+                        "data": {
+                            "messages": [message],
+                            "totalMessages": 2,
+                            "nextCursor": "page-two",
+                        },
+                    }
+                )
+                continue
+            emit(
+                {
+                    "id": request_id,
+                    "type": "response",
+                    "command": command_type,
+                    "success": True,
+                    "data": {
+                        "messages": [message],
+                        "totalMessages": 1,
+                        "nextCursor": None,
+                    },
+                }
+            )
+        elif command_type == "get_messages":
+            emit(
+                {
+                    "id": request_id,
+                    "type": "response",
+                    "command": command_type,
+                    "success": True,
+                    "data": {
+                        "messages": [
+                            {
+                                "role": "assistant",
+                                "content": [
+                                    {"type": "text", "text": "streaming snapshot"}
+                                ],
+                                "timestamp": 3,
+                            }
+                        ]
+                    },
+                }
+            )
+        else:
+            emit(
+                {
+                    "id": request_id,
+                    "type": "response",
+                    "command": command_type,
+                    "success": False,
+                    "error": f"unexpected command: {command_type}",
+                }
+            )
     """
 )
 
@@ -612,6 +798,38 @@ class RpcClientTests(unittest.TestCase):
             **kwargs,
         )
 
+    def test_protocol_v2_decoder_accepts_exact_logical_boundary(self) -> None:
+        frame = {
+            "id": "request-boundary",
+            "type": "response",
+            "command": "get_state",
+            "success": True,
+            "data": {"payload": ""},
+        }
+        encoded_empty = json.dumps(frame, separators=(",", ":")).encode("utf-8")
+        frame["data"]["payload"] = "x" * (1024 * 1024 - len(encoded_empty))
+        encoded = json.dumps(frame, separators=(",", ":")).encode("utf-8")
+        self.assertEqual(len(encoded), 1024 * 1024)
+
+        decoder = _RpcFrameDecoder()
+        chunk_size = 256 * 1024
+        count = (len(encoded) + chunk_size - 1) // chunk_size
+        decoded = None
+        for index in range(count):
+            chunk = encoded[index * chunk_size : (index + 1) * chunk_size]
+            decoded = decoder.push(
+                {
+                    "type": "rpc_chunk",
+                    "chunkId": "exact-boundary",
+                    "index": index,
+                    "count": count,
+                    "byteLength": len(encoded),
+                    "data": base64.b64encode(chunk).decode("ascii"),
+                }
+            )
+
+        self.assertEqual(decoded, frame)
+
     def test_command_builder_supports_common_rpc_options(self) -> None:
         client = RpcClient(
             executable="omp",
@@ -720,6 +938,62 @@ class RpcClientTests(unittest.TestCase):
                 update_events[0].partial_result["content"][0]["text"], "working:hello"
             )
             self.assertEqual(len(end_events), 1)
+            self.assertEqual(end_events[0].result["content"][0]["text"], "host:hello")
+
+    def test_xd_dispatched_custom_tool_events_carry_host_tool_name(self) -> None:
+        """Events for an xd:// device dispatch are renamed to the executed host tool.
+
+        With `tools.xdev` on, omp invokes a custom tool through `write
+        xd://<name>` and the wire events carry the transport tool (`write`).
+        Consumers must observe the host-tool name on update/end events
+        regardless of transport — roboomp's terminal-action detection
+        triple-posted PR reviews when end events only said `write`
+        (oh-my-pi#6696). `tool_execution_start` precedes the `host_tool_call`
+        frame on the wire and keeps the transport name.
+        """
+
+        def echo_host(args: dict[str, str], context) -> str:
+            context.send_update(f"working:{args['message']}")
+            return f"host:{args['message']}"
+
+        with self.make_client(
+            custom_tools=(
+                host_tool(
+                    name="echo_host",
+                    description="Echo from the Python host process",
+                    parameters={
+                        "type": "object",
+                        "properties": {"message": {"type": "string"}},
+                        "required": ["message"],
+                        "additionalProperties": False,
+                    },
+                    execute=echo_host,
+                ),
+            )
+        ) as client:
+            turn = client.prompt_and_wait("needs xd host tool", timeout=2.0)
+            start_names = [
+                event.tool_name
+                for event in turn.events
+                if getattr(event, "type", None) == "tool_execution_start"
+            ]
+            update_events = [
+                event
+                for event in turn.events
+                if getattr(event, "type", None) == "tool_execution_update"
+            ]
+            end_events = [
+                event
+                for event in turn.events
+                if getattr(event, "type", None) == "tool_execution_end"
+            ]
+
+            self.assertEqual(start_names, ["write"])
+            self.assertEqual(
+                [event.tool_name for event in update_events], ["echo_host"]
+            )
+            self.assertEqual([event.tool_name for event in end_events], ["echo_host"])
+            self.assertEqual(end_events[0].tool_call_id, "toolu_write_1")
             self.assertEqual(end_events[0].result["content"][0]["text"], "host:hello")
 
     def test_extension_ui_round_trip(self) -> None:
@@ -857,6 +1131,37 @@ class RpcClientTests(unittest.TestCase):
             client.abort_and_prompt("say hello")
             client.wait_for_idle(timeout=2.0)
             self.assertEqual(client.get_last_assistant_text(), "pong")
+
+    def test_protocol_v2_reassembles_chunked_message_pages(self) -> None:
+        with self.make_client(server=V2_MESSAGES_SERVER) as client:
+            messages = client.get_messages()
+
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(len(messages[0]["content"][0]["text"]), 1024 * 1024)
+
+    def test_protocol_v2_get_messages_falls_back_to_streaming_snapshot(self) -> None:
+        with self.make_client(
+            server=V2_MESSAGES_SERVER, env={"V2_MESSAGES_BUSY": "1"}
+        ) as client:
+            with self.assertRaisesRegex(
+                RpcCommandError, "Cannot page messages while the session is changing"
+            ):
+                client.get_messages_page()
+            messages = client.get_messages()
+
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["content"][0]["text"], "streaming snapshot")
+
+    def test_protocol_v2_get_messages_discards_stale_page_walk(self) -> None:
+        with self.make_client(
+            server=V2_MESSAGES_SERVER, env={"V2_MESSAGES_STALE": "1"}
+        ) as client:
+            with self.assertRaisesRegex(RpcCommandError, "RPC message cursor is stale"):
+                client.get_messages_page(cursor="page-two")
+            messages = client.get_messages()
+
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["content"][0]["text"], "streaming snapshot")
 
     def test_collect_events_returns_turn_events(self) -> None:
         with self.make_client() as client:

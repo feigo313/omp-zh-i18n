@@ -61,11 +61,6 @@ export interface RequestDetails extends MessageStats {
 	output: unknown;
 }
 
-export interface PaginatedResult<T> {
-	items: T[];
-	total: number;
-}
-
 export type TimeRange = "1h" | "24h" | "7d" | "30d" | "90d" | "all";
 
 export interface OverviewStats {

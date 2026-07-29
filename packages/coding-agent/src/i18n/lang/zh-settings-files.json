@@ -60,5 +60,7 @@
   "tabs.files.groups.LSP": "LSP",
   "tabs.files.groups.Read Summaries": "读取摘要",
   "tabs.files.groups.Reading": "读取",
-  "tabs.files.label": "文件"
+  "tabs.files.label": "文件",
+  "settings.read.renderMarkdown.label": "Markdown 预览",
+  "settings.read.renderMarkdown.description": "将 Markdown 读取结果渲染为格式化终端 Markdown 预览而非原始源码"
 }

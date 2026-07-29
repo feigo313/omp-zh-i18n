@@ -80,7 +80,11 @@ These are consumed via `getEnvApiKey()` (`packages/ai/src/stream.ts`) unless not
 | `AI_GATEWAY_API_KEY`            | Vercel AI Gateway auth                           | Using `vercel-ai-gateway` provider                             |                                                                                                     |
 | `CLOUDFLARE_AI_GATEWAY_API_KEY` | Cloudflare AI Gateway auth                       | Using `cloudflare-ai-gateway` provider                         | Base URL must be configured as `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic` |
 | `ALIBABA_CODING_PLAN_API_KEY`   | Alibaba Coding Plan auth                         | Using `alibaba-coding-plan` provider                           |                                                                                                     |
+| `ALIBABA_TOKEN_PLAN_API_KEY`    | QwenCloud Token Plan auth                       | Using `alibaba-token-plan` provider                            | Preferred provider-specific name                                                                    |
+| `BAILIAN_TOKEN_PLAN_API_KEY`    | QwenCloud Token Plan auth                       | Using `alibaba-token-plan` provider                            | Compatible with Qwen Code's Token Plan preset                                                        |
 | `DEEPSEEK_API_KEY`              | DeepSeek auth                                    | Using DeepSeek models                                          |                                                                                                     |
+| `SILICONFLOW_API_KEY`           | SiliconFlow auth                                 | Using `siliconflow` provider                                   |                                                                                                     |
+| `SILICONFLOW_CN_API_KEY`        | SiliconFlow (China) auth                         | Using `siliconflow-cn` provider                                |                                                                                                     |
 | `KILO_API_KEY`                  | Kilo auth                                        | Using Kilo models                                              |                                                                                                     |
 | `OLLAMA_CLOUD_API_KEY`          | Ollama Cloud auth                                | Using `ollama-cloud` provider                                  |                                                                                                     |
 | `WAFER_SERVERLESS_API_KEY`      | Wafer Serverless auth                            | Using `wafer-serverless` provider                              | Pay-as-you-go Wafer SKU; validated against `https://pass.wafer.ai/v1/models`                        |
@@ -104,6 +108,7 @@ When the broker is enabled, the local SQLite credential store is bypassed and al
 | `OMP_AUTH_BROKER_TOKEN` | Bearer token sent on every broker endpoint except `/v1/healthz`                              | `OMP_AUTH_BROKER_URL` is set and no token is available from `auth.broker.token` or `<config-dir>/auth-broker.token`       | Resolution: this env → `auth.broker.token` (`$ENV_NAME` indirection supported) → `<config-dir>/auth-broker.token` (mode `0600`). `<config-dir>` is `~/.omp/` (respecting `PI_CONFIG_DIR`). |
 | `OMP_AUTH_BROKER_SNAPSHOT_TTL_MS` | Freshness window for the encrypted local broker snapshot cache | Optional in broker mode | Default `3600000` (1 h). Freshness is based on broker `snapshot.generatedAt`; `0` disables cache reads/writes and forces the old blocking fetch every startup. |
 | `OMP_AUTH_BROKER_SNAPSHOT_CACHE` | Path to the encrypted local broker snapshot cache | Optional in broker mode | Defaults to `~/.omp/cache/auth-broker-snapshot.enc` (or XDG cache equivalent). Useful for tests, ephemeral hosts, or relocating the `0600` cache file. |
+| `OMP_AUTH_BROKER_ACCOUNT_POOL_FILE` | Process-scoped OAuth account routing for a trusted broker client | Optional in broker mode | Path to a JSON object mapping provider IDs to exact broker `identityKey` arrays. Missing providers are unrestricted; `[]` hides that provider's OAuth accounts; API keys remain visible. Parsed once at startup and fails closed on invalid input. This is not server authorization. |
 
 The gateway has no dedicated env vars — it inherits `OMP_AUTH_BROKER_*`. Its own inbound bearer token lives at `<config-dir>/auth-gateway.token` and is managed via `omp auth-gateway token`.
 
@@ -210,6 +215,7 @@ OAuth host chain: `KIMI_CODE_OAUTH_HOST` → `KIMI_OAUTH_HOST` → `https://auth
 | ------------------------------------------ | ---------------------------------------------------- |
 | `PI_CODEX_DEBUG`                           | `1`/`true` enables Codex provider debug logging      |
 | `PI_CODEX_WEBSOCKET`                       | `1`/`true` enables websocket transport preference    |
+| `PI_CODEX_RESPONSES_LITE`                  | `1`/`true` forces Responses Lite; `0`/`false` forces the standard Responses body; unset uses the model catalog default |
 | `PI_OPENAI_STATEFUL`                       | Overrides the stateful-chaining default for the platform OpenAI Responses API (`previous_response_id`, forces `store: true`): on by default against api.openai.com, off elsewhere |
 | `PI_CODEX_WEBSOCKET_IDLE_TIMEOUT_MS`       | Positive integer override (default 300000)           |
 | `PI_CODEX_WEBSOCKET_RETRY_BUDGET`          | Non-negative integer override (default 5)            |
@@ -403,6 +409,7 @@ These are read as runtime signals; they are usually set by the terminal/OS rathe
 | ------------------------- | ------------------------------------------------------------------------------------- |
 | `PI_NOTIFICATIONS`        | `off` / `0` / `false` suppress desktop notifications                                  |
 | `PI_TUI_WRITE_LOG`        | If set, logs TUI writes to file                                                       |
+| `PI_TUI_RAW_BACKSPACE_IS_CTRL` | If `1`, interprets raw `0x08` as Ctrl+Backspace instead of Backspace; use when SSH/container hops hide a Windows Terminal client |
 | `PI_HARDWARE_CURSOR`      | If `1`, enables hardware cursor mode                                                  |
 | `PI_NO_SYNC_OUTPUT`       | If set (any non-empty value), disables DEC 2026 synchronized-output wrappers while keeping TUI autowrap guards |
 | `PI_NO_DECCARA`           | If set (truthy), disables Kitty DECCARA rectangular-SGR background fills (forces padded-string rendering) |

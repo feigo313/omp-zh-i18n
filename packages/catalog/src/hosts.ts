@@ -41,7 +41,10 @@ export const KNOWN_HOSTS = {
 	zai: { providers: ["zai"], urlMarkers: ["api.z.ai"] },
 	zhipu: { providers: ["zhipu-coding-plan"], urlMarkers: ["open.bigmodel.cn"] },
 	kilo: { providers: ["kilo"], urlMarkers: ["api.kilo.ai"] },
-	alibabaDashscope: { providers: ["alibaba-coding-plan"], urlMarkers: ["dashscope"] },
+	alibabaDashscope: {
+		providers: ["alibaba-coding-plan", "alibaba-token-plan"],
+		urlMarkers: ["dashscope", "token-plan."],
+	},
 	umans: { providers: ["umans"], urlMarkers: ["api.code.umans.ai"] },
 	xiaomi: { providers: ["xiaomi"], providerPrefixes: ["xiaomi-token-plan-"], urlMarkers: ["xiaomimimo.com"] },
 	xai: { providers: ["xai"], urlMarkers: ["api.x.ai"] },
@@ -107,6 +110,24 @@ function includesAsciiCaseInsensitive(value: string, lowerNeedle: string): boole
 }
 
 // --- Endpoint-shape predicates (URL path/verb shapes, not vendor hosts) ---
+
+/**
+ * Hostname for a Vertex AI GenerateContent / rawPredict / OpenAI-compat
+ * request for the given location.
+ *
+ * - `global` → global endpoint (`aiplatform.googleapis.com`)
+ * - `eu` / `us` multi-regions → REP endpoints (`aiplatform.{eu|us}.rep.googleapis.com`)
+ * - every other location → regional (`{location}-aiplatform.googleapis.com`)
+ *
+ * Multi-region codes do NOT follow the regional `{location}-aiplatform` pattern;
+ * interpolating them that way yields hosts like `eu-aiplatform.googleapis.com`
+ * that 404.
+ */
+export function resolveVertexEndpointHost(location: string): string {
+	if (location === "global") return "aiplatform.googleapis.com";
+	if (location === "eu" || location === "us") return `aiplatform.${location}.rep.googleapis.com`;
+	return `${location}-aiplatform.googleapis.com`;
+}
 
 /** Vertex AI express-mode OpenAI-compatible endpoint (`…/endpoints/openapi`). */
 export function isVertexExpressOpenAIUrl(baseUrl: string): boolean {

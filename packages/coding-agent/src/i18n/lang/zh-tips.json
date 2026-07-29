@@ -27,5 +27,7 @@
   "tips.inspect_transcript": "按 ← ← 深入查看运行中或已完成的代理，检查其工具调用和对话记录",
   "tips.usage_reset": "遇到 Codex 频率限制？`/usage reset` 使用已保存的重置积分立即恢复配额",
   "tips.pi_dialect": "没有原生 tool_calling？推理提供商解析出错？设置 `PI_DIALECT=glm|kimi|anthropic…` 在本地处理！",
-  "tips.advisor": "开启 `/advisor` 附加第二个模型来审查每一轮并悄悄注入建议 [NEW]"
+  "tips.advisor": "开启 `/advisor` 附加第二个模型来审查每一轮并悄悄注入建议 [NEW]",
+  "tips.prompt_arrow_list": "尝试用 `->` 开头写个列表（1. 做 X, 2. 做 Y）来指导模型逐步处理",
+  "tips.shift_tab_effort": "按 Shift+Tab 切换推理深度级别"
 }

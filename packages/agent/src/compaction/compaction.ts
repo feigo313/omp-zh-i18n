@@ -28,7 +28,7 @@ import { convertTools } from "@oh-my-pi/pi-ai/providers/openai-responses";
 import { buildResponsesInput, resolveOpenAICompatPolicy } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
-import { logger, prompt, stringifyJson } from "@oh-my-pi/pi-utils";
+import { isRecord, logger, prompt, stringifyJson } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { type AgentTelemetry, instrumentedCompleteSimple } from "../telemetry";
 import { ThinkingLevel } from "../thinking";
@@ -51,6 +51,7 @@ import {
 	requestOpenAiRemoteCompaction,
 	requestRemoteCompaction,
 	shouldUseOpenAiRemoteCompaction,
+	trimRemoteCompactionInputToContextWindow,
 	withOpenAiRemoteCompactionPreserveData,
 } from "./openai";
 import autoHandoffThresholdFocusPrompt from "./prompts/auto-handoff-threshold-focus.md" with { type: "text" };
@@ -427,6 +428,14 @@ function computeMessageTokens(message: AgentMessage, options?: { excludeEncrypte
 					// Encrypted reasoning blob the provider still bills for on replay;
 					// excluded from the compaction floor for the same reason as above.
 					if (!options?.excludeEncryptedReasoning) fragments.push(block.data);
+				} else if (block.type === "anthropicServerTool") {
+					// Native Anthropic server-tool call/result replayed verbatim on the
+					// wire (server_tool_use input, web_search_tool_result
+					// encrypted_content). Opaque provider-replay state the provider still
+					// bills for on same-provider replay; excluded from the compaction
+					// floor like other encrypted reasoning because its local byte size
+					// diverges from provider billing.
+					if (!options?.excludeEncryptedReasoning) fragments.push(stringifyJson(block.block) ?? "null");
 				}
 			}
 			break;
@@ -1130,33 +1139,37 @@ export interface CompactionPreparation {
 }
 
 /**
- * Whether a prior compaction's preserve data can be carried forward by the
- * upcoming compaction. A local compaction (no remote preserve) always can — it
- * holds a real textual summary. A remote compaction (V2 or V1) only can when
- * some candidate model shares its provider AND remote replay is still enabled;
- * otherwise its provider-native replay is dead weight and only the opaque
- * placeholder summary survives, so the caller must re-expand the originals.
+ * Whether a prior remote compaction's provider-native replay can still be read
+ * by the active model — the model that assembles the request context on every
+ * turn. A local compaction (no remote preserve) always can: it holds a real
+ * textual summary. A remote compaction (V2 or V1) only can when the active model
+ * shares the blob's provider AND remote replay is still enabled; otherwise the
+ * active model's encoder drops the payload (see `getOpenAIResponsesHistoryPayload`)
+ * and only the opaque placeholder summary survives, so the caller must re-expand
+ * the originals into a portable local summary rather than strand that history.
+ *
+ * Judged against the ACTIVE model, not the compaction candidate set: a role
+ * model (e.g. `modelRoles.smol`) that still maps to the blob's provider does not
+ * let the active model replay it, so keying reuse on "any candidate shares the
+ * provider" left a provider-switched session permanently context-less (#6343).
  */
-function remotePreserveReusableByAny(
+function remotePreserveReusable(
 	preserveData: Record<string, unknown> | undefined,
-	models: readonly Model[],
+	activeModel: Model,
 	settings: CompactionSettings,
 ): boolean {
 	const remote = getCompactionV2PreserveData(preserveData) ?? getPreservedOpenAiRemoteCompactionData(preserveData);
 	if (!remote) return true;
 	if (settings.remoteEnabled === false) return false;
-	for (const model of models) {
-		if (remote.provider !== model.provider) continue;
-		const v2Ok = settings.remoteStreamingV2Enabled !== false && shouldUseCompactionV2Streaming(model);
-		if (v2Ok || shouldUseOpenAiRemoteCompaction(model)) return true;
-	}
-	return false;
+	if (remote.provider !== activeModel.provider) return false;
+	const v2Ok = settings.remoteStreamingV2Enabled !== false && shouldUseCompactionV2Streaming(activeModel);
+	return v2Ok || shouldUseOpenAiRemoteCompaction(activeModel);
 }
 
 export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
-	compactionModels: readonly Model[] = [],
+	activeModel?: Model,
 ): CompactionPreparation | undefined {
 	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
 		return undefined;
@@ -1165,13 +1178,13 @@ export function prepareCompaction(
 	let prevCompactionIndex = -1;
 	for (let i = pathEntries.length - 1; i >= 0; i--) {
 		if (pathEntries[i].type !== "compaction") continue;
-		// Skip a prior remote compaction (V2 or V1) whose provider-native replay
-		// none of the upcoming compaction candidates can reuse: its summary is only
-		// an opaque placeholder, so re-expand its original messages and summarize
-		// them locally rather than stranding that history. compact() still reuses it
-		// when a candidate can (same provider, remote enabled).
+		// Skip a prior remote compaction (V2 or V1) whose provider-native replay the
+		// active model cannot read: its summary is only an opaque placeholder, so
+		// re-expand its original messages and summarize them locally rather than
+		// stranding that history. compact() still reuses the payload when the active
+		// model can replay it (same provider, remote enabled).
 		const entry = pathEntries[i] as CompactionEntry;
-		if (compactionModels.length > 0 && !remotePreserveReusableByAny(entry.preserveData, compactionModels, settings)) {
+		if (activeModel && !remotePreserveReusable(entry.preserveData, activeModel, settings)) {
 			continue;
 		}
 		prevCompactionIndex = i;
@@ -1278,7 +1291,7 @@ function buildOpenAiResponsesCompactionInput(
 	messages: Message[],
 	model: Model<"openai-responses" | "azure-openai-responses" | "openai-codex-responses">,
 	previousReplacementHistory: Array<Record<string, unknown>> | undefined,
-): unknown[] {
+): Array<Record<string, unknown>> {
 	const input = buildResponsesInput({
 		model,
 		context: { messages },
@@ -1288,7 +1301,14 @@ function buildOpenAiResponsesCompactionInput(
 		includeThinkingSignatures: true,
 		repairOrphanOutputs: true,
 	});
-	return previousReplacementHistory ? [...previousReplacementHistory, ...input] : input;
+	const nativeInput: Array<Record<string, unknown>> = [];
+	for (const item of input) {
+		if (!isRecord(item)) {
+			throw new Error("OpenAI Responses compaction input contains a non-object item");
+		}
+		nativeInput.push(item);
+	}
+	return previousReplacementHistory ? [...previousReplacementHistory, ...nativeInput] : nativeInput;
 }
 
 /**
@@ -1403,20 +1423,33 @@ export async function compact(
 		);
 		if (remoteHistory.length > 0) {
 			try {
-				const request = buildCompactionV2Request(
-					model,
+				const instructions = summaryOptions.remoteInstructions ?? SUMMARIZATION_SYSTEM_PROMPT;
+				const tools = summaryOptions.tools
+					? convertTools(summaryOptions.tools, model.compat.supportsStrictMode, model)
+					: undefined;
+				const trimmed = trimRemoteCompactionInputToContextWindow(
 					remoteHistory,
-					summaryOptions.remoteInstructions ?? SUMMARIZATION_SYSTEM_PROMPT,
-					{
-						tools: summaryOptions.tools
-							? convertTools(summaryOptions.tools, model.compat.supportsStrictMode, model)
-							: undefined,
-						reasoning: buildCompactionV2Reasoning(model, summaryOptions.thinkingLevel),
-						sessionId: summaryOptions.sessionId,
-						promptCacheKey: summaryOptions.promptCacheKey,
-						retainedMessageBudget: settings.v2RetainedMessageBudget,
-					},
+					model.contextWindow,
+					instructions,
+					tools,
 				);
+				if (trimmed.rewrittenOutputs > 0) {
+					logger.info("Rewrote trailing tool outputs before OpenAI V2 remote compaction", {
+						model: model.id,
+						provider: model.provider,
+						rewrittenOutputs: trimmed.rewrittenOutputs,
+						estimatedTokensBefore: trimmed.estimatedTokensBefore,
+						estimatedTokensAfter: trimmed.estimatedTokensAfter,
+						contextWindow: model.contextWindow,
+					});
+				}
+				const request = buildCompactionV2Request(model, trimmed.input, instructions, {
+					tools,
+					reasoning: buildCompactionV2Reasoning(model, summaryOptions.thinkingLevel),
+					sessionId: summaryOptions.sessionId,
+					promptCacheKey: summaryOptions.promptCacheKey,
+					retainedMessageBudget: settings.v2RetainedMessageBudget,
+				});
 				const remote = await withAuth(
 					apiKey,
 					key =>
@@ -1502,7 +1535,7 @@ export async function compact(
 		// summarization so a successful remote compaction never pays for a second,
 		// redundant LLM round. If a LATER compaction cannot reuse this payload,
 		// prepareCompaction re-expands the original messages and summarizes them
-		// locally then (see remotePreserveReusableByAny).
+		// locally then (see remotePreserveReusable).
 		const usedTokens = getCompactionV2PreserveData(preserveData)?.usedTokens ?? 0;
 		summary =
 			"Remote compaction preserved provider-native history for this session." +

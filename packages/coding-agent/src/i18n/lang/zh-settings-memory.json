@@ -127,5 +127,7 @@
   "tabs.memory.groups.General": "通用",
   "tabs.memory.groups.Hindsight": "事后反思",
   "tabs.memory.groups.Mnemopi": "记忆派",
-  "tabs.memory.label": "记忆"
+  "tabs.memory.label": "记忆",
+  "settings.hindsight.apiToken.label": "Hindsight API 令牌",
+  "settings.hindsight.apiToken.description": "已认证 Hindsight 服务器的 Bearer 令牌"
 }

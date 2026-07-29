@@ -41,7 +41,6 @@ import type { Settings } from "../../config/settings";
 import type { PerAdvisorStat } from "../../session/agent-session";
 import type { OAuthAccountIdentity } from "../../session/auth-storage";
 import { formatCompactQuota } from "../controllers/command-controller";
-import { formatCLICost } from "../../i18n";
 import { getSelectListTheme, theme } from "../theme/theme";
 import { HookEditorComponent } from "./hook-editor";
 import { buildBrowserItems, ModelBrowser, sortModelItems } from "./model-browser";
@@ -314,9 +313,7 @@ export class AdvisorConfigOverlayComponent implements Component {
 			];
 			if (liveStat.tokens.cacheRead > 0) spendParts.push(`${liveStat.tokens.cacheRead.toLocaleString()} cache`);
 			lines.push(theme.fg("dim", `  Tokens: ${spendParts.join(", ")}`));
-			if (liveStat.cost > 0) {
-				lines.push(theme.fg("dim", `  Cost: ${formatCLICost(liveStat.cost)}`));
-			}
+			if (liveStat.cost > 0) lines.push(theme.fg("dim", `  Cost: $${liveStat.cost.toFixed(4)}`));
 			if (liveStat.contextWindow > 0) {
 				const pct = Math.round((liveStat.contextTokens / liveStat.contextWindow) * 100);
 				lines.push(

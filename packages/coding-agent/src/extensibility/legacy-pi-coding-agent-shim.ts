@@ -17,7 +17,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { type AuthCredential, SqliteAuthCredentialStore, type TSchema } from "@oh-my-pi/pi-ai";
-import { Text } from "@oh-my-pi/pi-tui";
+import { getKeybindings, type Keybinding, Text } from "@oh-my-pi/pi-tui";
 import {
 	getAgentDbPath,
 	getAgentDir,
@@ -26,6 +26,7 @@ import {
 	parseFrontmatter as parseOmpFrontmatter,
 } from "@oh-my-pi/pi-utils";
 import { getPackageDir as getOmpPackageDir } from "../config";
+import { formatKeyHints } from "../config/keybindings";
 import type { PromptTemplate } from "../config/prompt-templates";
 import { type SettingPath, Settings } from "../config/settings";
 import { EditTool } from "../edit";
@@ -371,6 +372,11 @@ async function executeLegacyBashOperations(
 		}
 		throw err;
 	}
+}
+
+/** Format the active shortcut for legacy extensions that render keybinding hints. */
+export function keyText(action: Keybinding): string {
+	return formatKeyHints(getKeybindings().getKeys(action));
 }
 
 /** Parse frontmatter using the historical Pi package-root helper. */
@@ -855,6 +861,11 @@ export interface ResourceLoader {
 	readonly __ompLegacyPiLoader?: true;
 }
 
+/** Create a pre-initialization runtime for legacy extension resource loaders. */
+export function createExtensionRuntime(): ExtensionRuntime {
+	return new ExtensionRuntime();
+}
+
 /**
  * Loader-owned inputs that {@link createAgentSession} needs regardless of
  * whether the caller provided extra options. `cwd`/`agentDir` fall back to
@@ -888,7 +899,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	readonly __ompLegacyPiLoader = true as const;
 	#state: ResolvedLoaderState;
 	#options: DefaultResourceLoaderOptions;
-	#extensionsResult: LoadExtensionsResult = { extensions: [], errors: [], runtime: new ExtensionRuntime() };
+	#extensionsResult: LoadExtensionsResult = { extensions: [], errors: [], runtime: createExtensionRuntime() };
 	#skills: Skill[] = [];
 	#skillDiagnostics: ResourceDiagnostic[] = [];
 	#prompts: PromptTemplate[] = [];
@@ -1037,7 +1048,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		const { cwd, noExtensions, additionalExtensionPaths, extensionFactories, eventBus } = this.#state;
 
 		if (noExtensions && additionalExtensionPaths.length === 0 && extensionFactories.length === 0) {
-			return { extensions: [], errors: [], runtime: new ExtensionRuntime() };
+			return { extensions: [], errors: [], runtime: createExtensionRuntime() };
 		}
 
 		const paths = await discoverSessionExtensionPaths(
@@ -1360,6 +1371,14 @@ export function getPackageDir(): string {
 	return getOmpPackageDir() ?? (isCompiledBinary() ? path.dirname(process.execPath) : process.cwd());
 }
 
+// Legacy pi's `@earendil-works/pi-coding-agent` re-exported `estimateTokens`
+// from its package root (via `./core/compaction/index.ts`). In omp it lives in
+// `@oh-my-pi/pi-agent-core/compaction`, and the coding-agent barrel below does
+// not forward it, so legacy extensions importing it fail Bun's static export
+// check during validation (issue #6583).
+export { estimateTokens } from "@oh-my-pi/pi-agent-core/compaction";
+
 export * from "../index";
 export { formatBytes as formatSize } from "../tools/render-utils";
+export { copyToClipboard } from "../utils/clipboard";
 export { Type } from "./typebox";

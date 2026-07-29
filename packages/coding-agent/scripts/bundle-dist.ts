@@ -9,6 +9,7 @@ const packageDir = path.join(import.meta.dir, "..");
 const outDir = path.join(packageDir, "dist");
 const cliPath = path.join(outDir, "cli.js");
 const shebang = "#!/usr/bin/env bun\n";
+const legacyHtmlExportAssetPattern = /^(?:template-[^.]+\.(?:css|html|js)|tool-views\.generated-[^.]+\.js)$/;
 
 // Native / optional / platform-specific deps are loaded from installed files.
 // `omp-legacy-pi-modules` exists only in compiled binaries via the build plugin;
@@ -64,8 +65,8 @@ function formatBytes(bytes: number): string {
 }
 
 async function cleanBundleOutputs(): Promise<void> {
-	// dist/ is shared with the dev binary (dist/omp); only remove this
-	// script's own outputs (entry bundle + copied native assets).
+	// dist/ is shared with the dev binary (dist/omp); only remove assets
+	// emitted by this script.
 	let entries: string[];
 	try {
 		entries = await fs.readdir(outDir);
@@ -75,7 +76,14 @@ async function cleanBundleOutputs(): Promise<void> {
 	}
 	await Promise.all(
 		entries
-			.filter(entry => entry === "cli.js" || entry.endsWith(".node") || entry.endsWith(".js.map"))
+			.filter(
+				entry =>
+					entry === "cli.js" ||
+					entry.endsWith(".node") ||
+					entry.endsWith(".js.map") ||
+					(entry.startsWith("CHANGELOG-") && entry.endsWith(".md")) ||
+					legacyHtmlExportAssetPattern.test(entry),
+			)
 			.map(entry => fs.rm(path.join(outDir, entry), { force: true })),
 	);
 }
@@ -115,12 +123,6 @@ async function main(): Promise<void> {
 		await runCommand(["bun", "--cwd=../stats", "run", "gen:stats:reset"]);
 	}
 	await ensureShebang();
-	// Copy bundled i18n translations so dist/cli.js can find them at runtime
-	// (import.meta.dir resolves to dist/, not src/i18n/).
-	const langSrc = path.join(packageDir, "src", "i18n", "lang");
-	const langDst = path.join(outDir, "lang");
-	await fs.rm(langDst, { recursive: true, force: true });
-	await fs.cp(langSrc, langDst, { recursive: true });
 	const stat = await fs.stat(cliPath);
 	const elapsedMs = (Bun.nanoseconds() - start) / 1_000_000;
 	process.stdout.write(

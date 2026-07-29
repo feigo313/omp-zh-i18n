@@ -71,7 +71,7 @@ export type SubmittedUserInput = {
 	started: boolean;
 };
 
-export type TodoStatus = "pending" | "in_progress" | "completed" | "abandoned";
+export type TodoStatus = "pending" | "in_progress" | "completed" | "abandoned" | "blocked";
 
 export type TodoItem = {
 	content: string;
@@ -91,6 +91,14 @@ export interface InteractiveModeInitOptions {
 }
 
 export type InteractiveSelectorDialogOptions = ExtensionUIDialogOptions & Pick<HookSelectorOptions, "disabledIndices">;
+
+export interface RenderSessionContextOptions {
+	updateFooter?: boolean;
+	populateHistory?: boolean;
+	reuseSettledComponents?: boolean;
+	/** Tool calls whose existing live component remains the sole render owner across a rebuild. */
+	preservedLiveToolCallIds?: ReadonlySet<string>;
+}
 
 export interface InteractiveModeContext {
 	// UI access
@@ -310,10 +318,7 @@ export interface InteractiveModeContext {
 			reuseSettledComponent?: boolean;
 		},
 	): Component[];
-	renderSessionContext(
-		sessionContext: SessionContext,
-		options?: { updateFooter?: boolean; populateHistory?: boolean; reuseSettledComponents?: boolean },
-	): void;
+	renderSessionContext(sessionContext: SessionContext, options?: RenderSessionContextOptions): void;
 	renderInitialMessages(options?: { preserveExistingChat?: boolean; clearTerminalHistory?: boolean }): void;
 	getUserMessageText(message: Message): string;
 	findLastAssistantMessage(): AssistantMessage | undefined;
@@ -356,6 +361,8 @@ export interface InteractiveModeContext {
 	handleRenameCommand(title: string): Promise<void>;
 	handleMemoryCommand(text: string): Promise<void>;
 	handleSTTToggle(): Promise<void>;
+	/** Start or stop the Codex-backed realtime voice session. */
+	handleLiveCommand(): Promise<void>;
 	executeCompaction(
 		customInstructionsOrOptions?: string | CompactOptions,
 		isAuto?: boolean,
@@ -381,6 +388,7 @@ export interface InteractiveModeContext {
 	handleResumeSession(sessionPath: string): Promise<void>;
 	handleSessionDeleteCommand(): Promise<void>;
 	showOAuthSelector(mode: "login" | "logout", providerId?: string): Promise<void>;
+	showSessionPinSelector(): Promise<void>;
 	showResetUsageSelector(): Promise<void>;
 	showProviderSetup(): Promise<void>;
 	showHookConfirm(title: string, message: string): Promise<boolean>;

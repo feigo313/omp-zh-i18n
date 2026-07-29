@@ -632,8 +632,8 @@ export function getDocsRsCacheDir(): string {
 	return dirs.rootSubdir("webcache", "cache");
 }
 
-/**Get AutoQa db directory */
-export function getAutoQaDbDir(): string {
+/**Get AutoQa db path */
+export function getAutoQaDbPath(): string {
 	return dirs.rootSubdir("autoqa.db", "data");
 }
 /**

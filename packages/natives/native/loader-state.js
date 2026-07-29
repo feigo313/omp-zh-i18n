@@ -178,6 +178,23 @@ export function resolveLoaderCandidates({
 
 // =========================================================================
 
+function parseReleaseVersion(version) {
+	const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+	return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function isOlderReleaseVersion(candidate, current) {
+	const candidateParts = parseReleaseVersion(candidate);
+	const currentParts = parseReleaseVersion(current);
+	if (!candidateParts || !currentParts) return false;
+	for (let index = 0; index < candidateParts.length; index++) {
+		if (candidateParts[index] !== currentParts[index]) {
+			return candidateParts[index] < currentParts[index];
+		}
+	}
+	return false;
+}
+
 /**
  * Remove version-pinned native cache directories older than the loaded package.
  * Best-effort by design: permission errors and concurrent processes must not
@@ -196,7 +213,7 @@ export function cleanupStaleNativeVersions({ nativesDir, currentVersion }) {
 	}
 
 	for (const entry of entries) {
-		if (!entry.isDirectory() || entry.name === currentVersion) continue;
+		if (!entry.isDirectory() || !isOlderReleaseVersion(entry.name, currentVersion)) continue;
 		const targetPath = path.join(nativesDir, entry.name);
 		try {
 			fs.rmSync(targetPath, { recursive: true, force: true });
@@ -671,7 +688,7 @@ function buildHelpMessage(ctx) {
 	return (
 		"If installed via npm/bun, try reinstalling: bun install @oh-my-pi/pi-natives\n" +
 		"If developing locally, build with: bun --cwd=packages/natives run build\n" +
-		"Optional x64 variants: TARGET_VARIANT=baseline|modern bun --cwd=packages/natives run build"
+		"Explicit targets: bun scripts/bazel-natives.ts <target> --dest packages/natives/native"
 	);
 }
 

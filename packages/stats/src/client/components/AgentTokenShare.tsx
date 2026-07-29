@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { formatCompact, formatInteger, formatPercent } from "../data/formatters";
 import { buildAgentTokenShare } from "../data/view-models";
-import type { TranslationFn } from "../i18n";
 import type { AgentType, AgentTypeStats } from "../types";
 
 /**
@@ -9,29 +8,21 @@ import type { AgentType, AgentTypeStats } from "../types";
  * (pink -> violet -> cyan) used by the dashboard charts so the bar reads on
  * both themes without per-theme overrides.
  */
-const AGENT_COLORS: Record<AgentType, string> = {
-	main: "#ed4abf",
-	subagent: "#9b4dff",
-	advisor: "#5ad8e6",
-};
-
-const AGENT_LABEL_KEYS: Record<AgentType, string> = {
-	main: "agent.main",
-	subagent: "agent.subagent",
-	advisor: "agent.advisor",
+const AGENT_META: Record<AgentType, { label: string; color: string }> = {
+	main: { label: "Main agent", color: "#ed4abf" },
+	subagent: { label: "Subagents", color: "#9b4dff" },
+	advisor: { label: "Advisor", color: "#5ad8e6" },
 };
 
 export interface AgentTokenShareProps {
 	stats: AgentTypeStats[];
-	t: TranslationFn;
 }
 
-export function AgentTokenShare({ stats, t }: AgentTokenShareProps) {
-	const { locale } = useLocale();
+export function AgentTokenShare({ stats }: AgentTokenShareProps) {
 	const view = useMemo(() => buildAgentTokenShare(stats), [stats]);
 
 	if (view.totalTokens === 0) {
-		return <div className="py-8 text-center stats-text-muted text-sm">{t("agent.noTokenUsage")}</div>;
+		return <div className="py-8 text-center stats-text-muted text-sm">No token usage in this range</div>;
 	}
 
 	return (
@@ -43,8 +34,8 @@ export function AgentTokenShare({ stats, t }: AgentTokenShareProps) {
 							<div
 								key={seg.agentType}
 								className="h-full"
-								style={{ width: `${seg.share * 100}%`, background: AGENT_COLORS[seg.agentType] }}
-								title={`${t(AGENT_LABEL_KEYS[seg.agentType])}: ${formatPercent(seg.share)}`}
+								style={{ width: `${seg.share * 100}%`, background: AGENT_META[seg.agentType].color }}
+								title={`${AGENT_META[seg.agentType].label}: ${formatPercent(seg.share)}`}
 							/>
 						),
 				)}
@@ -56,15 +47,15 @@ export function AgentTokenShare({ stats, t }: AgentTokenShareProps) {
 						<div className="flex items-center gap-2 min-w-0">
 							<span
 								className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-								style={{ background: AGENT_COLORS[seg.agentType] }}
+								style={{ background: AGENT_META[seg.agentType].color }}
 							/>
-							<span className="stats-text-primary truncate">{t(AGENT_LABEL_KEYS[seg.agentType])}</span>
+							<span className="stats-text-primary truncate">{AGENT_META[seg.agentType].label}</span>
 							<span className="stats-text-muted stats-text-xs whitespace-nowrap">
 								{formatInteger(seg.requests)} req
 							</span>
 						</div>
 						<div className="flex items-center gap-3 whitespace-nowrap">
-							<span className="stats-text-secondary">{formatCompact(seg.tokens, locale)} tok</span>
+							<span className="stats-text-secondary">{formatCompact(seg.tokens)} tok</span>
 							<span className="stats-font-semibold stats-text-primary tabular-nums">
 								{formatPercent(seg.share)}
 							</span>

@@ -18,6 +18,9 @@ import type {
 	ModelPerformancePoint,
 	ModelStats,
 	ModelTimeSeriesPoint,
+	ProviderAggregate,
+	ProviderHourlyPoint,
+	ProviderTimeSeriesPoint,
 	TimeSeriesPoint,
 	ToolCallStats,
 	ToolModelStats,
@@ -724,6 +727,144 @@ export function getModelTimeSeries(
 }
 
 /**
+ * Get request/token/cost totals grouped by provider.
+ */
+export function getStatsByProvider(cutoff?: number | null): ProviderAggregate[] {
+	if (!db) return [];
+
+	const hasCutoff = cutoff !== undefined && cutoff !== null && cutoff > 0;
+	const stmt = db.prepare(`
+		SELECT
+			provider,
+			COUNT(*) as total_requests,
+			SUM(CASE WHEN stop_reason = 'error' THEN 1 ELSE 0 END) as failed_requests,
+			COUNT(DISTINCT model) as models,
+			SUM(input_tokens) as total_input_tokens,
+			SUM(output_tokens) as total_output_tokens,
+			SUM(cache_read_tokens) as total_cache_read_tokens,
+			SUM(cache_write_tokens) as total_cache_write_tokens,
+			SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as total_tokens,
+			SUM(cost_total) as total_cost,
+			SUM(premium_requests) as total_premium_requests,
+			AVG(CASE WHEN duration > 0 THEN output_tokens * 1000.0 / duration ELSE NULL END) as avg_tokens_per_second
+		FROM messages
+		${hasCutoff ? "WHERE timestamp >= ?" : ""}
+		GROUP BY provider
+		ORDER BY total_tokens DESC
+	`);
+
+	const rows = (hasCutoff ? stmt.all(cutoff) : stmt.all()) as Array<{
+		provider: string;
+		total_requests: number;
+		failed_requests: number;
+		models: number;
+		total_input_tokens: number | null;
+		total_output_tokens: number | null;
+		total_cache_read_tokens: number | null;
+		total_cache_write_tokens: number | null;
+		total_tokens: number | null;
+		total_cost: number | null;
+		total_premium_requests: number | null;
+		avg_tokens_per_second: number | null;
+	}>;
+	return rows.map(row => ({
+		provider: row.provider,
+		totalRequests: row.total_requests,
+		failedRequests: row.failed_requests,
+		models: row.models,
+		totalInputTokens: row.total_input_tokens ?? 0,
+		totalOutputTokens: row.total_output_tokens ?? 0,
+		totalCacheReadTokens: row.total_cache_read_tokens ?? 0,
+		totalCacheWriteTokens: row.total_cache_write_tokens ?? 0,
+		totalTokens: row.total_tokens ?? 0,
+		totalCost: row.total_cost ?? 0,
+		totalPremiumRequests: row.total_premium_requests ?? 0,
+		avgTokensPerSecond: row.avg_tokens_per_second,
+	}));
+}
+
+/**
+ * Get token burn grouped by provider and local hour of day (0-23).
+ * Hours use the server's timezone — the dashboard is a localhost tool, so
+ * server-local and viewer-local time coincide.
+ */
+export function getProviderHourlyBurn(cutoff?: number | null): ProviderHourlyPoint[] {
+	if (!db) return [];
+
+	const hasCutoff = cutoff !== undefined && cutoff !== null && cutoff > 0;
+	const stmt = db.prepare(`
+		SELECT
+			provider,
+			CAST(strftime('%H', timestamp / 1000, 'unixepoch', 'localtime') AS INTEGER) as hour,
+			SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as total_tokens,
+			SUM(output_tokens) as output_tokens,
+			COUNT(*) as requests
+		FROM messages
+		${hasCutoff ? "WHERE timestamp >= ?" : ""}
+		GROUP BY provider, hour
+		ORDER BY provider, hour
+	`);
+
+	const rows = (hasCutoff ? stmt.all(cutoff) : stmt.all()) as Array<{
+		provider: string;
+		hour: number;
+		total_tokens: number | null;
+		output_tokens: number | null;
+		requests: number;
+	}>;
+	return rows.map(row => ({
+		provider: row.provider,
+		hour: row.hour,
+		totalTokens: row.total_tokens ?? 0,
+		outputTokens: row.output_tokens ?? 0,
+		requests: row.requests,
+	}));
+}
+
+/**
+ * Get token/cost time series grouped by provider (bucketed like the model series).
+ */
+export function getProviderTimeSeries(
+	days = 14,
+	cutoff?: number | null,
+	bucketMs = 24 * 60 * 60 * 1000,
+): ProviderTimeSeriesPoint[] {
+	if (!db) return [];
+
+	const hasCutoff = cutoff !== null;
+	const seriesCutoff = hasCutoff ? (cutoff ?? Date.now() - days * 24 * 60 * 60 * 1000) : 0;
+
+	const stmt = db.prepare(`
+		SELECT
+			(timestamp / ?) * ? as bucket,
+			provider,
+			SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as total_tokens,
+			SUM(cost_total) as cost,
+			COUNT(*) as requests
+		FROM messages
+		${hasCutoff ? "WHERE timestamp >= ?" : ""}
+		GROUP BY bucket, provider
+		ORDER BY bucket ASC
+	`);
+
+	const rowsRaw = hasCutoff ? stmt.all(bucketMs, bucketMs, seriesCutoff) : stmt.all(bucketMs, bucketMs);
+	const rows = rowsRaw as Array<{
+		bucket: number;
+		provider: string;
+		total_tokens: number | null;
+		cost: number | null;
+		requests: number;
+	}>;
+	return rows.map(row => ({
+		timestamp: row.bucket,
+		provider: row.provider,
+		totalTokens: row.total_tokens ?? 0,
+		cost: row.cost ?? 0,
+		requests: row.requests,
+	}));
+}
+
+/**
  * Get daily model performance time series data for the last N days.
  */
 export function getModelPerformanceSeries(
@@ -822,79 +963,28 @@ function rowToMessageStats(row: any): MessageStats {
 	};
 }
 
-export function getRecentRequests(limit = 100, offset = 0, model?: string): MessageStats[] {
+export function getRecentRequests(limit = 100): MessageStats[] {
 	if (!db) return [];
-	if (model) {
-		const stmt = db.prepare(`
-			SELECT * FROM messages
-			WHERE model = ?
-			ORDER BY timestamp DESC
-			LIMIT ? OFFSET ?
-		`);
-		return (stmt.all(model, limit, offset) as any[]).map(rowToMessageStats);
-	}
 	const stmt = db.prepare(`
 		SELECT * FROM messages 
 		ORDER BY timestamp DESC 
-		LIMIT ? OFFSET ?
+		LIMIT ?
 	`);
-	return (stmt.all(limit, offset) as any[]).map(rowToMessageStats);
+	return (stmt.all(limit) as any[]).map(rowToMessageStats);
 }
 
-export function getRecentErrors(limit = 100, cutoff?: number | null, offset = 0, model?: string): MessageStats[] {
+export function getRecentErrors(limit = 100, cutoff?: number | null): MessageStats[] {
 	if (!db) return [];
 	const hasCutoff = cutoff !== undefined && cutoff !== null;
-	if (model) {
-		const stmt = db.prepare(`
-			SELECT * FROM messages
-			WHERE stop_reason = 'error' AND model = ?
-			${hasCutoff ? "AND timestamp >= ?" : ""}
-			ORDER BY timestamp DESC
-			LIMIT ? OFFSET ?
-		`);
-		const rows = hasCutoff ? stmt.all(model, cutoff, limit, offset) : stmt.all(model, limit, offset);
-		return (rows as any[]).map(rowToMessageStats);
-	}
 	const stmt = db.prepare(`
 		SELECT * FROM messages
 		WHERE stop_reason = 'error'
 		${hasCutoff ? "AND timestamp >= ?" : ""}
 		ORDER BY timestamp DESC
-		LIMIT ? OFFSET ?
+		LIMIT ?
 	`);
-	const rows = hasCutoff ? stmt.all(cutoff, limit, offset) : stmt.all(limit, offset);
-	return (rows as any[]).map(rowToMessageStats);
-}
-
-export function countRecentRequests(model?: string): number {
-	if (!db) return 0;
-	if (model) {
-		const stmt = db.prepare("SELECT COUNT(*) as count FROM messages WHERE model = ?");
-		const row = stmt.get(model) as { count: number } | undefined;
-		return row?.count ?? 0;
-	}
-	const stmt = db.prepare("SELECT COUNT(*) as count FROM messages");
-	const row = stmt.get() as { count: number } | undefined;
-	return row?.count ?? 0;
-}
-
-export function countRecentErrors(cutoff?: number | null, model?: string): number {
-	if (!db) return 0;
-	const hasCutoff = cutoff !== undefined && cutoff !== null;
-	if (model) {
-		const stmt = db.prepare(`SELECT COUNT(*) as count FROM messages WHERE stop_reason = 'error' AND model = ? ${hasCutoff ? "AND timestamp >= ?" : ""}`);
-		const row = (hasCutoff ? stmt.get(model, cutoff) : stmt.get(model)) as { count: number } | undefined;
-		return row?.count ?? 0;
-	}
-	const stmt = db.prepare(`SELECT COUNT(*) as count FROM messages WHERE stop_reason = 'error' ${hasCutoff ? "AND timestamp >= ?" : ""}`);
-	const row = (hasCutoff ? stmt.get(cutoff) : stmt.get()) as { count: number } | undefined;
-	return row?.count ?? 0;
-}
-
-export function getDistinctModels(): string[] {
-	if (!db) return [];
-	const stmt = db.prepare("SELECT DISTINCT model FROM messages ORDER BY model");
-	return (stmt.all() as { model: string }[]).map(row => row.model);
+	const rows = hasCutoff ? stmt.all(cutoff, limit) : stmt.all(limit);
+	return rows.map(rowToMessageStats);
 }
 
 export function getMessageById(id: number): MessageStats | null {
@@ -1130,28 +1220,23 @@ function backfillPriorityPremiumRequests(database: Database): void {
 		.run(PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY, BACKFILL_PENDING);
 }
 
-export function markPriorityPremiumRequestsBackfillComplete(): void {
+/**
+ * Settle every full-session backfill after a successful sync pass.
+ */
+export function markSessionBackfillsComplete(): void {
 	if (!db) return;
-	db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run(
-		PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY,
-		BACKFILL_COMPLETE,
-	);
-}
-
-export function markUserMessagesBackfillComplete(): void {
-	if (!db) return;
-	db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run(
-		USER_MESSAGES_BACKFILL_KEY,
-		BACKFILL_COMPLETE,
-	);
-}
-
-export function markUserMessageLinksRepairComplete(): void {
-	if (!db) return;
-	db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run(
-		USER_MESSAGE_LINKS_REPAIR_KEY,
-		BACKFILL_COMPLETE,
-	);
+	const markComplete = db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)");
+	const apply = db.transaction(() => {
+		for (const key of [
+			USER_MESSAGES_BACKFILL_KEY,
+			TOOL_CALLS_BACKFILL_KEY,
+			USER_MESSAGE_LINKS_REPAIR_KEY,
+			PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY,
+		]) {
+			markComplete.run(key, BACKFILL_COMPLETE);
+		}
+	});
+	apply();
 }
 
 /**

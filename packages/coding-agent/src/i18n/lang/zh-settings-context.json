@@ -219,5 +219,6 @@
   "tabs.context.groups.Experimental": "实验性功能",
   "tabs.context.groups.General": "通用",
   "tabs.context.groups.Rules (TTSR)": "规则 (TTSR)",
-  "tabs.context.label": "上下文"
+  "tabs.context.label": "上下文",
+  "settings.workspace.additionalDirectories.label": "额外工作区目录"
 }

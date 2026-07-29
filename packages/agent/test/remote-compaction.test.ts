@@ -10,12 +10,14 @@ import {
 import {
 	buildCompactionV2Request,
 	buildOpenAiNativeHistory,
+	CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE,
 	getCompactionV2PreserveData,
 	requestCompactionV2Streaming,
 	requestOpenAiRemoteCompaction,
 	requestRemoteCompaction,
 	shouldUseCompactionV2Streaming,
 	shouldUseOpenAiRemoteCompaction,
+	trimRemoteCompactionInputToContextWindow,
 } from "@oh-my-pi/pi-agent-core/compaction/openai";
 import * as ai from "@oh-my-pi/pi-ai";
 import { getOpenAICodexTransportDetails } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
@@ -302,14 +304,177 @@ describe("buildOpenAiNativeHistory call-id tracking", () => {
 	});
 });
 
+describe("buildOpenAiNativeHistory computer calls", () => {
+	const computerModel = makeOpenAiModel({ supportsComputerUse: true });
+	const pendingSafetyChecks = [{ id: "safe_1", code: "confirm", message: "Confirm click" }];
+	const acknowledgedSafetyChecks = [{ id: "safe_1", code: "confirm", message: "Confirm click" }];
+
+	function computerAssistant(): AssistantMessage {
+		return {
+			role: "assistant",
+			content: [
+				{
+					type: "toolCall",
+					id: "call_computer_1|item_computer_1",
+					name: "computer",
+					arguments: { actions: [{ type: "click", button: "left", x: 12, y: 34 }] },
+					providerMetadata: {
+						type: "computer",
+						providerItemId: "item_computer_1",
+						actions: [{ type: "click", button: "left", x: 12, y: 34 }],
+						pendingSafetyChecks,
+					},
+				},
+			],
+			timestamp: Date.now(),
+			provider: "openai",
+			model: "gpt-5",
+			api: "openai-responses",
+			usage: ZERO_USAGE,
+			stopReason: "toolUse",
+		};
+	}
+
+	test("preserves provider item id, actions, safety checks, screenshot file_id, and acknowledgements", () => {
+		const result: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: "call_computer_1|item_computer_1",
+			toolName: "computer",
+			content: [],
+			isError: false,
+			timestamp: Date.now(),
+			providerMetadata: {
+				type: "computer",
+				screenshot: { type: "computer_screenshot", file_id: "file_screen_电脑/%2F" },
+				acknowledgedSafetyChecks,
+			},
+		};
+		const items = buildOpenAiNativeHistory([computerAssistant(), result], computerModel);
+		expect(items).toEqual([
+			{
+				type: "computer_call",
+				id: "item_computer_1",
+				call_id: "call_computer_1",
+				actions: [{ type: "click", button: "left", x: 12, y: 34 }],
+				pending_safety_checks: pendingSafetyChecks,
+				status: "completed",
+			},
+			{
+				type: "computer_call_output",
+				call_id: "call_computer_1",
+				output: { type: "computer_screenshot", file_id: "file_screen_电脑/%2F" },
+				acknowledged_safety_checks: acknowledgedSafetyChecks,
+			},
+		]);
+	});
+
+	test("registers native provider-payload computer calls for exact output pairing", () => {
+		const assistant = computerAssistant();
+		assistant.providerPayload = {
+			type: "openaiResponsesHistory",
+			provider: "openai",
+			dt: true,
+			items: [
+				{
+					type: "computer_call",
+					id: "item_raw_stable",
+					call_id: "call_computer_1",
+					actions: [{ type: "screenshot" }],
+					pending_safety_checks: [],
+					status: "completed",
+				},
+			],
+		};
+		const result: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: "call_computer_1|item_computer_1",
+			toolName: "computer",
+			content: [],
+			isError: false,
+			timestamp: Date.now(),
+			providerMetadata: {
+				type: "computer",
+				screenshot: { type: "computer_screenshot", image_url: "data:image/png;base64,AAEC" },
+				acknowledgedSafetyChecks: [],
+			},
+		};
+		const items = buildOpenAiNativeHistory([assistant, result], computerModel);
+		expect(items[0]?.id).toBe("item_raw_stable");
+		expect(items[1]).toEqual({
+			type: "computer_call_output",
+			call_id: "call_computer_1",
+			output: { type: "computer_screenshot", image_url: "data:image/png;base64,AAEC" },
+			acknowledged_safety_checks: [],
+		});
+	});
+
+	test("replaces a failed call without a screenshot with valid recovery history", () => {
+		const failed: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: "call_computer_1|item_computer_1",
+			toolName: "computer",
+			content: [{ type: "text", text: "capture failed" }],
+			isError: true,
+			timestamp: Date.now(),
+		};
+		const items = buildOpenAiNativeHistory([computerAssistant(), failed], computerModel);
+		expect(items).toHaveLength(1);
+		const recovery = items[0];
+		expect(recovery).toMatchObject({
+			type: "message",
+			role: "assistant",
+			status: "completed",
+		});
+		expect(String(recovery?.id)).toMatch(/^msg_[a-z0-9-]+$/);
+		expect(recovery?.content).toEqual([expect.objectContaining({ type: "output_text", annotations: [] })]);
+		expect(JSON.stringify(items)).toContain("failed before a screenshot was recorded");
+		expect(JSON.stringify(items)).toContain("capture failed");
+	});
+
+	test("downgrades unsupported native computer history to stable valid assistant message items", () => {
+		const unsupportedModel = makeOpenAiModel({ supportsComputerUse: false });
+		const result: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: "call_computer_1|item_computer_1",
+			toolName: "computer",
+			content: [],
+			isError: false,
+			timestamp: Date.now(),
+			providerMetadata: {
+				type: "computer",
+				screenshot: { type: "computer_screenshot", file_id: "file_downgraded_screen" },
+				acknowledgedSafetyChecks: [{ id: "safe_downgraded" }],
+			},
+		};
+		const first = buildOpenAiNativeHistory([computerAssistant(), result], unsupportedModel);
+		const second = buildOpenAiNativeHistory([computerAssistant(), result], unsupportedModel);
+		expect(first).toHaveLength(2);
+		for (const note of first) {
+			expect(note).toMatchObject({ type: "message", role: "assistant", status: "completed" });
+			expect(String(note.id)).toMatch(/^msg_[a-z0-9-]+$/);
+			expect(note.content).toEqual([expect.objectContaining({ type: "output_text", annotations: [] })]);
+		}
+		expect(first.map(item => item.id)).toEqual(second.map(item => item.id));
+		expect(first.every(item => String(item.id).length <= 64)).toBe(true);
+		expect(JSON.stringify(first)).toContain("file_downgraded_screen");
+		expect(JSON.stringify(first)).toContain("safe_downgraded");
+	});
+});
+
 describe("remote compaction input forwarding", () => {
-	test("sends the full native history without local trimming", async () => {
-		// Contract: the compact endpoint owns compression. Trimming locally dropped
-		// assistant turns + encrypted reasoning before the provider ever saw them,
-		// so the client now forwards the full input untouched even on a tiny window.
+	test("rewrites an oversized trailing tool output without dropping native history", async () => {
+		// The compact endpoint still receives every call/result item. Only the
+		// trailing output body is replaced when the request cannot fit.
+		const nativeInput = [
+			{ type: "custom_tool_call", call_id: "call_apply_1", name: "apply_patch", input: "{}" },
+			{ type: "custom_tool_call_output", call_id: "call_apply_1", output: "patch applied".repeat(1_000) },
+		];
 		let requestInput: Array<Record<string, unknown>> | undefined;
 		const fetchMock: FetchImpl = async (_input, init) => {
-			const body = JSON.parse(String(init?.body)) as { input: Array<Record<string, unknown>> };
+			const body: unknown = JSON.parse(String(init?.body));
+			if (!isRecord(body) || !Array.isArray(body.input) || !body.input.every(isRecord)) {
+				throw new Error("expected remote compaction input");
+			}
 			requestInput = body.input;
 			return Response.json({
 				output: [{ type: "compaction_summary", summary: "compact" }],
@@ -317,19 +482,138 @@ describe("remote compaction input forwarding", () => {
 		};
 
 		await requestOpenAiRemoteCompaction(
-			makeOpenAiModel({ contextWindow: 1 }),
+			makeOpenAiModel({ contextWindow: 1_000 }),
 			"test-key",
-			[
-				{ type: "custom_tool_call", call_id: "call_apply_1", name: "apply_patch", input: "x".repeat(10_000) },
-				{ type: "custom_tool_call_output", call_id: "call_apply_1", output: "patch applied".repeat(1_000) },
-			],
+			nativeInput,
 			"compact",
 			undefined,
 			{ fetch: fetchMock },
 		);
 
+		const trimmed = trimRemoteCompactionInputToContextWindow(nativeInput, 1_000, "compact");
+		expect(trimmed.estimatedTokensAfter).toBeLessThanOrEqual(1_000);
 		expect(requestInput?.some(item => item.type === "custom_tool_call")).toBe(true);
-		expect(requestInput?.some(item => item.type === "custom_tool_call_output")).toBe(true);
+		expect(requestInput?.find(item => item.type === "custom_tool_call_output")?.output).toBe(
+			CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE,
+		);
+	});
+
+	test("rewrites contiguous trailing outputs until the request fits", () => {
+		const input = [
+			{ type: "function_call", call_id: "call_1", name: "read", arguments: "{}" },
+			{ type: "function_call", call_id: "call_2", name: "read", arguments: "{}" },
+			{ type: "function_call_output", call_id: "call_1", output: "a".repeat(8_000) },
+			{ type: "function_call_output", call_id: "call_2", output: "b".repeat(8_000) },
+		];
+
+		const result = trimRemoteCompactionInputToContextWindow(input, 1_000, "compact");
+
+		expect(result.rewrittenOutputs).toBe(2);
+		expect(result.input.slice(0, 2)).toEqual(input.slice(0, 2));
+		expect(result.input.slice(2).map(item => item.output)).toEqual([
+			CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE,
+			CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE,
+		]);
+		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(1_000);
+		expect(input[2].output).toHaveLength(8_000);
+	});
+
+	test("keeps the original input when trailing rewrites cannot make the request fit", () => {
+		const input = [
+			{ type: "function_call", call_id: "call_1", name: "read", arguments: "{}" },
+			{ type: "function_call_output", call_id: "call_1", output: "a".repeat(20_000) },
+			{ type: "function_call", call_id: "call_2", name: "read", arguments: "{}" },
+			{ type: "function_call_output", call_id: "call_2", output: "useful latest result" },
+		];
+
+		const result = trimRemoteCompactionInputToContextWindow(input, 1_000, "compact");
+
+		expect(result.rewrittenOutputs).toBe(0);
+		expect(result.input).toEqual(input);
+		expect(result.input[3].output).toBe("useful latest result");
+		expect(result.estimatedTokensAfter).toBe(result.estimatedTokensBefore);
+	});
+
+	test("charges inline images by the maximum vision budget instead of serialized base64 size", () => {
+		const input = [
+			{
+				type: "message",
+				role: "user",
+				content: [
+					{ type: "input_image", detail: "auto", image_url: `data:image/png;base64,${"a".repeat(80_000)}` },
+				],
+			},
+			{ type: "function_call_output", call_id: "call_1", output: "useful result" },
+		];
+
+		const result = trimRemoteCompactionInputToContextWindow(input, 15_000, "compact");
+
+		expect(result.rewrittenOutputs).toBe(0);
+		expect(result.input).toEqual(input);
+		expect(result.estimatedTokensAfter).toBeGreaterThan(12_000);
+		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(15_000);
+	});
+
+	test("uses conservative token accounting for token-dense trailing output", () => {
+		const output = Array.from({ length: 1_000 }, (_, index) => index.toString(16).padStart(8, "0")).join("");
+		const input = [{ type: "function_call_output", call_id: "call_1", output }];
+
+		const result = trimRemoteCompactionInputToContextWindow(input, 3_000, "compact");
+
+		expect(result.estimatedTokensBefore).toBeGreaterThan(3_000);
+		expect(result.rewrittenOutputs).toBe(1);
+		expect(result.input[0].output).toBe(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE);
+		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(3_000);
+	});
+
+	test("scans past a synthetic tool-image attachment to rewrite its output", () => {
+		const attachment = {
+			type: "message",
+			role: "user",
+			content: [
+				{ type: "input_text", text: "Attached image(s) from tool result:" },
+				{ type: "input_image", detail: "auto", image_url: "data:image/png;base64,AAAA" },
+			],
+		};
+		const input = [
+			{ type: "function_call_output", call_id: "call_1", output: "large tool output".repeat(1_000) },
+			attachment,
+		];
+
+		const result = trimRemoteCompactionInputToContextWindow(input, 15_000, "compact");
+
+		expect(result.rewrittenOutputs).toBe(1);
+		expect(result.input[0].output).toBe(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE);
+		expect(result.input[1]).toEqual(attachment);
+		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(15_000);
+	});
+
+	test("reserves the maximum patch budget for original-detail images", () => {
+		const input = [
+			{
+				type: "message",
+				role: "user",
+				content: [
+					{ type: "input_image", detail: "original", image_url: `data:image/png;base64,${"a".repeat(80_000)}` },
+				],
+			},
+			{ type: "function_call_output", call_id: "call_1", output: "useful result".repeat(2_000) },
+		];
+
+		const result = trimRemoteCompactionInputToContextWindow(input, 15_000, "compact");
+
+		expect(result.estimatedTokensBefore).toBeGreaterThan(15_000);
+		expect(result.rewrittenOutputs).toBe(1);
+		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(15_000);
+	});
+
+	test("returns semantically unchanged input when it already fits", () => {
+		const input = [{ type: "function_call_output", call_id: "call_1", output: "small" }];
+
+		const result = trimRemoteCompactionInputToContextWindow(input, 1_000, "compact");
+
+		expect(result.rewrittenOutputs).toBe(0);
+		expect(result.input).toEqual(input);
 	});
 });
 
@@ -1190,6 +1474,70 @@ describe("compact() remote compaction failure handling", () => {
 		expect(completeSpy).not.toHaveBeenCalled();
 	});
 
+	test("rewrites an oversized trailing tool output before V2 streaming compaction", async () => {
+		const preparation = makePreparation();
+		preparation.settings = { ...preparation.settings, remoteStreamingV2Enabled: true };
+		preparation.messagesToSummarize = [
+			{ role: "user", content: "inspect the large file", timestamp: 1 },
+			{
+				role: "assistant",
+				content: [
+					{ type: "toolCall", id: "call_read_large|fc_read_large", name: "read", arguments: { path: "/tmp/x" } },
+				],
+				timestamp: 2,
+				provider: "openai",
+				model: "gpt-5",
+				api: "openai-responses",
+				usage: ZERO_USAGE,
+				stopReason: "toolUse",
+			},
+			{
+				role: "toolResult",
+				toolCallId: "call_read_large|fc_read_large",
+				toolName: "read",
+				content: [{ type: "text", text: "large output".repeat(10_000) }],
+				isError: false,
+				timestamp: 3,
+			},
+		];
+		preparation.recentMessages = [];
+		const model = makeOpenAiModel({
+			contextWindow: 20_000,
+			remoteCompaction: {
+				enabled: true,
+				v2StreamingEnabled: true,
+				v2Endpoint: "https://compact.example/v1/responses",
+			},
+		});
+		let requestInput: Array<Record<string, unknown>> = [];
+		const fetchMock: FetchImpl = async (_input, init) => {
+			const body: unknown = JSON.parse(String(init?.body));
+			if (!isRecord(body) || !Array.isArray(body.input) || !body.input.every(isRecord)) {
+				throw new Error("expected V2 compaction input");
+			}
+			requestInput = body.input;
+			return sseResponse([
+				{
+					type: "response.output_item.done",
+					output_index: 0,
+					item: { type: "compaction", encrypted_content: "enc_trimmed" },
+				},
+				{
+					type: "response.completed",
+					response: { usage: { input_tokens: 100, output_tokens: 2, total_tokens: 102 } },
+				},
+			]);
+		};
+
+		await compact(preparation, model, "test-key", undefined, undefined, { fetch: fetchMock });
+
+		expect(requestInput.some(item => item.type === "function_call" && item.call_id === "call_read_large")).toBe(true);
+		expect(requestInput.find(item => item.type === "function_call_output")?.output).toBe(
+			CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE,
+		);
+		expect(requestInput.at(-1)).toEqual({ type: "compaction_trigger" });
+	});
+
 	test("re-expands a prior V2 compaction's originals when no candidate can reuse the replay", async () => {
 		vi.spyOn(ai, "completeSimple").mockResolvedValue(localSummaryMessage("re-expanded local summary"));
 		const compactionItem = { type: "compaction", encrypted_content: "enc_v2" };
@@ -1256,16 +1604,87 @@ describe("compact() remote compaction failure handling", () => {
 		const baseSettings = { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 1 };
 
 		// Remote disabled → the V2 replay is unusable → re-expand the pre-V2 original.
-		const reexpanded = prepareCompaction(entries, { ...baseSettings, remoteEnabled: false }, [v2Model]);
+		const reexpanded = prepareCompaction(entries, { ...baseSettings, remoteEnabled: false }, v2Model);
 		expect(reexpanded).toBeDefined();
 		const reexpandedText = JSON.stringify(reexpanded?.messagesToSummarize ?? []);
 		expect(reexpandedText).toContain("ORIGINAL ALPHA port 4242");
 
 		// Remote + V2 still enabled, same provider → reuse the replay, don't re-summarize originals.
-		const reused = prepareCompaction(entries, { ...baseSettings, remoteStreamingV2Enabled: true }, [v2Model]);
+		const reused = prepareCompaction(entries, { ...baseSettings, remoteStreamingV2Enabled: true }, v2Model);
 		expect(reused).toBeDefined();
 		const reusedText = JSON.stringify(reused?.messagesToSummarize ?? []);
 		expect(reusedText).not.toContain("ORIGINAL ALPHA port 4242");
+	});
+
+	test("re-expands a stranded remote compaction when the active model cannot replay it (#6343)", () => {
+		const ts = (n: number) => new Date(n).toISOString();
+		const anthropicActive = buildModel({
+			id: "claude-sonnet-4-5",
+			name: "Claude Sonnet 4.5",
+			api: "anthropic-messages",
+			provider: "anthropic",
+			baseUrl: "https://api.anthropic.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200_000,
+			maxTokens: 64_000,
+		});
+		const openaiSmol = makeOpenAiModel({ id: "gpt-5-mini", name: "GPT-5 mini" });
+		// Prior OpenAI remote compaction: opaque placeholder summary, provider-native
+		// replay stored under preserveData tagged "openai".
+		const entries: SessionEntry[] = [
+			{
+				type: "message",
+				id: "m1",
+				parentId: null,
+				timestamp: ts(1),
+				message: { role: "user", content: "ORIGINAL ALPHA port 4242", timestamp: 1 },
+			},
+			{
+				type: "compaction",
+				id: "c1",
+				parentId: "m1",
+				timestamp: ts(2),
+				summary: "Remote compaction preserved provider-native history for this session.",
+				firstKeptEntryId: "m1",
+				tokensBefore: 100_000,
+				preserveData: {
+					openaiRemoteCompaction: {
+						provider: "openai",
+						replacementHistory: [{ type: "message", role: "user", content: "opaque native replay" }],
+						compactionItem: { type: "compaction", encrypted_content: "enc_v1" },
+					},
+				},
+			},
+			{
+				type: "message",
+				id: "m2",
+				parentId: "c1",
+				timestamp: ts(3),
+				message: { role: "user", content: "second turn", timestamp: 3 },
+			},
+			{
+				type: "message",
+				id: "m3",
+				parentId: "m2",
+				timestamp: ts(4),
+				message: { role: "user", content: "third turn", timestamp: 4 },
+			},
+		];
+		const settings = { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 1 };
+		// Reuse is judged by the ACTIVE model, not the candidate set. The active
+		// anthropic model's encoder drops the OpenAI replay payload, so the stranded
+		// originals are re-expanded into a portable local summary — even though the
+		// OpenAI smol role could still replay the blob.
+		const foreignActive = prepareCompaction(entries, settings, anthropicActive);
+		expect(foreignActive).toBeDefined();
+		expect(JSON.stringify(foreignActive?.messagesToSummarize ?? [])).toContain("ORIGINAL ALPHA port 4242");
+		// The same-provider OpenAI model can replay the payload, so the boundary is
+		// kept and the originals are not re-summarized.
+		const sameProviderActive = prepareCompaction(entries, settings, openaiSmol);
+		expect(sameProviderActive).toBeDefined();
+		expect(JSON.stringify(sameProviderActive?.messagesToSummarize ?? [])).not.toContain("ORIGINAL ALPHA port 4242");
 	});
 
 	test("user abort during the remote compact request rejects without falling back to local summarization", async () => {

@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 恢复 `stringProperty` 函数导出
+- 恢复 `getAutoQaDbPath` 函数名（保持与调用方一致）
+
+## [17.1.8] - 2026-07-28
+
+### Added
+
+- Added `setProcessName` utility to set the OS-visible process name on Linux via `bun:ffi`, bypassing Bun's `process.title` limitations.
+
+### Fixed
+
+- Fixed child shell environment filtering to drop launch-directory `.env` values in addition to Bun-autoloaded `.env.local` values.
+
+## [17.1.5] - 2026-07-27
+
+### Fixed
+
+- `getShellConfig` no longer throws `No bash shell found` on Windows hosts without a discoverable bash. `resolveWindowsShell` searches Git for Windows install roots (machine, per-user, `GIT_INSTALL_ROOT`, scoop app dirs — scoop shims `sh.exe`/`git.exe` but never `bash.exe`), then `bash.exe`/`sh.exe` on PATH, and finally falls back to `cmd.exe` from ComSpec with `/c` args, so shell resolution always succeeds.
+
+## [17.1.4] - 2026-07-26
+
+### Fixed
+
+- Fixed postmortem signal and fatal shutdown exits being intercepted by temporary `process.exit` guards during extension startup ([#6488](https://github.com/can1357/oh-my-pi/issues/6488)).
+- Corrected Windows shell resolution errors to identify the active global, project, overlay, or runtime source for `shellPath` instead of directing every user to the retired `settings.json` file ([#6579](https://github.com/can1357/oh-my-pi/issues/6579)).
+- Contained timed-out child lifecycle rejections so `ptree` callers cannot leak an unhandled `TimeoutError` after settling ([#6635](https://github.com/can1357/oh-my-pi/issues/6635)).
+- Fixed an invalid configured `shellPath` being silently masked whenever an earlier caller had already resolved a shell in the same process; the guidance error now surfaces regardless of cache state.
+
+## [17.0.9] - 2026-07-23
+
+### Breaking Changes
+
+- Renamed `getAutoQaDbDir` to `getAutoQaDbPath` for accuracy; update any usage accordingly
+
 ## [17.0.5] - 2026-07-18
 
 ### Changed

@@ -39,11 +39,9 @@ coverage/
 packages/ai/test/.temp-images/
 
 # Project specific
-# Never publish local omp runtime state / user overrides
-.omp/
+!.omp/
+.omp/plugins/
 .pi_config/
-.agents/
-docs/local/_*
 .opencode/
 .worktrees/
 .worktree/
@@ -56,6 +54,7 @@ syntax.jsonl
 out.jsonl
 out.html
 pi-*.html
+.close_issue.sh
 
 # Generated files
 packages/coding-agent/src/export/html/tool-views.generated.js
@@ -79,3 +78,10 @@ python/robomp/.env
 
 # Local, machine-specific boot perf baseline (see packages/coding-agent/scripts/bench-guard.ts)
 packages/coding-agent/bench/boot-baseline.json
+
+# Bazel
+/bazel-bin
+/bazel-out
+/bazel-testlogs
+/bazel-pi
+/.bazelrc.user

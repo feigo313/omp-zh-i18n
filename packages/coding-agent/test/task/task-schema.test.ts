@@ -7,7 +7,7 @@ import { type } from "arktype";
 
 // Contract: the single-spawn schema (`task.batch: false`; the exported
 // `taskSchema` instance) carries no batch fields while accepting a caller
-// `outputSchema` and its validation mode. The batch shape (`tasks[]` + shared
+// `model`, `outputSchema`, and its validation mode. The batch shape (`tasks[]` + shared
 // `context`) is gated by the `task.batch` setting (default on, covered by
 // test/task/task-batch.test.ts).
 

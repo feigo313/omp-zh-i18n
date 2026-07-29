@@ -21,7 +21,9 @@ InterruptMode: TypeAlias = Literal["immediate", "wait"]
 StopReason: TypeAlias = Literal["stop", "length", "toolUse", "error", "aborted"]
 NotifyType: TypeAlias = Literal["info", "warning", "error"]
 WidgetPlacement: TypeAlias = Literal["aboveEditor", "belowEditor"]
-TodoStatus: TypeAlias = Literal["pending", "in_progress", "completed", "abandoned"]
+TodoStatus: TypeAlias = Literal[
+    "pending", "in_progress", "completed", "abandoned", "blocked"
+]
 ExtensionUiMethod: TypeAlias = Literal[
     "select",
     "confirm",
@@ -65,7 +67,7 @@ _WIDGET_PLACEMENT_VALUES: Final[frozenset[str]] = frozenset(
     {"aboveEditor", "belowEditor"}
 )
 _TODO_STATUS_VALUES: Final[frozenset[str]] = frozenset(
-    {"pending", "in_progress", "completed", "abandoned"}
+    {"pending", "in_progress", "completed", "abandoned", "blocked"}
 )
 _EXTENSION_UI_METHOD_VALUES: Final[frozenset[str]] = frozenset(
     {
@@ -745,6 +747,8 @@ class TodoItem:
     status: TodoStatus
     notes: str | None = None
     details: str | None = None
+    # What a `blocked` task is waiting on; None for all other statuses.
+    blocker: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -851,7 +855,18 @@ class SessionStats:
 
 @dataclass(slots=True, frozen=True)
 class ReadyEvent:
+    protocol_version: int | None = None
+    supported_protocol_versions: tuple[int, ...] | None = None
+    max_frame_bytes: int | None = None
+    max_reassembled_frame_bytes: int | None = None
     type: Literal["ready"] = "ready"
+
+
+@dataclass(slots=True, frozen=True)
+class MessagesPage:
+    messages: tuple[AgentMessage, ...]
+    total_messages: int
+    next_cursor: str | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -1249,6 +1264,7 @@ def parse_todo_item(payload: JsonObject) -> TodoItem:
         ),
         notes=_optional_str(payload, "notes"),
         details=_optional_str(payload, "details"),
+        blocker=_optional_str(payload, "blocker"),
     )
 
 
@@ -1490,7 +1506,23 @@ def parse_extension_error(payload: JsonObject) -> ExtensionError:
 def parse_notification(payload: JsonObject) -> RpcNotification:
     event_type = payload.get("type")
     if event_type == "ready":
-        return ReadyEvent()
+        raw_versions = payload.get("supportedProtocolVersions")
+        supported_versions: tuple[int, ...] | None = None
+        if raw_versions is not None:
+            if not isinstance(raw_versions, list) or any(
+                not isinstance(version, int) or isinstance(version, bool)
+                for version in raw_versions
+            ):
+                raise ValueError("ready.supportedProtocolVersions must be integers")
+            supported_versions = tuple(raw_versions)
+        return ReadyEvent(
+            protocol_version=_optional_int(payload, "protocolVersion"),
+            supported_protocol_versions=supported_versions,
+            max_frame_bytes=_optional_int(payload, "maxFrameBytes"),
+            max_reassembled_frame_bytes=_optional_int(
+                payload, "maxReassembledFrameBytes"
+            ),
+        )
     if event_type == "extension_ui_request":
         return parse_extension_ui_request(payload)
     if event_type == "extension_error":

@@ -28,7 +28,7 @@
   "settings.computer.display.description": "合成所有显示器或选择指定的原生显示器 ID",
   "settings.computer.display.label": "Computer 显示器",
   "settings.computer.enabled.description": "为 OpenAI computer use 启用原生主机桌面截图与输入",
-  "settings.computer.enabled.label": "Computer",
+  "settings.computer.enabled.label": "计算机控制",
   "settings.computer.maxHeight.description": "合成截图的最大高度（像素）",
   "settings.computer.maxHeight.label": "Computer 截图高度",
   "settings.computer.maxWidth.description": "合成截图的最大宽度（像素）",
@@ -263,5 +263,9 @@
   "tabs.tools.groups.Grep & Browser": "搜索与浏览器",
   "tabs.tools.groups.Output Limits": "输出限制",
   "tabs.tools.groups.Todos": "待办",
-  "tabs.tools.label": "工具"
+  "tabs.tools.label": "工具",
+  "settings.tools.xdevDocs.label": "xd:// 提示文档",
+  "settings.tools.xdevInlineDevices.label": "xd:// 内联设备",
+  "settings.mcp.renderMarkdownResults.label": "MCP Markdown 结果",
+  "settings.mcp.renderMarkdownResults.description": "在转录中将非 JSON 的 MCP 文本结果渲染为 Markdown"
 }

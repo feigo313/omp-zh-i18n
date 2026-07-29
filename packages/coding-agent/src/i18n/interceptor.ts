@@ -83,8 +83,8 @@ export function interceptPluginsLabel(englishLabel: string): string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** 拦截通用 UI 字符串 */
-export function interceptUIString(key: string, english: string): string {
-	return i18n.t(key, english);
+export function interceptUIString(key: string, english: string, params?: Record<string, unknown>): string {
+	return i18n.t(key, english, params);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -145,6 +145,8 @@ const TIP_KEYS: readonly string[] = [
 	"tips.usage_reset",
 	"tips.pi_dialect",
 	"tips.advisor",
+	"tips.prompt_arrow_list",
+	"tips.shift_tab_effort",
 ];
 
 /**

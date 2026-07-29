@@ -11,7 +11,8 @@ import { Database, type Statement } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDbPath, logger } from "@oh-my-pi/pi-utils";
+import { parseAlibabaTokenPlanCredential } from "@oh-my-pi/pi-catalog/wire/alibaba-token-plan";
+import { $env, getAgentDbPath, logger } from "@oh-my-pi/pi-utils";
 import type { ApiKeyResolver } from "./auth-retry";
 import * as AIError from "./error";
 import { isUsageLimitOutcome } from "./error/rate-limit";
@@ -27,8 +28,12 @@ import type {
 import { getEnvApiKey, getEnvApiKeyName } from "./stream";
 import type { Provider } from "./types";
 import type {
+	ClientProviderUsage,
+	ClientUsageReport,
+	ClientUsageSummary,
 	CredentialRankingContext,
 	CredentialRankingStrategy,
+	ObservedUsageEntry,
 	UsageCostHistoryEntry,
 	UsageCostHistoryQuery,
 	UsageCredential,
@@ -42,12 +47,14 @@ import type {
 	UsageReport,
 } from "./usage";
 import { resolveUsedFraction } from "./usage";
+import { alibabaTokenPlanRankingStrategy, alibabaTokenPlanUsageProvider } from "./usage/alibaba-token-plan";
 import { claudeRankingStrategy, claudeUsageProvider } from "./usage/claude";
 import { cursorUsageProvider } from "./usage/cursor";
 import { googleGeminiCliUsageProvider } from "./usage/gemini";
 import { githubCopilotUsageProvider } from "./usage/github-copilot";
 import { antigravityRankingStrategy, antigravityUsageProvider } from "./usage/google-antigravity";
 import { kimiUsageProvider } from "./usage/kimi";
+import { minimaxCodeUsageProvider } from "./usage/minimax-code";
 import { ollamaCloudUsageProvider, ollamaUsageProvider } from "./usage/ollama";
 import { codexRankingStrategy, openaiCodexUsageProvider } from "./usage/openai-codex";
 import {
@@ -57,6 +64,8 @@ import {
 	listCodexResetCredits,
 } from "./usage/openai-codex-reset";
 import { opencodeGoUsageProvider } from "./usage/opencode-go";
+import { syntheticUsageProvider } from "./usage/synthetic";
+import { xaiOauthUsageProvider } from "./usage/xai-oauth";
 import { zaiRankingStrategy, zaiUsageProvider } from "./usage/zai";
 
 const USAGE_RANKING_METRIC_EPSILON = 1e-9;
@@ -160,6 +169,28 @@ export interface StoredCredentialBlock {
 	blockedUntilMs: number;
 	/** Last row update timestamp in epoch milliseconds, when provided by the backing store. */
 	updatedAtMs?: number;
+}
+
+/**
+ * Identity slice of a disabled (soft-deleted) credential tombstone — cause and
+ * account identity only, never token material. Surfaced so auto-disabled
+ * accounts (e.g. an expired Anthropic OAuth grant) stay visible in `omp usage`
+ * instead of silently vanishing until the user notices missing quota.
+ */
+export interface DisabledCredentialSummary {
+	/** Database row id (matches {@link StoredAuthCredential.id}). */
+	id: number;
+	provider: string;
+	type: AuthCredential["type"];
+	email?: string;
+	accountId?: string;
+	/** Organization/workspace the credential was scoped to (Anthropic/ChatGPT multi-subscription). */
+	orgId?: string;
+	orgName?: string;
+	/** Verbatim disable cause captured when the row was torn down. */
+	cause: string;
+	/** Epoch ms the row was disabled (SQLite `updated_at`), when known. */
+	disabledAtMs?: number;
 }
 
 /**
@@ -345,6 +376,21 @@ export interface AuthCredentialStore {
 	/** Optional hook to notify the underlying store that usage report cache is stale. */
 	invalidateUsageCache?(signal?: AbortSignal): Promise<void>;
 	listAuthCredentials(provider?: string): StoredAuthCredential[];
+	/**
+	 * Optional store hook to re-hydrate the credential snapshot from its
+	 * backing source. Remote broker stores re-fetch `GET /v1/snapshot` so a
+	 * disk-cached snapshot (up to an hour stale) cannot be paired with live
+	 * per-credential data; local SQLite stores omit it — their reads are
+	 * always current.
+	 */
+	refreshSnapshot?(): Promise<unknown>;
+	/**
+	 * Disabled credential tombstones (see {@link DisabledCredentialSummary}).
+	 * Optional: remote stores forward to the broker's
+	 * `GET /v1/credentials/disabled` (empty list when the broker predates the
+	 * endpoint); stores without tombstones omit it.
+	 */
+	listDisabledCredentials?(provider?: string, signal?: AbortSignal): Promise<DisabledCredentialSummary[]>;
 	updateAuthCredential(id: number, credential: AuthCredential): void;
 	deleteAuthCredential(id: number, disabledCause: string): void;
 	tryDisableAuthCredentialIfMatches(
@@ -373,6 +419,8 @@ export interface AuthCredentialStore {
 	getCredentialBlockReconcileAfter?(credentialId: number, providerKey: string, blockScope: string): number | undefined;
 	/** Upsert with MAX semantics: keep the later blockedUntilMs on conflict. */
 	upsertCredentialBlock?(block: StoredCredentialBlock): void;
+	/** Drop one block row for a credential/provider/scope key. */
+	deleteCredentialBlock?(credentialId: number, providerKey: string, blockScope: string): void;
 	/** Drop every block row for a credential (all providerKeys/scopes). */
 	deleteCredentialBlocks?(credentialId: number): void;
 	/** Prune rows with blocked_until_ms <= nowMs. */
@@ -395,6 +443,16 @@ export interface AuthCredentialStore {
 	listUsageCosts?(query?: UsageCostHistoryQuery): UsageCostHistoryEntry[];
 	/** Read recorded usage-limit snapshots, oldest first. */
 	listUsageHistory?(query?: UsageHistoryQuery): UsageHistoryEntry[];
+	/**
+	 * Client hook: forward locally observed request usage. Remote broker stores
+	 * batch these to the broker so it can attribute token burn per install;
+	 * local stores omit it and observation is skipped.
+	 */
+	recordObservedUsage?(entries: ObservedUsageEntry[]): void;
+	/** Broker host: persist one client's observed-usage report. */
+	recordClientUsage?(report: ClientUsageReport): void;
+	/** Broker host: aggregate recorded per-client usage since a timestamp. */
+	getClientUsageSummary?(sinceMs: number): ClientUsageSummary;
 	/**
 	 * Optional store-supplied OAuth refresh. When present, `AuthStorage` uses
 	 * it before the per-provider local refresh path. `RemoteAuthCredentialStore`
@@ -585,8 +643,10 @@ async function defaultConfigValueResolver(config: string): Promise<string | unde
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_USAGE_PROVIDERS: UsageProvider[] = [
+	alibabaTokenPlanUsageProvider,
 	openaiCodexUsageProvider,
 	kimiUsageProvider,
+	minimaxCodeUsageProvider,
 	antigravityUsageProvider,
 	googleGeminiCliUsageProvider,
 	ollamaUsageProvider,
@@ -596,6 +656,8 @@ const DEFAULT_USAGE_PROVIDERS: UsageProvider[] = [
 	opencodeGoUsageProvider,
 	githubCopilotUsageProvider,
 	cursorUsageProvider,
+	syntheticUsageProvider,
+	xaiOauthUsageProvider,
 ];
 
 const DEFAULT_USAGE_PROVIDER_MAP = new Map<Provider, UsageProvider>(
@@ -618,6 +680,12 @@ const USAGE_LAST_GOOD_RETENTION_MS = 24 * 60 * 60_000;
  */
 const USAGE_HISTORY_BUCKET_MS = 60 * 60_000;
 /**
+ * Merge client observed-usage flushes into at most one row per 5 minutes per
+ * (install, provider, model): ~300 rows/day per active model per client
+ * instead of one row per 10s flush.
+ */
+const CLIENT_USAGE_BUCKET_MS = 5 * 60_000;
+/**
  * Per-credential cool-down after a usage fetch fails. While this window is
  * active we serve the last successful value to avoid dropping the credential
  * from the report; without a previous value we just return null and retry
@@ -631,10 +699,10 @@ const USAGE_REPORT_CACHE_KEY_VERSION_OVERRIDES: Partial<Record<Provider, number>
 	"google-antigravity": 2,
 	zai: 2,
 	// v2: cache identity gained an `org:` component so two subscriptions on one
-	// account email stop sharing a slot. The bump also retires pre-org entries —
-	// otherwise an org-less credential could replay another org's cached pool
-	// (incl. the 24h last-good fallback) via the old bare email/account key.
-	anthropic: 2,
+	// account email stop sharing a slot. v3 retires parsed reports created before
+	// Anthropic extra-usage rows existed; header ingestion can otherwise keep
+	// renewing those incomplete reports throughout the 24h last-good retention.
+	anthropic: 3,
 };
 const DEFAULT_OAUTH_REFRESH_TIMEOUT_MS = 10_000;
 /**
@@ -680,6 +748,31 @@ export { isDefinitiveOAuthFailure } from "./error/auth-classify";
 export interface UsageLimitMarkResult {
 	switched: boolean;
 	retryAtMs?: number;
+}
+
+export type ModelUsageHealthState = "healthy" | "reserve" | "depleted" | "unknown";
+
+export interface ModelUsageAccountHealth {
+	credentialId: number;
+	credentialType: AuthCredential["type"];
+	/** True when this credential is currently sticky for options.sessionId. */
+	selected?: true;
+	state: ModelUsageHealthState;
+	remainingFraction?: number;
+	resetsAt?: number;
+}
+
+export interface ModelUsageHealth {
+	state: ModelUsageHealthState;
+	accounts: ModelUsageAccountHealth[];
+}
+
+export interface ModelUsageHealthOptions {
+	modelId?: string;
+	sessionId?: string;
+	baseUrl?: string;
+	reserveFraction: number;
+	signal?: AbortSignal;
 }
 
 type UsageCacheEntry<T> = {
@@ -798,6 +891,8 @@ export interface OAuthAccountSummary {
 	/** Organization/workspace the credential is scoped to (Anthropic/ChatGPT multi-subscription). */
 	orgId?: string;
 	orgName?: string;
+	/** True when this account is the session-sticky OAuth credential requested by `listOAuthAccounts`. */
+	active: boolean;
 }
 export interface InvalidateCredentialMatchingOptions {
 	signal?: AbortSignal;
@@ -970,6 +1065,7 @@ function resolveDefaultUsageProvider(provider: Provider): UsageProvider | undefi
 }
 
 const DEFAULT_RANKING_STRATEGIES = new Map<Provider, CredentialRankingStrategy>([
+	["alibaba-token-plan", alibabaTokenPlanRankingStrategy],
 	["openai-codex", codexRankingStrategy],
 	["anthropic", claudeRankingStrategy],
 	["google-antigravity", antigravityRankingStrategy],
@@ -1599,11 +1695,16 @@ export class AuthStorage {
 		provider: string,
 		providerKey: string,
 		credentialIndex: number,
-		blockScope: string | undefined = undefined,
+		blockScopeOrScopes: string | readonly string[] | undefined = undefined,
 	): number | undefined {
 		const nowMs = Date.now();
+		// A request honours its own scope plus any legacy catch-all scope, so a
+		// block written before backoff was scoped still applies to everything.
+		const scopes = (
+			typeof blockScopeOrScopes === "string" ? [blockScopeOrScopes] : (blockScopeOrScopes ?? [])
+		).filter(scope => scope.length > 0);
 		let blockedUntil = this.#getCredentialBlockedUntilForKey(providerKey, credentialIndex, nowMs);
-		if (blockScope) {
+		for (const blockScope of scopes) {
 			const scopedBlockedUntil = this.#getCredentialBlockedUntilForKey(
 				this.#toScopedBackoffKey(providerKey, blockScope),
 				credentialIndex,
@@ -1616,16 +1717,14 @@ export class AuthStorage {
 
 		const credentialId = this.#getStoredCredentials(provider)[credentialIndex]?.id;
 		if (credentialId === undefined) return blockedUntil;
-		if (!blockScope || provider !== "openai-codex") {
-			const persistedGlobalBlockedUntil = this.#readPersistedCredentialBlock(credentialId, providerKey, "");
-			if (
-				persistedGlobalBlockedUntil !== undefined &&
-				(blockedUntil === undefined || persistedGlobalBlockedUntil > blockedUntil)
-			) {
-				blockedUntil = persistedGlobalBlockedUntil;
-			}
+		const persistedGlobalBlockedUntil = this.#readPersistedCredentialBlock(credentialId, providerKey, "");
+		if (
+			persistedGlobalBlockedUntil !== undefined &&
+			(blockedUntil === undefined || persistedGlobalBlockedUntil > blockedUntil)
+		) {
+			blockedUntil = persistedGlobalBlockedUntil;
 		}
-		if (blockScope) {
+		for (const blockScope of scopes) {
 			const persistedScopedBlockedUntil = this.#readPersistedCredentialBlock(credentialId, providerKey, blockScope);
 			if (
 				persistedScopedBlockedUntil !== undefined &&
@@ -1642,7 +1741,7 @@ export class AuthStorage {
 		provider: string,
 		providerKey: string,
 		credentialIndex: number,
-		blockScope: string | undefined = undefined,
+		blockScope: string | readonly string[] | undefined = undefined,
 	): boolean {
 		return this.#getCredentialBlockedUntil(provider, providerKey, credentialIndex, blockScope) !== undefined;
 	}
@@ -1827,6 +1926,8 @@ export class AuthStorage {
 		strategy: CredentialRankingStrategy;
 		rankingContext: CredentialRankingContext;
 		blockScope?: string;
+		/** Scopes a block may live under for this request; reads honour all of them. */
+		blockScopes?: readonly string[];
 	}): Promise<ApiKeyCandidate[]> {
 		const nowMs = Date.now();
 		const { strategy } = args;
@@ -1840,7 +1941,7 @@ export class AuthStorage {
 					args.provider,
 					args.providerKey,
 					selection.index,
-					args.blockScope,
+					args.blockScopes ?? args.blockScope,
 				);
 				if (blockedUntil !== undefined) {
 					return { selection, usage: null, usageChecked: false, blockedUntil };
@@ -1865,7 +1966,7 @@ export class AuthStorage {
 					args.provider,
 					args.providerKey,
 					selection.index,
-					args.blockScope,
+					args.blockScopes ?? args.blockScope,
 				);
 				return { selection, usage: null, usageChecked: false, blockedUntil };
 			});
@@ -1948,6 +2049,7 @@ export class AuthStorage {
 
 		const rankingContext: CredentialRankingContext = { modelId: options?.modelId };
 		const blockScope = strategy.blockScope?.(rankingContext);
+		const blockScopes = strategy.blockScopes?.(rankingContext) ?? (blockScope ? [blockScope] : []);
 		const candidates = await this.#rankApiKeySelections({
 			providerKey,
 			provider,
@@ -1957,6 +2059,7 @@ export class AuthStorage {
 			strategy,
 			rankingContext,
 			blockScope,
+			blockScopes,
 		});
 		return candidates[0]?.selection ?? fallback;
 	}
@@ -2653,7 +2756,10 @@ export class AuthStorage {
 			this.#resetProviderAssignments(provider);
 			return { type: "api_key" };
 		}
-		const newCredential: OAuthCredential = { type: "oauth", ...result };
+		// Stamp the interactive-login instant: providers with an absolute grant
+		// lifetime (Anthropic) need it to surface re-login deadlines, and token
+		// refreshes only ever merge over this credential without clearing it.
+		const newCredential: OAuthCredential = { type: "oauth", ...result, authorizedAt: Date.now() };
 		// Use #upsertOAuthCredential to upsert the new credential.
 		// Any legacy api_key rows from older versions will be cleaned up so they do not
 		// shadow the new OAuth row, while preserving other active OAuth credentials.
@@ -2872,6 +2978,9 @@ export class AuthStorage {
 			apiEndpoint: next.apiEndpoint,
 			orgId: next.orgId ?? entry.credential.orgId,
 			orgName: next.orgName ?? entry.credential.orgName,
+			// Not part of UsageCredential — carried from the stored row so the
+			// interactive-login anchor survives usage-path refresh persists.
+			authorizedAt: entry.credential.authorizedAt,
 		});
 	}
 
@@ -3008,11 +3117,13 @@ export class AuthStorage {
 				return report;
 			}
 			// Failure: apply a short jittered cool-down so the credential doesn't
-			// re-hit the endpoint on every poll. Serve the last good value when we
-			// have one (keeps the credential in the report); otherwise cache null
-			// so a cold or throttled credential stops re-bursting until the window
-			// expires and the next poll retries.
-			const lastGood = this.#usageCache.getStale<UsageReport | null>(cacheKey)?.value ?? null;
+			// re-hit the endpoint on every poll. Most providers serve the last good
+			// value through transient failures. Session-cookie providers can opt out
+			// so an expired login does not display stale quota indefinitely.
+			const retainLastGood = this.#usageProviderResolver?.(request.provider)?.retainLastGoodOnFailure !== false;
+			const lastGood = retainLastGood
+				? (this.#usageCache.getStale<UsageReport | null>(cacheKey)?.value ?? null)
+				: null;
 			const backoffJitter = USAGE_FAILURE_BACKOFF_MS * (Math.random() * 0.5 - 0.25);
 			const coolDown = Date.now() + USAGE_FAILURE_BACKOFF_MS + backoffJitter;
 			this.#usageCache.set(cacheKey, { value: lastGood, expiresAt: coolDown });
@@ -3105,6 +3216,56 @@ export class AuthStorage {
 		}
 	}
 
+	/**
+	 * Forward one completed request's usage to the store's observer hook.
+	 * Broker-backed stores batch these into per-install reports so the broker
+	 * can track actual token burn per client; local stores have no hook and
+	 * the call is a no-op.
+	 */
+	recordObservedUsage(entry: {
+		provider: Provider;
+		model: string;
+		usage: { input: number; output: number; cacheRead: number; cacheWrite: number };
+		costUsd?: number;
+		at?: number;
+	}): void {
+		const record = this.#store.recordObservedUsage;
+		if (!record) return;
+		try {
+			record.call(this.#store, [
+				{
+					at: entry.at ?? Date.now(),
+					provider: entry.provider,
+					model: entry.model,
+					requests: 1,
+					inputTokens: entry.usage.input,
+					outputTokens: entry.usage.output,
+					cacheReadTokens: entry.usage.cacheRead,
+					cacheWriteTokens: entry.usage.cacheWrite,
+					costUsd: Number.isFinite(entry.costUsd) ? (entry.costUsd ?? 0) : 0,
+				},
+			]);
+		} catch (error) {
+			this.#usageLogger?.debug("observed usage record failed", {
+				provider: entry.provider,
+				error: String(error),
+			});
+		}
+	}
+
+	/** Broker host: persist one client's observed-usage report (per-install token burn). */
+	recordClientUsage(report: ClientUsageReport): boolean {
+		const record = this.#store.recordClientUsage;
+		if (!record) return false;
+		record.call(this.#store, report);
+		return true;
+	}
+
+	/** Broker host: aggregate recorded per-client usage since `sinceMs`. */
+	getClientUsageSummary(sinceMs: number): ClientUsageSummary {
+		return this.#store.getClientUsageSummary?.(sinceMs) ?? { clients: [] };
+	}
+
 	#resolveObservedUsageCredential(provider: Provider, sessionId?: string): UsageCredential | undefined {
 		const entries = this.#getStoredCredentials(provider);
 		const sessionCredential = this.#getSessionCredential(provider, sessionId);
@@ -3146,8 +3307,9 @@ export class AuthStorage {
 		const parsedReport = parseHeaders(headers, now);
 		if (!parsedReport) return false;
 		// Throttled to one ingest per interval — except when a window reads
-		// exhausted: that snapshot must land immediately so the next getApiKey
-		// blocks the credential instead of burning a wire 429 on the wall.
+		// exhausted: persist that snapshot immediately. A full-backed cache can
+		// then block the next getApiKey; a cold header-only snapshot first probes
+		// the usage endpoint.
 		const exhausted = parsedReport.limits.some(limit => this.#isUsageLimitExhausted(limit));
 		const last = this.#usageHeaderIngestAt.get(cacheKey);
 		if (!exhausted && last !== undefined && now - last < USAGE_HEADER_INGEST_INTERVAL_MS) return false;
@@ -3167,7 +3329,8 @@ export class AuthStorage {
 		}
 
 		if (this.#fetchUsageReportsOverride || this.#store.fetchUsageReports) return false;
-		const prior = this.#usageCache.getStale<UsageReport | null>(cacheKey)?.value;
+		const priorEntry = this.#usageCache.getStale<UsageReport | null>(cacheKey);
+		const prior = priorEntry?.value;
 		let merged = report;
 		if (prior && Array.isArray(prior.limits)) {
 			const headerLimitsById = new Map(report.limits.map(limit => [limit.id, limit]));
@@ -3191,12 +3354,19 @@ export class AuthStorage {
 				metadata: {
 					...(report.metadata ?? {}),
 					...(prior.metadata ?? {}),
+					source: prior.metadata?.source,
 					headersUpdatedAt: now,
 				},
 			};
 		}
 
-		this.#usageCache.set(cacheKey, { value: merged, expiresAt: now + USAGE_REPORT_TTL_MS });
+		// Header ingestion merges values but never extends a cache entry's lifetime.
+		// Preserve the existing expiry (including active failure cooldowns) so full
+		// reports refetch on their original 5-minute schedule and full-payload-only
+		// rows such as extra usage stay current; headers only refresh window rows
+		// between fetches. A newly minted header-only report is durable but stale.
+		const expiresAt = Math.max(priorEntry?.expiresAt ?? now - 1, now - 1);
+		this.#usageCache.set(cacheKey, { value: merged, expiresAt });
 		this.#usageHeaderIngestAt.set(cacheKey, now);
 		return true;
 	}
@@ -3225,6 +3395,29 @@ export class AuthStorage {
 					this.#setStoredCredentials(providerId, dedupedEntries);
 				}
 				entries = dedupedEntries;
+			}
+
+			// SuperGrok billing only accepts OAuth bearers. Catalog envVars for
+			// xai-oauth are [XAI_OAUTH_TOKEN, XAI_API_KEY], so the generic path
+			// would (a) build api_key usage requests from stored keys / the paid
+			// API env var and (b) never fall through to XAI_OAUTH_TOKEN when a
+			// non-OAuth row is the only stored credential. Skip api_key material
+			// and only env-fallback to the dedicated OAuth bearer.
+			if (providerId === "xai-oauth") {
+				let hasUsableStoredOAuthCredential = false;
+				for (const entry of entries) {
+					if (entry.credential.type !== "oauth") continue;
+					const request = this.#buildUsageRequestForOauth(provider, entry.credential, baseUrl);
+					if (providerImpl.supports && !providerImpl.supports(request)) continue;
+					requests.push(request);
+					hasUsableStoredOAuthCredential = true;
+				}
+				const oauthToken = $env.XAI_OAUTH_TOKEN?.trim();
+				if (!hasUsableStoredOAuthCredential && oauthToken) {
+					const request = this.#buildUsageRequest(provider, { type: "oauth", accessToken: oauthToken }, baseUrl);
+					if (!providerImpl.supports || providerImpl.supports(request)) requests.push(request);
+				}
+				continue;
 			}
 
 			if (entries.length === 0) {
@@ -3479,6 +3672,178 @@ export class AuthStorage {
 	 */
 	usageProviderFor(provider: Provider): UsageProvider | undefined {
 		return this.#usageProviderResolver?.(provider);
+	}
+
+	/**
+	 * Return model ids whose live reports map to a quantitative usage scope.
+	 * Provider strategies supply model/tier mapping when available; otherwise
+	 * only explicitly matching model ids and account-wide shared limits count.
+	 * Label-only or ambiguous tier limits are excluded rather than guessed.
+	 */
+	getUsageReportingModelIds(
+		provider: Provider,
+		modelIds: readonly string[],
+		reports: readonly UsageReport[],
+	): string[] {
+		const strategy = this.#rankingStrategyResolver?.(provider);
+		const providerReports = reports.filter(report => report.provider === provider);
+		if (providerReports.length === 0) return [];
+		const seen = new Set<string>();
+		const reporting: string[] = [];
+		for (const modelId of modelIds) {
+			if (seen.has(modelId)) continue;
+			seen.add(modelId);
+			const context: CredentialRankingContext = { modelId };
+			const hasUsage = providerReports.some(report => {
+				const limits = strategy
+					? this.#getScopedUsageLimits(strategy, report, context)
+					: report.limits.filter(limit => limit.scope.shared === true || limit.scope.modelId === modelId);
+				return limits.some(limit => this.#isUsageLimitExhausted(limit) || resolveUsedFraction(limit) !== undefined);
+			});
+			if (hasUsage) reporting.push(modelId);
+		}
+		return reporting;
+	}
+
+	/**
+	 * Inspect the credential pool that {@link getApiKey} would use for one model
+	 * without advancing round-robin state or changing session stickiness.
+	 *
+	 * Pool aggregation is deliberately conservative: one healthy sibling makes
+	 * the model healthy, while any unknown sibling prevents a depleted/reserve
+	 * conclusion. Static runtime/config/env credentials return unknown because
+	 * they bypass the managed account pool.
+	 */
+	async getModelUsageHealth(provider: Provider, options: ModelUsageHealthOptions): Promise<ModelUsageHealth> {
+		options.signal?.throwIfAborted();
+		const origin = this.getCredentialOrigin(provider);
+		const strategy = this.#rankingStrategyResolver?.(provider);
+		if (!origin || !strategy || (origin.kind !== "oauth" && origin.kind !== "api_key")) {
+			return { state: "unknown", accounts: [] };
+		}
+
+		const stored = this.#getStoredCredentials(provider).map((entry, index) => ({ entry, index }));
+		const oauthPool = stored.filter(({ entry }) => entry.credential.type === "oauth");
+		const apiKeyPool = stored.filter(({ entry }) => entry.credential.type === "api_key");
+		const loginApiKeyPool = apiKeyPool.filter(
+			({ entry }) => entry.credential.type === "api_key" && entry.credential.source === "login",
+		);
+		const pool = origin.kind === "oauth" ? oauthPool : loginApiKeyPool;
+		if (pool.length === 0) return { state: "unknown", accounts: [] };
+		const sessionCredential = this.#getSessionCredential(provider, options.sessionId);
+		const selectedCredentialId =
+			sessionCredential?.type === origin.kind
+				? this.#getStoredCredentials(provider)[sessionCredential.index]?.id
+				: undefined;
+
+		const rankingContext: CredentialRankingContext = { modelId: options.modelId };
+		const blockScope = strategy.blockScope?.(rankingContext);
+		const blockScopes = strategy.blockScopes?.(rankingContext) ?? (blockScope ? [blockScope] : []);
+		const reserveFraction = Number.isFinite(options.reserveFraction)
+			? Math.max(0, Math.min(1, options.reserveFraction))
+			: 0;
+		const nowMs = Date.now();
+		const accounts = await Promise.all(
+			pool.map(async ({ entry, index }): Promise<ModelUsageAccountHealth> => {
+				const credentialType = entry.credential.type;
+				const providerKey = this.#getProviderTypeKey(provider, credentialType);
+				let blockedUntil = this.#getCredentialBlockedUntil(provider, providerKey, index, blockScopes);
+				if (blockedUntil !== undefined && provider !== "openai-codex") {
+					return {
+						credentialId: entry.id,
+						credentialType,
+						state: "depleted",
+						resetsAt: blockedUntil,
+					};
+				}
+
+				let report: UsageReport | null;
+				try {
+					report = await raceUsageWithSignal(
+						this.#getUsageReport(provider, entry.credential, {
+							baseUrl: options.baseUrl,
+							timeoutMs: this.#usageRequestTimeoutMs,
+							signal: options.signal,
+						}),
+						options.signal,
+					);
+				} catch (error) {
+					if (options.signal?.aborted) throw error;
+					report = null;
+				}
+
+				if (provider === "openai-codex") {
+					blockedUntil = this.#getCredentialBlockedUntil(provider, providerKey, index, blockScopes);
+				}
+				if (blockedUntil !== undefined) {
+					return {
+						credentialId: entry.id,
+						credentialType,
+						state: "depleted",
+						resetsAt: blockedUntil,
+					};
+				}
+				if (!report) return { credentialId: entry.id, credentialType, state: "unknown" };
+
+				const limits = this.#getScopedUsageLimits(strategy, report, rankingContext);
+				if (limits.length === 0) return { credentialId: entry.id, credentialType, state: "unknown" };
+
+				const currentLimits = limits.filter(limit => {
+					const resetsAt = limit.window?.resetsAt;
+					return resetsAt === undefined || resetsAt > nowMs || report.fetchedAt >= resetsAt;
+				});
+				if (currentLimits.length === 0) {
+					return { credentialId: entry.id, credentialType, state: "unknown" };
+				}
+				const activeExhausted = currentLimits.filter(limit => this.#isUsageLimitExhausted(limit));
+				if (activeExhausted.length > 0) {
+					const futureResets = activeExhausted
+						.map(limit => limit.window?.resetsAt)
+						.filter((resetsAt): resetsAt is number => resetsAt !== undefined && resetsAt > nowMs);
+					return {
+						credentialId: entry.id,
+						credentialType,
+						state: "depleted",
+						resetsAt: futureResets.length > 0 ? Math.min(...futureResets) : undefined,
+					};
+				}
+
+				const usedFractions = currentLimits
+					.map(resolveUsedFraction)
+					.filter((fraction): fraction is number => fraction !== undefined);
+				if (usedFractions.length === 0) {
+					return { credentialId: entry.id, credentialType, state: "unknown" };
+				}
+				const remainingFraction = Math.max(0, 1 - Math.max(...usedFractions));
+				return {
+					credentialId: entry.id,
+					credentialType,
+					state: remainingFraction <= reserveFraction ? "reserve" : "healthy",
+					remainingFraction,
+				};
+			}),
+		);
+		if (selectedCredentialId !== undefined) {
+			const selectedAccount = accounts.find(account => account.credentialId === selectedCredentialId);
+			if (selectedAccount) selectedAccount.selected = true;
+		}
+
+		if (accounts.some(account => account.state === "healthy")) return { state: "healthy", accounts };
+		if (accounts.some(account => account.state === "unknown")) return { state: "unknown", accounts };
+		if (accounts.some(account => account.state === "reserve")) return { state: "reserve", accounts };
+		return { state: "depleted", accounts };
+	}
+
+	/**
+	 * Release a session's sticky credential so its next {@link getApiKey} call
+	 * re-runs native pool ranking. This never blocks or penalizes the released
+	 * account; usage-aware routing uses it when another sibling has more
+	 * headroom, before considering a model/provider fallback.
+	 */
+	releaseSessionCredentialForReselection(provider: string, sessionId: string): boolean {
+		if (!this.#getSessionCredential(provider, sessionId)) return false;
+		this.#clearSessionCredential(provider, sessionId);
+		return true;
 	}
 
 	async fetchUsageReports(options?: {
@@ -3835,6 +4200,7 @@ export class AuthStorage {
 		const strategy = this.#rankingStrategyResolver?.(provider);
 		const rankingContext: CredentialRankingContext = { modelId: options?.modelId };
 		const blockScope = strategy?.blockScope?.(rankingContext);
+		const siblingBlockScopes = strategy?.blockScopes?.(rankingContext) ?? (blockScope ? [blockScope] : []);
 		const now = Date.now();
 		let blockedUntil = now + (options?.retryAfterMs ?? AuthStorage.#defaultBackoffMs);
 
@@ -3869,11 +4235,14 @@ export class AuthStorage {
 
 		let retryAtMs: number | undefined;
 		for (const candidate of remainingCredentials) {
+			// Sibling availability must use the same scope set selection reads, or
+			// this reports a sibling as free that selection will then refuse, most
+			// visibly when the sibling still carries a legacy shared block.
 			const candidateBlockedUntil = this.#getCredentialBlockedUntil(
 				provider,
 				providerKey,
 				candidate.index,
-				blockScope,
+				siblingBlockScopes,
 			);
 			if (candidateBlockedUntil === undefined) return { switched: true };
 			if (retryAtMs === undefined || candidateBlockedUntil < retryAtMs) retryAtMs = candidateBlockedUntil;
@@ -3995,6 +4364,8 @@ export class AuthStorage {
 		strategy: CredentialRankingStrategy;
 		rankingContext: CredentialRankingContext;
 		blockScope?: string;
+		/** Scopes a block may live under for this request; reads honour all of them. */
+		blockScopes?: readonly string[];
 	}): Promise<OAuthCandidate[]> {
 		const nowMs = Date.now();
 		const { strategy } = args;
@@ -4012,7 +4383,7 @@ export class AuthStorage {
 					args.provider,
 					args.providerKey,
 					selection.index,
-					args.blockScope,
+					args.blockScopes ?? args.blockScope,
 				);
 				let usage: UsageReport | null = null;
 				let usageChecked = false;
@@ -4026,7 +4397,7 @@ export class AuthStorage {
 						args.provider,
 						args.providerKey,
 						selection.index,
-						args.blockScope,
+						args.blockScopes ?? args.blockScope,
 					);
 				}
 				if (blockedUntil !== undefined) return { selection, usage, usageChecked, blockedUntil };
@@ -4137,6 +4508,8 @@ export class AuthStorage {
 		const strategy = this.#rankingStrategyResolver?.(provider);
 		const rankingContext: CredentialRankingContext = { modelId: options?.modelId };
 		const blockScope = strategy?.blockScope?.(rankingContext);
+		// Reads honour every scope that applies; the scalar above is for args that persist.
+		const blockScopes = strategy?.blockScopes?.(rankingContext) ?? (blockScope ? [blockScope] : []);
 		const planRequirement = resolveOpenAICodexPlanRequirement(provider, options?.modelId);
 		const hasPlanRequirement = planRequirement !== "none";
 		const checkUsage = strategy !== undefined && (credentials.length > 1 || hasPlanRequirement);
@@ -4165,7 +4538,7 @@ export class AuthStorage {
 		const sessionPreferredIsAvailable =
 			sessionPreferredIndex !== undefined &&
 			sessionPreferredCanRefreshOrUse &&
-			!this.#isCredentialBlocked(provider, providerKey, sessionPreferredIndex, blockScope);
+			!this.#isCredentialBlocked(provider, providerKey, sessionPreferredIndex, blockScopes);
 		const shouldRank = checkUsage && (!sessionPreferredIsAvailable || !sessionPreferredIsWarm || hasPlanRequirement);
 		// When ranking, seed the pinned credential first in the evaluation order so it wins genuine
 		// ties (the ranked comparator falls back to `orderPos`) without overriding a strictly-better
@@ -4194,6 +4567,7 @@ export class AuthStorage {
 					strategy: strategy!,
 					rankingContext,
 					blockScope,
+					blockScopes,
 				})
 			: order
 					.map(idx => credentials[idx])
@@ -4206,7 +4580,7 @@ export class AuthStorage {
 		if (!shouldRank && sessionPreferredIndex !== undefined && !hasPlanRequirement) {
 			const sessionPreferredCandidate = candidates.findIndex(
 				candidate =>
-					!this.#isCredentialBlocked(provider, providerKey, candidate.selection.index, blockScope) &&
+					!this.#isCredentialBlocked(provider, providerKey, candidate.selection.index, blockScopes) &&
 					candidate.selection.index === sessionPreferredIndex,
 			);
 			if (sessionPreferredCandidate > 0) {
@@ -4300,7 +4674,7 @@ export class AuthStorage {
 		if (hasPlanRequirement && sessionPreferredIndex !== undefined) {
 			const sessionPreferredCandidate = candidates.findIndex(
 				candidate =>
-					!this.#isCredentialBlocked(provider, providerKey, candidate.selection.index, blockScope) &&
+					!this.#isCredentialBlocked(provider, providerKey, candidate.selection.index, blockScopes) &&
 					candidate.selection.index === sessionPreferredIndex,
 			);
 			if (sessionPreferredCandidate > 0) {
@@ -4337,6 +4711,7 @@ export class AuthStorage {
 						strategy,
 						rankingContext,
 						blockScope,
+						blockScopes,
 					},
 				);
 				if (resolved) return resolved;
@@ -4514,6 +4889,7 @@ export class AuthStorage {
 			strategy?: CredentialRankingStrategy;
 			rankingContext?: CredentialRankingContext;
 			blockScope?: string;
+			blockScopes?: readonly string[];
 			/** When false, a definitive failure of THIS credential returns undefined instead of falling back to the ranked/round-robin selector (target-only resolution). */
 			allowFallback?: boolean;
 		},
@@ -4528,9 +4904,13 @@ export class AuthStorage {
 			strategy,
 			rankingContext,
 			blockScope,
+			blockScopes,
 			allowFallback = true,
 		} = usageOptions;
-		if (!allowBlocked && this.#isCredentialBlocked(provider, providerKey, selection.index, blockScope)) {
+		if (
+			!allowBlocked &&
+			this.#isCredentialBlocked(provider, providerKey, selection.index, blockScopes ?? blockScope)
+		) {
 			return undefined;
 		}
 
@@ -4623,6 +5003,7 @@ export class AuthStorage {
 				apiEndpoint: result.newCredentials.apiEndpoint ?? selection.credential.apiEndpoint,
 				orgId: result.newCredentials.orgId ?? selection.credential.orgId,
 				orgName: result.newCredentials.orgName ?? selection.credential.orgName,
+				authorizedAt: result.newCredentials.authorizedAt ?? selection.credential.authorizedAt,
 			};
 			if (credentialId !== undefined) {
 				const idx = this.#replaceCredentialById(provider, credentialId, updated);
@@ -4964,11 +5345,20 @@ export class AuthStorage {
 	 * order, WITHOUT refreshing any token. The array position (0-based) is the
 	 * selector accepted by {@link AuthStorage.getOAuthAccessAt}; a "pick the Nth
 	 * account" UI should render `position + 1`.
+	 *
+	 * When `sessionId` is supplied, the session-sticky OAuth credential is marked
+	 * `active`. No account is active before that session has resolved or pinned a
+	 * credential.
 	 */
-	listOAuthAccounts(provider: string): OAuthAccountSummary[] {
+	listOAuthAccounts(provider: string, sessionId?: string): OAuthAccountSummary[] {
 		if (this.#runtimeOverrides.has(provider) || this.#configOverrides.has(provider)) {
 			return [];
 		}
+		const sessionCredential = this.#getSessionCredential(provider, sessionId);
+		const activeCredentialId =
+			sessionCredential?.type === "oauth"
+				? this.#getStoredCredentials(provider)[sessionCredential.index]?.id
+				: undefined;
 		return this.#getStoredOAuthSelections(provider).map((selection, position) => ({
 			position,
 			credentialId: selection.credentialId,
@@ -4978,7 +5368,27 @@ export class AuthStorage {
 			enterpriseUrl: selection.credential.enterpriseUrl,
 			orgId: selection.credential.orgId,
 			orgName: selection.credential.orgName,
+			active: selection.credentialId === activeCredentialId,
 		}));
+	}
+
+	/**
+	 * Pin one stored OAuth account as this session's preferred credential.
+	 *
+	 * The durable credential id keeps the pin stable across credential refreshes,
+	 * storage reordering, and process restarts. Normal auth retry and usage-limit
+	 * handling may still route around an unavailable account.
+	 */
+	pinSessionOAuthAccount(provider: string, sessionId: string, credentialId: number): boolean {
+		if (!sessionId || this.#runtimeOverrides.has(provider) || this.#configOverrides.has(provider)) {
+			return false;
+		}
+		const stored = this.#getStoredCredentials(provider);
+		const index = stored.findIndex(entry => entry.id === credentialId);
+		const target = stored[index];
+		if (target?.credential.type !== "oauth") return false;
+		this.#recordSessionCredential(provider, sessionId, "oauth", index);
+		return true;
 	}
 
 	/**
@@ -5234,6 +5644,70 @@ export class AuthStorage {
 	 * persisted and in-memory `openai-codex:oauth` blocks so credential selection
 	 * can re-include recovered seats before a stale block naturally expires.
 	 */
+	/**
+	 * Narrow a usage report to the limits a backoff scope covers, so a scope is
+	 * judged only by the meters it gates. A legacy scope that meant "block
+	 * everything" keeps the whole report.
+	 */
+	#scopeUsageReportToBlockScope(
+		report: UsageReport,
+		blockScope: string | undefined,
+		strategy: CredentialRankingStrategy | undefined,
+	): UsageReport {
+		if (!blockScope || !strategy?.scopeLimits || !strategy.blockScopes) return report;
+		// Find a request context whose scope set leads with this scope; its scoped
+		// limits are the ones this block gates.
+		const modelId = blockScope === "spark" ? "gpt-5.3-codex-spark" : "gpt-5.3-codex";
+		if (strategy.blockScopes({ modelId })[0] !== blockScope) return report;
+		const scopedLimits = strategy.scopeLimits(report, { modelId });
+		const meterStates = report.metadata?.meterStates;
+		const meterState =
+			meterStates !== null && typeof meterStates === "object"
+				? (meterStates as Record<string, { allowed?: boolean; limitReached?: boolean }>)[blockScope]
+				: undefined;
+		return {
+			...report,
+			limits: scopedLimits,
+			metadata:
+				meterState || blockScope === "spark"
+					? {
+							...report.metadata,
+							allowed: meterState?.allowed,
+							limitReached: meterState?.limitReached,
+						}
+					: report.metadata,
+		};
+	}
+
+	/**
+	 * Clear one backoff scope. The in-memory backoff is per scope so it is
+	 * dropped directly; the persisted store deletes a credential's blocks as a
+	 * unit, so it is only purged once no other scope still holds a live block.
+	 * Leaving a persisted row behind is safe: the scope it belongs to is
+	 * unblocked in memory, and the row heals on the pass where its own meter
+	 * recovers.
+	 */
+	#clearCredentialBlockScope(
+		provider: string,
+		credentialId: number,
+		credentialIndex: number,
+		providerKey: string,
+		blockScope: string | undefined,
+	): void {
+		const key = this.#toScopedBackoffKey(providerKey, blockScope);
+		const backoffMap = this.#credentialBackoff.get(key);
+		backoffMap?.delete(credentialIndex);
+		if (backoffMap?.size === 0) this.#credentialBackoff.delete(key);
+		const probeAfterMap = this.#credentialBackoffProbeAfter.get(key);
+		probeAfterMap?.delete(credentialIndex);
+		if (probeAfterMap?.size === 0) this.#credentialBackoffProbeAfter.delete(key);
+		try {
+			this.deleteCredentialBlock(credentialId, providerKey, blockScope ?? "");
+		} catch (err) {
+			logger.debug("Failed to clear persisted credential block", { err, provider, credentialId, blockScope });
+		}
+	}
+
 	#isHealthyCodexUsageReport(report: UsageReport): boolean {
 		if (report.provider !== "openai-codex") return false;
 		const metadata = report.metadata;
@@ -5242,13 +5716,51 @@ export class AuthStorage {
 	}
 
 	#reconcileCodexUsageBlockForCredential(provider: Provider, credentialId: number, report: UsageReport): void {
-		if (!this.#isHealthyCodexUsageReport(report)) return;
 		const providerKey = this.#getProviderTypeKey(provider, "oauth");
 		const credentialIndex = this.#getStoredCredentials(provider).findIndex(entry => entry.id === credentialId);
 		if (credentialIndex < 0) return;
 		// Mirror selection: consult the same strategy scope `markUsageLimitReached`
 		// persists under, else a scoped block is invisible here and never healed.
-		const blockScope = this.#rankingStrategyResolver?.(provider)?.blockScope?.({});
+		// Reconciliation has no request context, so it cannot know which scope a
+		// block was written under. Heal every scope the strategy can produce, plus
+		// any legacy scope it still lists, or a block persisted under one scope
+		// stays invisible here forever.
+		const strategy = this.#rankingStrategyResolver?.(provider);
+		const blockScopes =
+			strategy?.blockScopes?.() ?? [strategy?.blockScope?.({})].filter(scope => scope !== undefined);
+		const scopesToHeal = blockScopes.length > 0 ? blockScopes : [undefined];
+		for (const blockScope of scopesToHeal) {
+			this.#healCodexUsageBlockScope(
+				provider,
+				providerKey,
+				credentialId,
+				credentialIndex,
+				blockScope,
+				report,
+				strategy,
+			);
+		}
+	}
+
+	/**
+	 * Heal one backoff scope against the limits that scope actually covers.
+	 *
+	 * Judging a scope by the whole report is wrong once scopes are per-meter: an
+	 * exhausted Spark meter would keep a recovered chat block alive, and healing
+	 * would then delete every scope including a block that is still valid. So
+	 * each scope is evaluated against its own limits and cleared on its own.
+	 */
+	#healCodexUsageBlockScope(
+		provider: Provider,
+		providerKey: string,
+		credentialId: number,
+		credentialIndex: number,
+		blockScope: string | undefined,
+		report: UsageReport,
+		strategy: CredentialRankingStrategy | undefined,
+	): void {
+		const scopedReport = this.#scopeUsageReportToBlockScope(report, blockScope, strategy);
+		if (!this.#isHealthyCodexUsageReport(scopedReport)) return;
 		const blockedUntilMs = this.#getCredentialBlockedUntil(provider, providerKey, credentialIndex, blockScope);
 		if (blockedUntilMs === undefined) return;
 		// `/usage` can lag the request path that just returned 429. Fresh local or
@@ -5264,10 +5776,11 @@ export class AuthStorage {
 		if (Math.max(globalProbeAfterMs, scopedProbeAfterMs, storeGlobalProbeAfterMs, storeScopedProbeAfterMs) > nowMs) {
 			return;
 		}
-		this.#clearCredentialBlocks(provider, credentialId);
+		this.#clearCredentialBlockScope(provider, credentialId, credentialIndex, providerKey, blockScope);
 		logger.info("Cleared stale Codex usage-limit block after healthy live usage report", {
 			credentialId,
 			provider,
+			blockScope,
 			clearedBlockedUntilMs: blockedUntilMs,
 		});
 	}
@@ -5308,7 +5821,6 @@ export class AuthStorage {
 	#reconcileCodexUsageBlocksFromReports(reports: UsageReport[]): void {
 		const reconciled = new Set<number>();
 		for (const report of reports) {
-			if (!this.#isHealthyCodexUsageReport(report)) continue;
 			for (const credentialId of this.#findStoredCredentialIdsForUsageReport(report)) {
 				if (reconciled.has(credentialId)) continue;
 				reconciled.add(credentialId);
@@ -5554,6 +6066,28 @@ export class AuthStorage {
 	}
 
 	/**
+	 * Disabled credential tombstones for display surfaces (`omp usage`,
+	 * broker `GET /v1/credentials/disabled`). Empty when the backing store
+	 * keeps no tombstones or the remote broker predates the endpoint.
+	 */
+	async listDisabledCredentials(provider?: string, signal?: AbortSignal): Promise<DisabledCredentialSummary[]> {
+		if (!this.#store.listDisabledCredentials) return [];
+		return this.#store.listDisabledCredentials(provider, signal);
+	}
+
+	/**
+	 * Force the backing store to revalidate its credential snapshot, then
+	 * reload. Remote broker stores re-fetch the snapshot; local stores are
+	 * always current, so only the reload runs. Callers that pair live
+	 * per-credential data with stored identities (`omp usage`) use this so a
+	 * disk-cached snapshot cannot misattribute fresh reports.
+	 */
+	async revalidateCredentials(): Promise<void> {
+		if (this.#store.refreshSnapshot) await this.#store.refreshSnapshot();
+		await this.reload();
+	}
+
+	/**
 	 * Refresh the OAuth credential with the given id through a per-credential
 	 * single-flight. Concurrent callers for the same row await the same upstream
 	 * refresh attempt, which is required for providers that rotate refresh tokens
@@ -5643,6 +6177,7 @@ export class AuthStorage {
 				apiEndpoint: refreshed.apiEndpoint ?? attempted.apiEndpoint,
 				orgId: refreshed.orgId ?? attempted.orgId,
 				orgName: refreshed.orgName ?? attempted.orgName,
+				authorizedAt: refreshed.authorizedAt ?? attempted.authorizedAt,
 			};
 			// Persist by id: the array may have been reordered/shrunk while the
 			// refresh was in flight, so the pre-await positional index is unsafe. A
@@ -5730,6 +6265,14 @@ export class AuthStorage {
 	/**
 	 * Broker-server seam: clear all persisted blocks for one credential and notify snapshot waiters.
 	 */
+	deleteCredentialBlock(credentialId: number, providerKey: string, blockScope: string): void {
+		const deleteCredentialBlock = this.#store.deleteCredentialBlock?.bind(this.#store);
+		if (!deleteCredentialBlock) return;
+		deleteCredentialBlock(credentialId, providerKey, blockScope);
+		this.#invalidateUsageReportCacheForProviderKey(providerKey);
+		this.#bumpGeneration("credential-block");
+	}
+
 	deleteCredentialBlocks(credentialId: number): void {
 		const deleteCredentialBlocks = this.#store.deleteCredentialBlocks?.bind(this.#store);
 		if (!deleteCredentialBlocks) return;
@@ -5812,6 +6355,9 @@ type AuthRow = {
 	disabled_cause: string | null;
 	identity_key: string | null;
 };
+
+/** {@link AuthRow} plus `updated_at` — disabled-tombstone queries surface when the row was torn down. */
+type DisabledAuthRow = AuthRow & { updated_at: number | null };
 
 type CredentialBlockRow = {
 	credential_id: number;
@@ -5956,7 +6502,12 @@ function matchesReplacementCredential(
 ): boolean {
 	if (!existing || existing.type !== incoming.type) return false;
 	if (incoming.type === "api_key") {
-		return existing.type === "api_key" && existing.key === incoming.key;
+		if (existing.type !== "api_key") return false;
+		if (existing.key === incoming.key) return true;
+		if (provider !== "alibaba-token-plan") return false;
+		const existingToken = parseAlibabaTokenPlanCredential(existing.key)?.token;
+		const incomingToken = parseAlibabaTokenPlanCredential(incoming.key)?.token;
+		return existingToken !== undefined && existingToken === incomingToken;
 	}
 	const incomingIdentifiers = extractOAuthCredentialIdentifiers(incoming);
 	const incomingIdentityKey = resolveProviderCredentialIdentityKey(provider, incomingIdentifiers);
@@ -6082,6 +6633,7 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 	#db: Database;
 	#listActiveStmt: Statement;
 	#listActiveByProviderStmt: Statement;
+	#listDisabledStmt: Statement;
 	#listDisabledByProviderStmt: Statement;
 	#insertStmt: Statement;
 	#updateStmt: Statement;
@@ -6101,6 +6653,7 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 	#listCredentialBlocksByCredentialStmt: Statement;
 	#upsertCredentialBlockStmt: Statement;
 	#deleteCredentialBlocksStmt: Statement;
+	#deleteCredentialBlockStmt: Statement;
 	#deleteExpiredCredentialBlocksStmt: Statement;
 	#acquireCredentialRefreshLeaseStmt: Statement;
 	#getCredentialRefreshLeaseStmt: Statement;
@@ -6125,8 +6678,11 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		this.#listActiveByProviderStmt = this.#db.prepare(
 			"SELECT id, provider, credential_type, data, disabled_cause, identity_key FROM auth_credentials WHERE provider = ? AND disabled_cause IS NULL ORDER BY id ASC",
 		);
+		this.#listDisabledStmt = this.#db.prepare(
+			"SELECT id, provider, credential_type, data, disabled_cause, identity_key, updated_at FROM auth_credentials WHERE disabled_cause IS NOT NULL ORDER BY id ASC",
+		);
 		this.#listDisabledByProviderStmt = this.#db.prepare(
-			"SELECT id, provider, credential_type, data, disabled_cause, identity_key FROM auth_credentials WHERE provider = ? AND disabled_cause IS NOT NULL ORDER BY id ASC",
+			"SELECT id, provider, credential_type, data, disabled_cause, identity_key, updated_at FROM auth_credentials WHERE provider = ? AND disabled_cause IS NOT NULL ORDER BY id ASC",
 		);
 		this.#insertStmt = this.#db.prepare(
 			`INSERT INTO auth_credentials (provider, credential_type, data, identity_key, created_at, updated_at) VALUES (?, ?, ?, ?, ${SQLITE_NOW_EPOCH}, ${SQLITE_NOW_EPOCH}) RETURNING id`,
@@ -6188,6 +6744,9 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 				updated_at = excluded.updated_at`,
 		);
 		this.#deleteCredentialBlocksStmt = this.#db.prepare("DELETE FROM auth_credential_blocks WHERE credential_id = ?");
+		this.#deleteCredentialBlockStmt = this.#db.prepare(
+			"DELETE FROM auth_credential_blocks WHERE credential_id = ? AND provider_key = ? AND block_scope = ?",
+		);
 		this.#deleteExpiredCredentialBlocksStmt = this.#db.prepare(
 			"DELETE FROM auth_credential_blocks WHERE blocked_until_ms <= ?",
 		);
@@ -6329,6 +6888,27 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 			);
 			CREATE INDEX IF NOT EXISTS idx_usage_cost_history_lookup ON usage_cost_history(provider, account_key, recorded_at);
 			CREATE INDEX IF NOT EXISTS idx_usage_history_recorded ON usage_history(recorded_at);
+			CREATE TABLE IF NOT EXISTS clients (
+				install_id TEXT PRIMARY KEY,
+				hostname TEXT,
+				first_seen INTEGER NOT NULL,
+				last_seen INTEGER NOT NULL
+			);
+			CREATE TABLE IF NOT EXISTS client_usage (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				recorded_at INTEGER NOT NULL,
+				install_id TEXT NOT NULL,
+				provider TEXT NOT NULL,
+				model TEXT NOT NULL,
+				requests INTEGER NOT NULL,
+				input_tokens INTEGER NOT NULL,
+				output_tokens INTEGER NOT NULL,
+				cache_read_tokens INTEGER NOT NULL,
+				cache_write_tokens INTEGER NOT NULL,
+				cost_usd REAL NOT NULL DEFAULT 0
+			);
+			CREATE INDEX IF NOT EXISTS idx_client_usage_series ON client_usage(install_id, provider, model, recorded_at);
+			CREATE INDEX IF NOT EXISTS idx_client_usage_recorded ON client_usage(recorded_at);
 		`);
 
 		if (!this.#authCredentialsTableExists()) {
@@ -6610,6 +7190,34 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 			const credential = deserializeCredential(row);
 			if (!credential) continue;
 			results.push(toStoredAuthCredential(row, credential));
+		}
+		return results;
+	}
+
+	async listDisabledCredentials(provider?: string): Promise<DisabledCredentialSummary[]> {
+		const rows =
+			(provider
+				? (this.#listDisabledByProviderStmt.all(provider) as DisabledAuthRow[])
+				: (this.#listDisabledStmt.all() as DisabledAuthRow[])) ?? [];
+		const results: DisabledCredentialSummary[] = [];
+		for (const row of rows) {
+			const credential = deserializeCredential(row);
+			const summary: DisabledCredentialSummary = {
+				id: row.id,
+				provider: row.provider,
+				type: row.credential_type === "api_key" ? "api_key" : "oauth",
+				cause: row.disabled_cause ?? "disabled",
+			};
+			if (credential?.type === "oauth") {
+				if (credential.email) summary.email = credential.email;
+				if (credential.accountId) summary.accountId = credential.accountId;
+				if (credential.orgId) summary.orgId = credential.orgId;
+				if (credential.orgName) summary.orgName = credential.orgName;
+			}
+			if (typeof row.updated_at === "number" && Number.isFinite(row.updated_at)) {
+				summary.disabledAtMs = row.updated_at * 1000;
+			}
+			results.push(summary);
 		}
 		return results;
 	}
@@ -6931,6 +7539,11 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		);
 	}
 
+	deleteCredentialBlock(credentialId: number, providerKey: string, blockScope: string): void {
+		this.#deleteCredentialBlockStmt.run(credentialId, providerKey, blockScope);
+		this.#credentialBlockReconcileAfter.delete(`${credentialId}\0${providerKey}\0${blockScope}`);
+	}
+
 	deleteCredentialBlocks(credentialId: number): void {
 		this.#deleteCredentialBlocksStmt.run(credentialId);
 		for (const key of this.#credentialBlockReconcileAfter.keys()) {
@@ -7107,6 +7720,113 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		}
 	}
 
+	recordClientUsage(report: ClientUsageReport): void {
+		const now = Date.now();
+		this.#db
+			.query(
+				`INSERT INTO clients (install_id, hostname, first_seen, last_seen) VALUES (?, ?, ?, ?)
+				 ON CONFLICT(install_id) DO UPDATE SET hostname = COALESCE(excluded.hostname, hostname), last_seen = excluded.last_seen`,
+			)
+			.run(report.installId, report.hostname ?? null, now, now);
+		const findBucket = this.#db.query(
+			`SELECT id FROM client_usage
+			 WHERE install_id = ? AND provider = ? AND model = ? AND recorded_at >= ?
+			 ORDER BY recorded_at DESC LIMIT 1`,
+		);
+		const merge = this.#db.query(
+			`UPDATE client_usage SET recorded_at = ?, requests = requests + ?, input_tokens = input_tokens + ?,
+				output_tokens = output_tokens + ?, cache_read_tokens = cache_read_tokens + ?,
+				cache_write_tokens = cache_write_tokens + ?, cost_usd = cost_usd + ? WHERE id = ?`,
+		);
+		const insert = this.#db.query(
+			`INSERT INTO client_usage (recorded_at, install_id, provider, model, requests, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		for (const entry of report.entries) {
+			// Merge into the newest row of the same (install, provider, model)
+			// bucket so 10s client flushes don't accrete one row apiece forever.
+			const bucketFloor = entry.at - CLIENT_USAGE_BUCKET_MS;
+			const existing = findBucket.get(report.installId, entry.provider, entry.model, bucketFloor) as {
+				id: number;
+			} | null;
+			if (existing) {
+				merge.run(
+					entry.at,
+					entry.requests,
+					entry.inputTokens,
+					entry.outputTokens,
+					entry.cacheReadTokens,
+					entry.cacheWriteTokens,
+					entry.costUsd,
+					existing.id,
+				);
+				continue;
+			}
+			insert.run(
+				entry.at,
+				report.installId,
+				entry.provider,
+				entry.model,
+				entry.requests,
+				entry.inputTokens,
+				entry.outputTokens,
+				entry.cacheReadTokens,
+				entry.cacheWriteTokens,
+				entry.costUsd,
+			);
+		}
+	}
+
+	getClientUsageSummary(sinceMs: number): ClientUsageSummary {
+		const clients = this.#db
+			.query("SELECT install_id, hostname, first_seen, last_seen FROM clients ORDER BY last_seen DESC")
+			.all() as Array<{ install_id: string; hostname: string | null; first_seen: number; last_seen: number }>;
+		const aggregates = this.#db
+			.query(
+				`SELECT install_id, provider, SUM(requests) requests, SUM(input_tokens) input_tokens,
+					SUM(output_tokens) output_tokens, SUM(cache_read_tokens) cache_read_tokens,
+					SUM(cache_write_tokens) cache_write_tokens, SUM(cost_usd) cost_usd
+				 FROM client_usage WHERE recorded_at >= ? GROUP BY install_id, provider
+				 ORDER BY install_id, SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) DESC`,
+			)
+			.all(sinceMs) as Array<{
+			install_id: string;
+			provider: string;
+			requests: number;
+			input_tokens: number;
+			output_tokens: number;
+			cache_read_tokens: number;
+			cache_write_tokens: number;
+			cost_usd: number;
+		}>;
+		const providersByInstall = new Map<string, ClientProviderUsage[]>();
+		for (const row of aggregates) {
+			let list = providersByInstall.get(row.install_id);
+			if (!list) {
+				list = [];
+				providersByInstall.set(row.install_id, list);
+			}
+			list.push({
+				provider: row.provider,
+				requests: row.requests,
+				inputTokens: row.input_tokens,
+				outputTokens: row.output_tokens,
+				cacheReadTokens: row.cache_read_tokens,
+				cacheWriteTokens: row.cache_write_tokens,
+				costUsd: row.cost_usd,
+			});
+		}
+		return {
+			clients: clients.map(client => ({
+				installId: client.install_id,
+				hostname: client.hostname ?? undefined,
+				firstSeen: client.first_seen,
+				lastSeen: client.last_seen,
+				providers: providersByInstall.get(client.install_id) ?? [],
+			})),
+		};
+	}
+
 	// ─── Convenience methods for CLI ────────────────────────────────────────
 
 	/**
@@ -7179,6 +7899,7 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		this.#closed = true;
 		this.#listActiveStmt.finalize();
 		this.#listActiveByProviderStmt.finalize();
+		this.#listDisabledStmt.finalize();
 		this.#listDisabledByProviderStmt.finalize();
 		this.#insertStmt.finalize();
 		this.#updateStmt.finalize();
@@ -7194,6 +7915,7 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		this.#listCredentialBlocksByCredentialStmt.finalize();
 		this.#upsertCredentialBlockStmt.finalize();
 		this.#deleteCredentialBlocksStmt.finalize();
+		this.#deleteCredentialBlockStmt.finalize();
 		this.#deleteExpiredCredentialBlocksStmt.finalize();
 		this.#insertUsageHistoryStmt.finalize();
 		this.#lastUsageHistoryStmt.finalize();
@@ -7201,6 +7923,14 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		this.#updateUsageHistoryStmt.finalize();
 		this.#insertUsageCostStmt.finalize();
 		this.#listUsageCostsStmt.finalize();
+		this.#updateIfMatchesStmt.finalize();
+		this.#updateIfMatchesWithLeaseStmt.finalize();
+		this.#deleteIfMatchesWithLeaseStmt.finalize();
+		this.#deleteCachePrefixStmt.finalize();
+		this.#acquireCredentialRefreshLeaseStmt.finalize();
+		this.#getCredentialRefreshLeaseStmt.finalize();
+		this.#renewCredentialRefreshLeaseStmt.finalize();
+		this.#releaseCredentialRefreshLeaseStmt.finalize();
 		this.#db.close();
 	}
 }

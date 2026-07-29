@@ -1,4 +1,4 @@
-import { rangeBucketMeta } from "../components/range-meta";
+import { rangeMeta } from "../components/range-meta";
 import type {
 	AgentType,
 	AgentTypeStats,
@@ -142,7 +142,7 @@ export function buildModelPerformanceLookup(
 ): Map<string, ModelPerformanceSeries> {
 	if (points.length === 0) return new Map();
 
-	const meta = rangeBucketMeta(range);
+	const meta = rangeMeta(range);
 	const bucketMs = meta.bucketMs;
 	const bucketCount = meta.bucketCount;
 
