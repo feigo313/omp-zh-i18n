@@ -19,6 +19,57 @@ export interface DashboardRoute {
 	icon: React.ComponentType<{ size?: number; className?: string }>;
 }
 
+export function getRoutes(t: (key: string) => string): DashboardRoute[] {
+	return [
+		{
+			id: "overview",
+			label: t("nav.overview"),
+			icon: LayoutDashboard,
+		},
+		{
+			id: "requests",
+			label: t("nav.requests"),
+			icon: Activity,
+		},
+		{
+			id: "errors",
+			label: t("nav.errors"),
+			icon: AlertCircle,
+		},
+		{
+			id: "models",
+			label: t("nav.models"),
+			icon: Cpu,
+		},
+		{
+			id: "tools",
+			label: t("nav.tools"),
+			icon: Wrench,
+		},
+		{
+			id: "costs",
+			label: t("nav.costs"),
+			icon: Coins,
+		},
+		{
+			id: "behavior",
+			shortLabel: t("nav.behavior"),
+			label: t("nav.behavior"),
+			icon: Smile,
+		},
+		{
+			id: "projects",
+			label: t("nav.projects"),
+			icon: Folder,
+		},
+		{
+			id: "gain",
+			label: t("nav.gain"),
+			icon: TrendingUp,
+		},
+	];
+}
+
 export const routes: DashboardRoute[] = [
 	{
 		id: "overview",

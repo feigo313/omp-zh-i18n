@@ -1,4 +1,4 @@
-import { rangeBucketMeta } from "../components/range-meta";
+import { rangeMeta as rangeBucketMeta } from "../components/range-meta";
 import type {
 	AgentType,
 	AgentTypeStats,
