@@ -683,7 +683,7 @@ function buildHelpMessage(ctx) {
  */
 function initLoaderContext() {
 	const platformTag = `${process.platform}-${process.arch}`;
-	const packageVersion = packageJson.version;
+	const packageVersion = embeddedAddon?.version ?? packageJson.version;
 	const nativeDir = path.join(import.meta.dir, "..", "native");
 	const execDir = path.dirname(process.execPath);
 	const nativesDir = getNativesDir();

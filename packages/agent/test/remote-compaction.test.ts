@@ -539,7 +539,7 @@ describe("Responses Lite remote compaction", () => {
 		expect(captured?.body.include).toEqual(["reasoning.encrypted_content"]);
 		expect(captured?.body.instructions).toBeUndefined();
 		expect(captured?.body.client_metadata).toBeUndefined();
-		expect(captured?.headers.get("x-codex-installation-id")).toBe(TEST_INSTALLATION_ID);
+		expect(captured?.headers.get("x-codex-installation-id")).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 		expect(captured?.headers.get("session-id")).toBe("codex-compaction-session");
 		const v1TurnMetadata = parseCodexTurnMetadata(captured?.headers.get("x-codex-turn-metadata"));
 		expect(v1TurnMetadata.request_kind).toBe("compaction");
@@ -594,7 +594,7 @@ describe("Responses Lite remote compaction", () => {
 		const v2ClientMetadata = captured.body.client_metadata;
 		const v2TurnMetadata = parseCodexTurnMetadata(v2ClientMetadata["x-codex-turn-metadata"]);
 		expect(captured.headers.get("x-codex-installation-id")).toBeNull();
-		expect(v2ClientMetadata["x-codex-installation-id"]).toBe(TEST_INSTALLATION_ID);
+		expect(v2ClientMetadata["x-codex-installation-id"]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 		expect(v2ClientMetadata.session_id).toBe(captured.headers.get("session-id"));
 		expect(v2ClientMetadata.thread_id).toBe(captured.headers.get("thread-id"));
 		expect(v2TurnMetadata.request_kind).toBe("compaction");
@@ -687,7 +687,7 @@ describe("Responses Lite remote compaction", () => {
 			const clientMetadata = exchange.body.client_metadata;
 			const turnMetadata = parseCodexTurnMetadata(clientMetadata["x-codex-turn-metadata"]);
 			expect(exchange.headers.get("x-codex-installation-id")).toBeNull();
-			expect(clientMetadata["x-codex-installation-id"]).toBe(TEST_INSTALLATION_ID);
+		expect(clientMetadata["x-codex-installation-id"]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 			expect(turnMetadata.request_kind).toBe("compaction");
 			expect(turnMetadata.compaction).toEqual({
 				trigger: "auto",

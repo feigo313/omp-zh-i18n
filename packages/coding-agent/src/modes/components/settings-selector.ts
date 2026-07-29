@@ -151,7 +151,7 @@ class SelectSubmenu extends Container {
 		this.#selectList = new SelectList(options, Math.min(options.length, 10), getSelectListTheme());
 
 		// Pre-select current value
-		const currentIndex = options.findIndex(o => o.value === currentValue);
+		const currentIndex = options.findIndex(o => o.value === currentValue || o.label === currentValue);
 		if (currentIndex !== -1) {
 			this.#selectList.setSelectedIndex(currentIndex);
 		}
