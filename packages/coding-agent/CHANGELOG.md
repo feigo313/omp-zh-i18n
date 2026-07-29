@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added zh/en i18n keys for settings surfaced by upstream v17.1.0 → v17.1.8: `computer.*` (backend/display/enabled/maxHeight/maxWidth + options), `inspect_image.mode` (auto/off/on), `inspect_image.timeoutMs` (1–5 min options), `tabs.tools.groups.Computer`, `task.enableEffort`, `task.maxEffort`, and `live.voice`.
 - Added / completed Chinese i18n coverage for settings UI paths that previously fell back to English schema labels (e.g. Generate Image, Launch, Ask, xd:// Tools, Rewrite Scrollback, Collapse Compacted History, IME-Safe Prompt Layout, Refresh Title on Replan, Generic Task Prewalk, service tiers, idle recap, prewalk), with matching `en-settings-*.json` SoT keys.
 - Added Chinese welcome-shell strings (`interceptWelcomeString`) and settings chrome (`ui.settings.title`, footer hints, plugins tab).
 - Added `scripts/realign-zh-i18n.ts` / gate helpers for zh key realign and schema-path coverage checks (local i18n maintenance).
