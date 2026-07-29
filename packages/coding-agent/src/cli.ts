@@ -335,7 +335,7 @@ export async function runCli(argv: string[]): Promise<void> {
 				throw new Error("--alias requires --profile <name> or OMP_PROFILE");
 			}
 			const result = await installProfileAlias({
-				profile: extracted.profile,
+				profile: extracted.profile!,
 				aliasName: extracted.aliasName,
 				command: resolveProfileAliasCommandFromProcess(),
 			});

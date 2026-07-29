@@ -15,9 +15,9 @@ i18n.init();
 if (process.env.NODE_ENV === "development") {
 	const lang = i18n.getLanguage();
 	const meta = i18n.getMeta();
-	logger.debug("[i18n] Initialized with language: %s", lang);
+	logger.debug("[i18n] Initialized with language:", { lang });
 	if (meta) {
-		logger.debug("[i18n] Translation version: %s", meta.version || "unknown");
-		logger.debug("[i18n] Translation completeness: %s%%", meta.completeness || 0);
+		logger.debug("[i18n] Translation version:", { version: meta.version || "unknown" });
+		logger.debug("[i18n] Translation completeness:", { completeness: meta.completeness || 0 });
 	}
 }
