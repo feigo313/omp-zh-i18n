@@ -194,5 +194,7 @@
   "tabs.interaction.groups.Power (macOS)": "电源 (macOS)",
   "tabs.interaction.groups.Speech": "语音",
   "tabs.interaction.groups.Startup & Updates": "启动与更新",
-  "tabs.interaction.label": "交互"
+  "tabs.interaction.label": "交互",
+  "settings.error.notify.label": "错误通知",
+  "settings.error.notify.description": "当 agent 因错误停止时通知"
 }

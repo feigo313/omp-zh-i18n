@@ -207,5 +207,6 @@
   "themes.porcelain.label": "瓷器白",
   "themes.quartz.label": "石英",
   "themes.sandstone.label": "砂岩",
-  "themes.titanium.label": "钛色"
+  "themes.titanium.label": "钛色",
+  "settings.tui.titleState.label": "终端标题运行状态"
 }

@@ -1,0 +1,39 @@
+{
+  "remotes": {
+    "upstream": "https://github.com/can1357/oh-my-pi.git",
+    "origin": "https://github.com/feigo313/omp-zh-i18n.git"
+  },
+  "github": {
+    "repo": "feigo313/omp-zh-i18n",
+    "release": {
+      "draft": false,
+      "prerelease": false
+    }
+  },
+  "localizedTagSuffix": "-zh",
+  "branchPattern": "i18n/{version}-zh-adaptation",
+  "cadence": {
+    "xyReleaseDue": "Only trigger a new Chinese adaptation when the upstream official version changes major or minor.",
+    "patchOnlyPolicy": "Patch-only (Z) changes do not create a localized release. Patches are folded into the next X.Y alignment."
+  },
+  "overlay": {
+    "roots": [
+      "packages/coding-agent/src/i18n",
+      "packages/coding-agent/src/config/settings-schema.ts",
+      "packages/coding-agent/src/cli.ts",
+      "packages/coding-agent/src/modes/components/plugin-settings.ts",
+      "packages/coding-agent/src/modes/components/settings-defs.ts",
+      "packages/coding-agent/src/modes/components/settings-selector.ts",
+      "packages/coding-agent/src/modes/components/welcome.ts",
+      "packages/coding-agent/src/modes/controllers/selector-controller.ts",
+      "packages/coding-agent/src/slash-commands/builtin-registry.ts",
+      "packages/coding-agent/scripts/check-schema-gate.ts",
+      "packages/coding-agent/scripts/extract-settings-translations.ts"
+    ],
+    "localAuxiliary": [
+      ".agents",
+      ".reasonix",
+      "docs/local/_audit"
+    ]
+  }
+}

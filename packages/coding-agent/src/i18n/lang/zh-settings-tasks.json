@@ -113,5 +113,6 @@
   "tabs.tasks.groups.Isolation": "隔离",
   "tabs.tasks.groups.Modes": "模式",
   "tabs.tasks.groups.Subagents": "子代理",
-  "tabs.tasks.label": "任务"
+  "tabs.tasks.label": "任务",
+  "settings.task.isolation.apply.label": "应用隔离变更"
 }

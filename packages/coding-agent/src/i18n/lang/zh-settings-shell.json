@@ -39,5 +39,8 @@
   "settings.shellMinimizer.sourceOutlineLevel.options.default.label": "默认",
   "tabs.shell.groups.Bash": "Bash",
   "tabs.shell.groups.Eval & Runtimes": "执行与运行时",
-  "tabs.shell.label": "Shell"
+  "tabs.shell.label": "Shell",
+  "settings.bash.patterns.label": "Bash 审批模式",
+  "settings.bash.direnv.label": "direnv 自动加载",
+  "settings.bash.direnvLoadTimeoutMs.label": "direnv 加载超时（毫秒）"
 }

@@ -276,5 +276,9 @@
   "tabs.model.groups.Thinking": "思考",
   "tabs.model.groups.Vision": "视觉",
   "tabs.model.label": "模型",
-  "tabs.model.groups.Prewalk": "预走查"
+  "tabs.model.groups.Prewalk": "预走查",
+  "settings.retry.usageAwareFallback.label": "用量感知回退",
+  "settings.retry.usageReservePct.label": "预留余量",
+  "settings.retry.usageReservePolicy.label": "预留策略",
+  "settings.retry.usageReservePolicy.description": "当同提供者的所有 coding-plan 账号均进入预留余量时的处理方式"
 }

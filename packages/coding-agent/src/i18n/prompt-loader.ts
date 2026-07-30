@@ -7,15 +7,14 @@
  * 找不到翻译则使用原始英文版本
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import * as fs from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { getLanguage } from "./index";
 
 /** 包内 bundled prompt 翻译目录 */
-const BUNDLED_PROMPTS_DIR = join(fileURLToPath(import.meta.url), "..", "lang", "prompts");
+const BUNDLED_PROMPTS_DIR = join(import.meta.dir, "..", "lang", "prompts");
 
 /**
  * Prompt 翻译缓存
@@ -45,28 +44,33 @@ export function loadTranslatedPrompt(promptPath: string, originalContent: string
 	}
 
 	// 检查缓存
+	const cached = promptCache.get(promptPath);
+	if (cached !== undefined) {
+		return cached;
+	}
+
 	// 构造翻译文件路径（用户覆盖优先，bundled 兜底）
 	const userPath = join(homedir(), ".omp", "lang", "prompts", lang, `${promptPath}.md`);
 	const bundledPath = join(BUNDLED_PROMPTS_DIR, lang, `${promptPath}.md`);
 
-	// 用户覆盖优先
-	const translatedPath = existsSync(userPath) ? userPath : bundledPath;
-
-	// 检查翻译文件是否存在
-	if (existsSync(translatedPath)) {
-		try {
-			const translated = readFileSync(translatedPath, "utf-8");
-			promptCache.set(promptPath, translated);
-			return translated;
-		} catch (error) {
-			// 加载失败，回退到原文
-			if (process.env.NODE_ENV === "development") {
-				console.warn(`[i18n] Failed to load translated prompt: ${translatedPath}`, error);
-			}
-		}
+	// 用户覆盖优先 — 用 try/catch 一次读取，避免 TOCTOU
+	const translatedPath = userPath;
+	try {
+		const translated = fs.readFileSync(translatedPath, "utf-8");
+		promptCache.set(promptPath, translated);
+		return translated;
+	} catch {
+		// userPath 不存在或读取失败，尝试 bundled
 	}
 
-	// 找不到翻译，返回原文
+	try {
+		const translated = fs.readFileSync(bundledPath, "utf-8");
+		promptCache.set(promptPath, translated);
+		return translated;
+	} catch {
+		// bundled 也不存在，回退到原文
+	}
+
 	promptCache.set(promptPath, originalContent);
 	return originalContent;
 }

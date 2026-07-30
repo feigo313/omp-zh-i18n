@@ -280,5 +280,7 @@
   "tabs.providers.groups.Protocol": "协议",
   "tabs.providers.groups.Services": "服务",
   "tabs.providers.groups.Tiny Model": "Tiny 模式",
-  "tabs.providers.label": "提供商"
+  "tabs.providers.label": "提供商",
+  "settings.providers.webSearchOrder.label": "网络搜索提供者顺序",
+  "settings.providers.imageOrder.label": "图片提供者顺序"
 }
