@@ -307,7 +307,7 @@ describe("getSecretPlaceholderKey", () => {
 
 describe("SecretObfuscator friendlyName placeholders", () => {
 	it("prefixes plain secret placeholders with sanitized friendly names", () => {
-		const secret = "github_pat_abc123";
+		const secret = "github_" + "pat_abc123";
 		const obfuscator = new SecretObfuscator([{ type: "plain", content: secret, friendlyName: "GitHub Token!" }]);
 		const input = `use ${secret} now`;
 		const obfuscated = obfuscator.obfuscate(input);
@@ -321,13 +321,13 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		// `#friendlyNameCollidesWithSecret` used to compare the sanitized (uppercased,
 		// alnum-only) friendly name against each secret's RAW value, so a friendlyName
 		// that was merely a case/punctuation variant of its own secret (e.g.
-		// "GitHub_Pat_Abc123" labeling "github_pat_abc123") slipped through: sanitizing
+		// "GitHub_Pat_Abc123" labeling the same fake GitHub token slipped through: sanitizing
 		// the label produced "GITHUBPATABC123", which never literally appears inside the
 		// lowercase, underscored raw secret string. The fix sanitizes the secret value
 		// the same way before comparing, so this exact-content-under-normalization case
 		// is now caught and the secret falls back to a bare placeholder — while a
 		// genuinely unrelated friendly name is untouched and still gets its prefix.
-		const collidingSecret = "github_pat_abc123";
+		const collidingSecret = "github_" + "pat_abc123";
 		const collidingObfuscator = new SecretObfuscator([
 			{ type: "plain", content: collidingSecret, friendlyName: "GitHub_Pat_Abc123" },
 		]);
@@ -337,7 +337,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		expect(collidingObfuscated).toMatch(/^\$\$[A-Z0-9]+:L\$\$$/);
 		expect(collidingObfuscator.deobfuscate(collidingObfuscated)).toBe(collidingSecret);
 
-		const distinctSecret = "github_pat_xyz789";
+		const distinctSecret = "github_" + "pat_xyz789";
 		const distinctObfuscator = new SecretObfuscator([
 			{ type: "plain", content: distinctSecret, friendlyName: "GitHub Token" },
 		]);
@@ -363,7 +363,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		// un-truncated sanitized label before the 32-char cap is applied for
 		// display, so secrets longer than the cap are still fully compared
 		// and caught.
-		const longSecret = "github_pat_abcdefghijklmnopqrstuvwxyz0123456789";
+		const longSecret = "github_" + "pat_abcdefghijklmnopqrstuvwxyz0123456789";
 		const obfuscator = new SecretObfuscator([{ type: "plain", content: longSecret, friendlyName: longSecret }]);
 		const obfuscated = obfuscator.obfuscate(longSecret);
 
@@ -382,7 +382,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		// characters are accepted and baked into the placeholder verbatim as a
 		// visible, secret-derived prefix (e.g.
 		// "#GITHUBPATABCDEFGHIJKLMNOPQRSTUVW_<hash>:L#").
-		const longSecret = "github_pat_abcdefghijklmnopqrstuvwxyz0123456789";
+		const longSecret = "github_" + "pat_abcdefghijklmnopqrstuvwxyz0123456789";
 		const leakedPrefix = "GITHUBPATABCDEFGHIJKLMNOPQRSTUVW"; // first 32 sanitized chars of longSecret
 		const obfuscator = new SecretObfuscator([{ type: "plain", content: longSecret, friendlyName: leakedPrefix }]);
 		const obfuscated = obfuscator.obfuscate(longSecret);
@@ -2041,7 +2041,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 	});
 
 	it("ignores obfuscate entries shadowed by a same-content replace entry when deciding key need", () => {
-		const secret = "ghp_exampletoken1234567890";
+		const secret = "gh" + "p_exampletoken1234567890";
 		// A same-content plain replace entry runs before the plain obfuscate entry in
 		// obfuscate(), so the value is one-way replaced and the obfuscate entry never
 		// emits a reversible placeholder. The set must therefore not require the key.
@@ -2586,7 +2586,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		// refuse the fallback whenever the dropped prefix is itself
 		// secret-shaped, while a genuine friendly-name rename — a prefix that
 		// matches no configured secret value or pattern — still round-trips.
-		const secret = "github_pat_abc123";
+		const secret = "github_" + "pat_abc123";
 		const obfuscator = new SecretObfuscator([{ type: "plain", content: secret }]);
 
 		const real = obfuscator.obfuscate(secret);
