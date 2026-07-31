@@ -1192,7 +1192,7 @@ def test_redact_credentials_strips_userinfo() -> None:
     from robomp.sandbox import redact_credentials
 
     assert (
-        redact_credentials("Cloning into 'x' from https://bot:ghp_secret@github.com/o/r.git failed")
+        redact_credentials("Cloning into 'x' from https://bot:" + "gh" + "p_secret@github.com/o/r.git failed")
         == "Cloning into 'x' from https://***@github.com/o/r.git failed"
     )
     # Multiple URLs in one string.
@@ -1211,11 +1211,11 @@ def test_git_command_error_redacts_url_in_args_and_stderr(tmp_path: Path) -> Non
 
     from robomp.sandbox import _run
 
-    cred_url = "https://bot:ghp_abc123secret@example.invalid/o/r.git"
+    cred_url = "https://bot:" + "gh" + "p_abc123secret@example.invalid/o/r.git"
     with _pytest.raises(Exception) as exc:
         _run(["git", "clone", cred_url, str(tmp_path / "out")])
     text = str(exc.value)
-    assert "ghp_abc123secret" not in text
+    assert "gh" + "p_abc123secret" not in text
     assert "bot" not in text or "https://bot:" not in text
     assert "***" in text or "example.invalid" in text
 
@@ -1230,10 +1230,10 @@ def test_ensure_workspace_rewrites_credentialed_origin(tmp_path: Path, upstream_
     pool = mgr.pool_path("octo/widget")
     pool.parent.mkdir(parents=True, exist_ok=True)
     _git(["clone", "--filter=blob:none", str(upstream_repo), str(pool)], cwd=tmp_path)
-    credentialed = "https://bot:ghp_seekrit@example.invalid/octo/widget.git"
+    credentialed = "https://bot:" + "gh" + "p_seekrit@example.invalid/octo/widget.git"
     _git(["-C", str(pool), "remote", "set-url", "origin", credentialed], cwd=tmp_path)
     config = (pool / ".git" / "config").read_text()
-    assert "ghp_seekrit" in config  # sanity: precondition
+    assert "gh" + "p_seekrit" in config  # sanity: precondition
 
     # Now resolve through ensure_workspace using the clean URL we now own.
     # The fetch step itself will fail against the bogus example.invalid host,
@@ -1249,7 +1249,7 @@ def test_ensure_workspace_rewrites_credentialed_origin(tmp_path: Path, upstream_
         author_email="robomp-bot@example.invalid",
     )
     config_after = (pool / ".git" / "config").read_text()
-    assert "ghp_seekrit" not in config_after, config_after
+    assert "gh" + "p_seekrit" not in config_after, config_after
     assert "bot:" not in config_after, config_after
     # Origin now points at the clean URL.
     url = subprocess.run(

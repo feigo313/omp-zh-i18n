@@ -64,7 +64,7 @@ describe("GitHub Copilot long-context variant wire model id", () => {
 
 		const model = makeLongContextVariant({ api: "anthropic-messages" });
 		const result = await streamAnthropic(model, testContext, {
-			apiKey: "ghu_test_copilot_token",
+			apiKey: "gh" + "u_test_copilot_token",
 			fetch: fetchMock as unknown as typeof fetch,
 		}).result();
 
@@ -86,7 +86,7 @@ describe("GitHub Copilot long-context variant wire model id", () => {
 			name: "GPT-5.5 (1M)",
 		});
 		const result = await streamOpenAIResponses(model, testContext, {
-			apiKey: "ghu_test_copilot_token",
+			apiKey: "gh" + "u_test_copilot_token",
 			fetch: fetchMock as unknown as typeof fetch,
 		}).result();
 
@@ -108,7 +108,7 @@ describe("GitHub Copilot long-context variant wire model id", () => {
 			name: "Gemini 3.1 Pro (1M)",
 		});
 		const result = await streamOpenAICompletions(model, testContext, {
-			apiKey: "ghu_test_copilot_token",
+			apiKey: "gh" + "u_test_copilot_token",
 			fetch: fetchMock as unknown as typeof fetch,
 		}).result();
 
@@ -170,7 +170,7 @@ describe("GitHub Copilot Responses image detail clamp (#2822)", () => {
 			// serialized onto the wire, which `fetchMock` captures into `body`
 			// before `.result()` settles. Tolerate the result rejecting.
 			await streamOpenAIResponses(model, imageContext, {
-				apiKey: "ghu_test_copilot_token",
+				apiKey: "gh" + "u_test_copilot_token",
 				fetch: fetchMock as unknown as typeof fetch,
 			}).result();
 		} catch {

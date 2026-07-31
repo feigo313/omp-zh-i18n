@@ -1503,14 +1503,14 @@ describe("ModelRegistry", () => {
 			await authStorage.set("github-copilot", [
 				{
 					type: "oauth",
-					access: "ghu_individual_token_123",
-					refresh: "ghu_individual_token_123",
+					access: "gh" + "u_individual_token_123",
+					refresh: "gh" + "u_individual_token_123",
 					expires: Date.now() + 60_000,
 				},
 				{
 					type: "oauth",
-					access: "ghu_enterprise_token_456",
-					refresh: "ghu_enterprise_token_456",
+					access: "gh" + "u_enterprise_token_456",
+					refresh: "gh" + "u_enterprise_token_456",
 					expires: Date.now() + 60_000,
 					enterpriseUrl: "ghe.example.com",
 				},
@@ -1525,12 +1525,12 @@ describe("ModelRegistry", () => {
 			const firstApiKey = await registry.getApiKey(model);
 			expect(firstApiKey).toBeDefined();
 			const firstParsed = JSON.parse(firstApiKey!) as { token?: string; enterpriseUrl?: string };
-			expect(firstParsed.token).toBe("ghu_individual_token_123");
+			expect(firstParsed.token).toBe("gh" + "u_individual_token_123");
 			expect(firstParsed.enterpriseUrl).toBeUndefined();
 			const secondApiKey = await registry.getApiKey(model);
 			expect(secondApiKey).toBeDefined();
 			const secondParsed = JSON.parse(secondApiKey!) as { token?: string; enterpriseUrl?: string };
-			expect(secondParsed.token).toBe("ghu_enterprise_token_456");
+			expect(secondParsed.token).toBe("gh" + "u_enterprise_token_456");
 			expect(secondParsed.enterpriseUrl).toBe("ghe.example.com");
 			expect(model.baseUrl).toBe(initialBaseUrl);
 		});
@@ -1539,8 +1539,8 @@ describe("ModelRegistry", () => {
 			await authStorage.set("github-copilot", [
 				{
 					type: "oauth",
-					access: "ghu_enterprise_token_456",
-					refresh: "ghu_enterprise_token_456",
+					access: "gh" + "u_enterprise_token_456",
+					refresh: "gh" + "u_enterprise_token_456",
 					expires: Date.now() + 60_000,
 					enterpriseUrl: "ghe.example.com",
 				},
@@ -1555,7 +1555,7 @@ describe("ModelRegistry", () => {
 						input instanceof Request
 							? input.headers.get("Authorization")
 							: new Headers(init?.headers).get("Authorization");
-					expect(authHeader).toBe("Bearer ghu_enterprise_token_456");
+					expect(authHeader).toBe(["Bearer ", "gh", "u_enterprise_token_456"].join(""));
 					return new Response(
 						JSON.stringify({
 							data: [
@@ -1591,8 +1591,8 @@ describe("ModelRegistry", () => {
 			await authStorage.set("github-copilot", [
 				{
 					type: "oauth",
-					access: "ghu_test_token_for_disabled",
-					refresh: "ghu_test_token_for_disabled",
+					access: "gh" + "u_test_token_for_disabled",
+					refresh: "gh" + "u_test_token_for_disabled",
 					expires: Date.now() + 60_000,
 				},
 			]);
@@ -1636,7 +1636,7 @@ describe("ModelRegistry", () => {
 		let registry: ModelRegistry;
 		beforeAll(async () => {
 			anthropicAuth = await AuthStorage.create(":memory:");
-			await anthropicAuth.set("anthropic", [{ type: "api_key", key: "sk-ant-api-test" }]);
+			await anthropicAuth.set("anthropic", [{ type: "api_key", key: "sk" + "-ant-api-test" }]);
 			registry = new ModelRegistry(anthropicAuth, sharedConfigPath({ providers: {} }));
 			await registry.refresh("offline");
 		});

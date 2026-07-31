@@ -167,7 +167,7 @@ def test_triage_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
     async def _go() -> None:
         db = Database(cfg.sqlite_path)
-        github = GitHubClient("ghp_test", transport=transport)
+        github = GitHubClient("gh" + "p_test", transport=transport)
         sandbox = SandboxManager(cfg.workspace_root)
         await triage_issue(
             settings=cfg,

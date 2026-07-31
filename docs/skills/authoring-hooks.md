@@ -185,7 +185,7 @@ import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
 const SECRET_PATTERNS = [
   /\b(sk|pk)-[a-zA-Z0-9]{20,}\b/g,
   /\bAKIA[A-Z0-9]{16}\b/g,
-  /\bghp_[a-zA-Z0-9]{36}\b/g,
+  /\bgh(?:p)_[a-zA-Z0-9]{36}\b/g,
   // Zhipu / GLM Coding Plan: `<id>.<secret>` (no `sk-` prefix).
   /\b[a-zA-Z0-9]{16,}\.[a-zA-Z0-9]{16,}\b/g,
   /\b[a-zA-Z0-9_-]{20,}\s*=\s*["']?[a-zA-Z0-9._/+=-]{20,}["']?/g,

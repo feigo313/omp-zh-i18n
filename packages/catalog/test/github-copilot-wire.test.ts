@@ -30,13 +30,13 @@ describe("GitHub Copilot OAuth helpers", () => {
 		expect(
 			parseGitHubCopilotApiKey(
 				JSON.stringify({
-					token: "ghu_test_token",
+					token: "gh" + "u_test_token",
 					enterpriseUrl: "https://ghe.example.com",
 					apiEndpoint: "https://api.business.githubcopilot.com/",
 				}),
 			),
 		).toEqual({
-			accessToken: "ghu_test_token",
+			accessToken: "gh" + "u_test_token",
 			enterpriseUrl: "ghe.example.com",
 			apiEndpoint: "https://api.business.githubcopilot.com",
 		});

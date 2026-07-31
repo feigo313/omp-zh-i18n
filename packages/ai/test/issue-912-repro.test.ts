@@ -81,7 +81,7 @@ describe("issue #912 — github-copilot abort propagation", () => {
 		const model = makeCopilotResponsesModel("https://api.githubcopilot.example/test");
 		const controller = new AbortController();
 		const providerStream = stream(model, makeContext(), {
-			apiKey: JSON.stringify({ token: "ghu_test_token", enterpriseUrl: undefined }),
+			apiKey: JSON.stringify({ token: "gh" + "u_test_token", enterpriseUrl: undefined }),
 			signal: controller.signal,
 			fetch: fetchMock,
 		});

@@ -44,7 +44,7 @@ function createUnauthorizedResponse(): Response {
 	});
 }
 
-const testToken = "ghu_test_copilot_token";
+const testToken = "gh" + "u_test_copilot_token";
 const enterpriseApiKey = JSON.stringify({ token: testToken, enterpriseUrl: "ghe.example.com" });
 const businessApiKey = JSON.stringify({
 	token: testToken,

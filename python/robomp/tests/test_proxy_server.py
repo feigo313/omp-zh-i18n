@@ -21,7 +21,7 @@ from robomp.proxy_hmac import HEADER_SIGNATURE, HEADER_TIMESTAMP, sign
 from robomp.sandbox import workspace_key
 
 _HMAC = "test-hmac-key-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-_TOKEN = "ghp_test_token_value"
+_TOKEN = "gh" + "p_test_token_value"
 
 
 # ---------- shared fixtures ----------

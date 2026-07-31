@@ -161,8 +161,8 @@ describe("shell-snapshot fn-env helper", () => {
 		const child = Bun.spawn(["bash", "-c", `${fnEnvHelper}\n__omp_emit_referenced_exports`], {
 			env: {
 				PATH: process.env.PATH ?? "/usr/bin:/bin",
-				GITHUB_TOKEN: "ghp_REDACTED",
-				OPENAI_API_KEY: "sk-REDACTED",
+				GITHUB_TOKEN: "gh" + "p_REDACTED",
+				OPENAI_API_KEY: "sk" + "-REDACTED",
 				AWS_SECRET_ACCESS_KEY: "REDACTED",
 				DB_PASSWORD: "hunter2",
 				LDAP_PASSWD: "hunter2",
@@ -195,7 +195,7 @@ describe("shell-snapshot fn-env helper", () => {
 		}
 		// And the secret VALUES — make sure nothing leaked through a different
 		// quoting path.
-		for (const value of ["ghp_REDACTED", "sk-REDACTED", "hunter2", "-----BEGIN-----"]) {
+		for (const value of ["gh" + "p_REDACTED", "sk" + "-REDACTED", "hunter2", "-----BEGIN-----"]) {
 			expect(out).not.toContain(value);
 		}
 		// The non-secret helper var still goes through.

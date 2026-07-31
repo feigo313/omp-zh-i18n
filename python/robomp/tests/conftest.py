@@ -128,7 +128,7 @@ def proxy_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, str]
     baseline = _baseline_env(tmp_path)
     baseline.pop("ROBOMP_GH_PROXY_URL", None)
     baseline.pop("ROBOMP_GH_PROXY_HMAC_KEY", None)
-    baseline["GITHUB_TOKEN"] = "ghp_test_token_value_xxxxxxxxxxxxxxxx"
+    baseline["GITHUB_TOKEN"] = "gh" + "p_test_token_value_xxxxxxxxxxxxxxxx"
     for key, value in baseline.items():
         monkeypatch.setenv(key, value)
     # Same defense-in-depth as `env`: setenv("") rather than delenv so

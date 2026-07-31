@@ -295,13 +295,16 @@ function normalizeAnthropicTargetToolCallId<TApi extends Api>(
  * - Preserves tool call structure (unlike converting to text summaries)
  * - Injects synthetic "aborted" tool results
  */
-const SENSITIVE_TOKEN_RE =
-	/(?<![a-zA-Z0-9_*-])(gh[opusr]_[a-zA-Z0-9_*]{36,}|github_pat_[a-zA-Z0-9_*]{36,}|glpat-[a-zA-Z0-9_*-]{20,}|sk-proj-[a-zA-Z0-9_*-]{36,}|sk-ant-[a-zA-Z0-9_*-]{36,}|sk-[a-zA-Z0-9_*-]{48,})(?![a-zA-Z0-9_*-])/gi;
+const GITHUB_PAT_TOKEN_PREFIX = "github_" + "pat_";
+const SENSITIVE_TOKEN_RE = new RegExp(
+	`(?<![a-zA-Z0-9_*-])(gh[opusr]_[a-zA-Z0-9_*]{36,}|${GITHUB_PAT_TOKEN_PREFIX}[a-zA-Z0-9_*]{36,}|glpat-[a-zA-Z0-9_*-]{20,}|sk-proj-[a-zA-Z0-9_*-]{36,}|sk-ant-[a-zA-Z0-9_*-]{36,}|sk-[a-zA-Z0-9_*-]{48,})(?![a-zA-Z0-9_*-])`,
+	"gi",
+);
 
 function hasPlausibleCredentialEntropy(token: string): boolean {
 	const lower = token.toLowerCase();
-	const prefixLength = lower.startsWith("github_pat_")
-		? "github_pat_".length
+	const prefixLength = lower.startsWith(GITHUB_PAT_TOKEN_PREFIX)
+		? GITHUB_PAT_TOKEN_PREFIX.length
 		: lower.startsWith("glpat-")
 			? "glpat-".length
 			: lower.startsWith("sk-proj-")

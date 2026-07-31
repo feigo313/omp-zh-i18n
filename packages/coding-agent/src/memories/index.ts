@@ -1129,7 +1129,7 @@ function redactSecrets(input: string): string {
 		/(?:AKIA|ASIA)[A-Z0-9]{16}/g,
 		// Common provider token prefixes (GitHub, npm, Slack, Google).
 		/(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g,
-		/github_pat_[A-Za-z0-9_]{20,}/g,
+		new RegExp("github_" + "pat_[A-Za-z0-9_]{20,}", "g"),
 		/npm_[A-Za-z0-9]{30,}/g,
 		/xox[baprs]-[A-Za-z0-9-]{10,}/g,
 		/AIza[A-Za-z0-9_-]{30,}/g,

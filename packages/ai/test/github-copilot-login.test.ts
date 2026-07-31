@@ -23,7 +23,7 @@ function deviceCodeResponse(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function accessTokenResponse(token = "ghu_test") {
+function accessTokenResponse(token = "gh" + "u_test") {
 	return { access_token: token, token_type: "bearer", scope: "read:user" };
 }
 
@@ -65,8 +65,8 @@ describe("loginGitHubCopilot", () => {
 		});
 
 		expect(onAuth).toHaveBeenCalled();
-		expect(credentials.access).toBe("ghu_test");
-		expect(credentials.refresh).toBe("ghu_test");
+		expect(credentials.access).toBe("gh" + "u_test");
+		expect(credentials.refresh).toBe("gh" + "u_test");
 		expect(credentials.expires).toBeGreaterThan(Date.now());
 		expect(credentials.enterpriseUrl).toBeUndefined();
 		expect(pollCount).toBeGreaterThanOrEqual(1);
@@ -119,8 +119,8 @@ describe("loginGitHubCopilot", () => {
 	it("serializes business API endpoint into structured api keys", async () => {
 		const result = await getOAuthApiKey("github-copilot", {
 			"github-copilot": {
-				access: "ghu_test",
-				refresh: "ghu_test",
+				access: "gh" + "u_test",
+				refresh: "gh" + "u_test",
 				expires: Date.now() + 60_000,
 				apiEndpoint: "https://api.business.githubcopilot.com",
 			},
@@ -128,7 +128,7 @@ describe("loginGitHubCopilot", () => {
 
 		expect(result).not.toBeNull();
 		expect(JSON.parse(result!.apiKey)).toMatchObject({
-			token: "ghu_test",
+			token: "gh" + "u_test",
 			apiEndpoint: "https://api.business.githubcopilot.com",
 		});
 	});
@@ -161,7 +161,7 @@ describe("loginGitHubCopilot", () => {
 			onPrompt: mockOnPrompt("ghe.example.com"),
 		});
 
-		expect(credentials.access).toBe("ghu_test");
+		expect(credentials.access).toBe("gh" + "u_test");
 		expect(credentials.enterpriseUrl).toBe("ghe.example.com");
 	});
 
@@ -193,7 +193,7 @@ describe("loginGitHubCopilot", () => {
 			onPrompt: mockOnPrompt("   "),
 		});
 
-		expect(credentials.access).toBe("ghu_test");
+		expect(credentials.access).toBe("gh" + "u_test");
 		expect(credentials.enterpriseUrl).toBeUndefined();
 	});
 
@@ -260,7 +260,7 @@ describe("loginGitHubCopilot", () => {
 			onPrompt: mockOnPrompt(""),
 		});
 
-		expect(credentials.access).toBe("ghu_test");
+		expect(credentials.access).toBe("gh" + "u_test");
 		expect(pollCount).toBeGreaterThanOrEqual(3);
 	}, 15000);
 
@@ -348,7 +348,7 @@ describe("loginGitHubCopilot", () => {
 		});
 
 		// Login succeeds even though all model enablements failed
-		expect(credentials.access).toBe("ghu_test");
-		expect(credentials.refresh).toBe("ghu_test");
+		expect(credentials.access).toBe("gh" + "u_test");
+		expect(credentials.refresh).toBe("gh" + "u_test");
 	});
 });

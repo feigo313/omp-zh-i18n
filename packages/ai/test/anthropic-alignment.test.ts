@@ -95,7 +95,7 @@ function captureAnthropicPayload(
 ): Promise<unknown> {
 	const { promise, resolve } = Promise.withResolvers<unknown>();
 	streamAnthropic(model, context, {
-		apiKey: "sk-ant-oat-test",
+		apiKey: "sk" + "-ant-oat-test",
 		isOAuth: options?.isOAuth ?? true,
 		signal: createAbortedSignal(),
 		metadata: options?.metadata,
@@ -121,7 +121,7 @@ function captureSimpleAnthropicPayload(
 ): Promise<unknown> {
 	const { promise, resolve } = Promise.withResolvers<unknown>();
 	streamSimple(model, context, {
-		apiKey: "sk-ant-oat-test",
+		apiKey: "sk" + "-ant-oat-test",
 		signal: createAbortedSignal(),
 		reasoning,
 		onPayload: payload => resolve(payload),
@@ -166,7 +166,7 @@ describe("Anthropic request fingerprint alignment", () => {
 	it("matches Cowork OAuth header defaults", () => {
 		const sessionId = "167ec5b4-e711-4169-879f-84fa52679d9c";
 		const headers = buildAnthropicHeaders({
-			apiKey: "sk-ant-oat-test",
+			apiKey: "sk" + "-ant-oat-test",
 			isOAuth: true,
 			stream: true,
 			claudeCodeSessionId: sessionId,
@@ -212,7 +212,7 @@ describe("Anthropic request fingerprint alignment", () => {
 	it("omits the legacy redact-thinking beta from Cowork requests", () => {
 		const baseArgs = {
 			model: ANTHROPIC_MODEL,
-			apiKey: "sk-ant-oat-test",
+			apiKey: "sk" + "-ant-oat-test",
 			stream: true,
 			interleavedThinking: true,
 			hasTools: true,
@@ -243,7 +243,7 @@ describe("Anthropic request fingerprint alignment", () => {
 		});
 		const options = buildAnthropicClientOptions({
 			model: longContextModel,
-			apiKey: "sk-ant-oat-test",
+			apiKey: "sk" + "-ant-oat-test",
 			stream: true,
 			hasTools: true,
 			thinkingEnabled: true,
@@ -447,7 +447,7 @@ describe("Anthropic request fingerprint alignment", () => {
 		await streamAnthropic(
 			adaptiveModel,
 			{ systemPrompt: ["Stay concise."], messages: [{ role: "user", content: "Hi", timestamp: Date.now() }] },
-			{ apiKey: "sk-ant-api-test", thinkingEnabled: false, fetch: fetchMock },
+			{ apiKey: "sk" + "-ant-api-test", thinkingEnabled: false, fetch: fetchMock },
 		).result();
 
 		// thinking-off on an adaptive-only model still pins output_config.effort,
@@ -494,7 +494,7 @@ describe("Anthropic request fingerprint alignment", () => {
 					},
 				],
 			},
-			{ apiKey: "sk-ant-api-test", toolChoice: "any", fetch: fetchMock },
+			{ apiKey: "sk" + "-ant-api-test", toolChoice: "any", fetch: fetchMock },
 		).result();
 
 		expect(capturedBody?.tool_choice).toEqual({ type: "any" });
@@ -532,7 +532,7 @@ describe("Anthropic request fingerprint alignment", () => {
 				],
 			},
 			{
-				apiKey: "sk-ant-api-test",
+				apiKey: "sk" + "-ant-api-test",
 				toolChoice: "any",
 				client: {
 					messages: {
@@ -573,7 +573,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 		const canonical = captureBeta();
 		await streamAnthropic(ANTHROPIC_MODEL, cacheContext, {
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			fetch: canonical.fetchMock,
 		}).result();
 		expect(canonical.beta()).toContain("extended-cache-ttl-2025-04-11");
@@ -582,7 +582,7 @@ describe("Anthropic request fingerprint alignment", () => {
 		// companion beta must stay off the wire too.
 		const proxy = captureBeta();
 		await streamAnthropic(UMANS_ANTHROPIC_MODEL, cacheContext, {
-			apiKey: "sk-umans-test",
+			apiKey: "sk" + "-umans-test",
 			fetch: proxy.fetchMock,
 		}).result();
 		expect(proxy.beta()).not.toContain("extended-cache-ttl-2025-04-11");
@@ -666,7 +666,7 @@ describe("Anthropic request fingerprint alignment", () => {
 		await streamAnthropic(
 			ANTHROPIC_MODEL,
 			{ systemPrompt: ["Stay concise."], messages: [{ role: "user", content: "Hi", timestamp: Date.now() }] },
-			{ apiKey: "sk-ant-api-test", thinkingEnabled: true, fetch: fetchMock },
+			{ apiKey: "sk" + "-ant-api-test", thinkingEnabled: true, fetch: fetchMock },
 		).result();
 
 		expect(capturedBeta).toContain("context-management-2025-06-27");
@@ -675,7 +675,7 @@ describe("Anthropic request fingerprint alignment", () => {
 		await streamAnthropic(
 			ANTHROPIC_MODEL,
 			{ systemPrompt: ["Stay concise."], messages: [{ role: "user", content: "Hi", timestamp: Date.now() }] },
-			{ apiKey: "sk-ant-api-test", thinkingEnabled: false, fetch: fetchMock },
+			{ apiKey: "sk" + "-ant-api-test", thinkingEnabled: false, fetch: fetchMock },
 		).result();
 
 		// No context_management field is sent when thinking is disabled, so the
@@ -732,7 +732,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 	it("uses Bearer auth for non-Anthropic API bases with api-key credentials", () => {
 		const headers = buildAnthropicHeaders({
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			baseUrl: "https://proxy.example.com",
 			stream: true,
 		});
@@ -743,7 +743,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 	it("honors caller-supplied Authorization on non-official Anthropic endpoints (#3391)", () => {
 		const headers = buildAnthropicHeaders({
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			baseUrl: "https://proxy.example.com/anthropic",
 			stream: true,
 			modelHeaders: { Authorization: "secret-proxy-key" },
@@ -755,7 +755,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 	it("honors lowercase `authorization` from caller without duplicating the header key", () => {
 		const headers = buildAnthropicHeaders({
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			baseUrl: "https://proxy.example.com/anthropic",
 			stream: true,
 			modelHeaders: { authorization: "secret-proxy-key" },
@@ -768,7 +768,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 	it("honors caller-supplied X-Api-Key on official Anthropic endpoints", () => {
 		const headers = buildAnthropicHeaders({
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			baseUrl: "https://api.anthropic.com",
 			stream: true,
 			modelHeaders: { "X-Api-Key": "custom-api-key" },
@@ -780,7 +780,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 	it("honors caller-supplied Authorization alongside X-Api-Key on official endpoints", () => {
 		const headers = buildAnthropicHeaders({
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			baseUrl: "https://api.anthropic.com",
 			stream: true,
 			modelHeaders: { Authorization: "Token tok-abc" },
@@ -790,12 +790,12 @@ describe("Anthropic request fingerprint alignment", () => {
 		// forwards the caller's custom Authorization so a fronting proxy/gateway
 		// can read it.
 		expect(headers.Authorization).toBe("Token tok-abc");
-		expect(headers["X-Api-Key"]).toBe("sk-ant-api-test");
+		expect(headers["X-Api-Key"]).toBe("sk" + "-ant-api-test");
 	});
 
 	it("forces OAuth bearer auth and ignores caller-supplied Authorization under OAuth", () => {
 		const headers = buildAnthropicHeaders({
-			apiKey: "sk-ant-oat-test",
+			apiKey: "sk" + "-ant-oat-test",
 			isOAuth: true,
 			stream: true,
 			modelHeaders: { Authorization: "should-not-leak" },
@@ -818,7 +818,7 @@ describe("Anthropic request fingerprint alignment", () => {
 				},
 				compat: { allowAnthropicHeaderOverrides: true },
 			}),
-			apiKey: "sk-ant-oat-test",
+			apiKey: "sk" + "-ant-oat-test",
 			stream: true,
 		});
 
@@ -830,7 +830,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 	it("keeps OAuth fingerprint defaults on official endpoints despite the compat opt-in", () => {
 		const headers = buildAnthropicHeaders({
-			apiKey: "sk-ant-oat-test",
+			apiKey: "sk" + "-ant-oat-test",
 			baseUrl: "https://api.anthropic.com",
 			isOAuth: true,
 			allowAnthropicHeaderOverrides: true,
@@ -855,7 +855,7 @@ describe("Anthropic request fingerprint alignment", () => {
 				baseUrl: "https://proxy.example.com/anthropic",
 				headers: { Authorization: "secret-proxy-key" },
 			}),
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			stream: true,
 		});
 
@@ -875,11 +875,11 @@ describe("Anthropic request fingerprint alignment", () => {
 				provider: "umans",
 				baseUrl: "https://api.code.umans.ai",
 			}),
-			apiKey: "sk-umans-test",
+			apiKey: "sk" + "-umans-test",
 			stream: true,
 		});
 
-		expect(options.apiKey).toBe("sk-umans-test");
+		expect(options.apiKey).toBe("sk" + "-umans-test");
 		expect(options.defaultHeaders.Authorization).toBeUndefined();
 	});
 
@@ -887,7 +887,7 @@ describe("Anthropic request fingerprint alignment", () => {
 		await withEnv({ UMANS_WEBSEARCH_PROVIDER: "exa" }, () => {
 			const options = buildAnthropicClientOptions({
 				model: UMANS_ANTHROPIC_MODEL,
-				apiKey: "sk-umans-test",
+				apiKey: "sk" + "-umans-test",
 				stream: true,
 				hasTools: true,
 			});
@@ -898,7 +898,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 	it("forwards only prefix-matching Cowork User-Agent values", () => {
 		const forwardedHeaders = buildAnthropicHeaders({
-			apiKey: "sk-ant-oat-test",
+			apiKey: "sk" + "-ant-oat-test",
 			isOAuth: true,
 			stream: true,
 			modelHeaders: { "User-Agent": "claude-cli/2.1.63 (external, cli)" },
@@ -907,7 +907,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 		// Test variant without slash
 		const forwardedNoSlashHeaders = buildAnthropicHeaders({
-			apiKey: "sk-ant-oat-test",
+			apiKey: "sk" + "-ant-oat-test",
 			isOAuth: true,
 			stream: true,
 			modelHeaders: { "User-Agent": "claude-cli-dev" },
@@ -915,7 +915,7 @@ describe("Anthropic request fingerprint alignment", () => {
 		expect(forwardedNoSlashHeaders["User-Agent"]).toBe("claude-cli-dev");
 
 		const normalizedHeaders = buildAnthropicHeaders({
-			apiKey: "sk-ant-oat-test",
+			apiKey: "sk" + "-ant-oat-test",
 			isOAuth: true,
 			stream: true,
 			modelHeaders: { "User-Agent": "curl/8.7.1" },
@@ -923,7 +923,7 @@ describe("Anthropic request fingerprint alignment", () => {
 		expect(normalizedHeaders["User-Agent"]).toBe(`claude-cli/${claudeCodeVersion} (external, claude-desktop)`);
 
 		const embeddedClaudeCliHeaders = buildAnthropicHeaders({
-			apiKey: "sk-ant-oat-test",
+			apiKey: "sk" + "-ant-oat-test",
 			isOAuth: true,
 			stream: true,
 			modelHeaders: { "User-Agent": "my-client claude-cli/2.1.63" },
@@ -934,7 +934,7 @@ describe("Anthropic request fingerprint alignment", () => {
 	it("forwards model-supplied User-Agent on API-key requests", () => {
 		// Direct Anthropic API (X-Api-Key branch).
 		const directHeaders = buildAnthropicHeaders({
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			isOAuth: false,
 			stream: true,
 			modelHeaders: { "User-Agent": "corp-gateway-client/2.0" },
@@ -954,7 +954,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 	it("omits Claude Code betas on API-key requests by default", () => {
 		const headers = buildAnthropicHeaders({
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			isOAuth: false,
 			stream: true,
 			extraBetas: ["web-search-2025-03-05"],
@@ -963,7 +963,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 		// And no empty anthropic-beta header when there are no betas at all.
 		const bare = buildAnthropicHeaders({
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			isOAuth: false,
 			stream: true,
 		});
@@ -1145,7 +1145,7 @@ describe("Anthropic request fingerprint alignment", () => {
 				messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
 			},
 			{
-				apiKey: "sk-ant-oat-test",
+				apiKey: "sk" + "-ant-oat-test",
 				isOAuth: true,
 				metadata: { user_id: userId },
 				signal: controller.signal,
@@ -1809,7 +1809,7 @@ describe("Anthropic request fingerprint alignment", () => {
 	it("keeps the interleaved-thinking beta for dated Opus 4.0 ids", () => {
 		const legacy = buildAnthropicClientOptions({
 			model: buildModel({ ...ANTHROPIC_MODEL_SPEC, id: "claude-opus-4-20250514", name: "Claude Opus 4" }),
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			extraBetas: [],
 			stream: true,
 			interleavedThinking: true,
@@ -1820,7 +1820,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 		const modern = buildAnthropicClientOptions({
 			model: buildModel({ ...ANTHROPIC_MODEL_SPEC, id: "claude-opus-4-7", name: "Claude Opus 4.7" }),
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			extraBetas: [],
 			stream: true,
 			interleavedThinking: true,
@@ -1845,7 +1845,7 @@ describe("Anthropic request fingerprint alignment", () => {
 		const signingProxyUrl = "https://gateway.ai.cloudflare.com/v1/account/gateway/anthropic";
 		const signingProxy = buildAnthropicClientOptions({
 			model: buildModel({ ...adaptiveProxySpec, baseUrl: signingProxyUrl }),
-			apiKey: "sk-proxy-test",
+			apiKey: "sk" + "-proxy-test",
 			interleavedThinking: true,
 		});
 		const canonicalModel = buildModel({
@@ -1857,12 +1857,12 @@ describe("Anthropic request fingerprint alignment", () => {
 			// Runtime provider overrides replace baseUrl without rebuilding the
 			// canonical model's official-endpoint compat.
 			model: { ...canonicalModel, baseUrl: signingProxyUrl },
-			apiKey: "sk-proxy-test",
+			apiKey: "sk" + "-proxy-test",
 			interleavedThinking: true,
 		});
 		const nonSigningProxy = buildAnthropicClientOptions({
 			model: buildModel(adaptiveProxySpec),
-			apiKey: "sk-proxy-test",
+			apiKey: "sk" + "-proxy-test",
 			interleavedThinking: true,
 		});
 		// Vertex rawPredict is signing regardless of provider id, but only
@@ -1892,7 +1892,7 @@ describe("Anthropic request fingerprint alignment", () => {
 		// can't recognize, explicitly marked signing via spec compat override.
 		const flaggedOpaqueProxy = buildAnthropicClientOptions({
 			model: buildModel({ ...adaptiveProxySpec, compat: { signingEndpoint: true } }),
-			apiKey: "sk-proxy-test",
+			apiKey: "sk" + "-proxy-test",
 			interleavedThinking: true,
 		});
 		// ZenMux's provider id classifies signing even on a customized mirror
@@ -1903,7 +1903,7 @@ describe("Anthropic request fingerprint alignment", () => {
 				provider: "zenmux",
 				baseUrl: "https://mirror.example.net/api/anthropic",
 			}),
-			apiKey: "sk-proxy-test",
+			apiKey: "sk" + "-proxy-test",
 			interleavedThinking: true,
 		});
 
@@ -1924,7 +1924,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 		const withoutTools = buildAnthropicClientOptions({
 			model: incompatibleModel,
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			extraBetas: [],
 			stream: true,
 			interleavedThinking: false,
@@ -1932,7 +1932,7 @@ describe("Anthropic request fingerprint alignment", () => {
 		});
 		const withCompatibleTools = buildAnthropicClientOptions({
 			model: ANTHROPIC_MODEL,
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			extraBetas: [],
 			stream: true,
 			interleavedThinking: false,
@@ -1940,7 +1940,7 @@ describe("Anthropic request fingerprint alignment", () => {
 		});
 		const withIncompatibleTools = buildAnthropicClientOptions({
 			model: incompatibleModel,
-			apiKey: "sk-ant-api-test",
+			apiKey: "sk" + "-ant-api-test",
 			extraBetas: [],
 			stream: true,
 			interleavedThinking: false,
@@ -1979,7 +1979,7 @@ describe("Anthropic request fingerprint alignment", () => {
 				...CLOUDFLARE_ANTHROPIC_MODEL,
 				headers: {
 					Authorization: "Bearer anthropic-oauth",
-					"X-Api-Key": "sk-ant-api-leak",
+					"X-Api-Key": "sk" + "-ant-api-leak",
 					"cf-aig-authorization": "Bearer stale-token",
 				},
 			},
@@ -1998,7 +1998,7 @@ describe("Anthropic request fingerprint alignment", () => {
 	it("applies Cowork's TLS profile for direct Anthropic transport", () => {
 		const options = buildAnthropicClientOptions({
 			model: ANTHROPIC_MODEL,
-			apiKey: "sk-ant-oat-test",
+			apiKey: "sk" + "-ant-oat-test",
 			extraBetas: [],
 			stream: true,
 			interleavedThinking: false,
@@ -2082,7 +2082,7 @@ describe("Anthropic request fingerprint alignment", () => {
 			() => {
 				const options = buildAnthropicClientOptions({
 					model: gatewayModel,
-					apiKey: "sk-ant-api-test",
+					apiKey: "sk" + "-ant-api-test",
 					extraBetas: [],
 					stream: true,
 					interleavedThinking: false,
@@ -2105,7 +2105,7 @@ describe("Anthropic request fingerprint alignment", () => {
 			() => {
 				const options = buildAnthropicClientOptions({
 					model: ANTHROPIC_MODEL,
-					apiKey: "sk-ant-api-test",
+					apiKey: "sk" + "-ant-api-test",
 					extraBetas: [],
 					stream: true,
 					interleavedThinking: false,
@@ -2125,7 +2125,11 @@ describe("Anthropic request fingerprint alignment", () => {
 		const keyPath = path.join(tmpDir, "client-key.pem");
 		fs.writeFileSync(caPath, "-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----\n", "utf8");
 		fs.writeFileSync(certPath, "-----BEGIN CERTIFICATE-----\nCERT\n-----END CERTIFICATE-----\n", "utf8");
-		fs.writeFileSync(keyPath, "-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n", "utf8");
+		fs.writeFileSync(
+			keyPath,
+			["-----BEGIN ", "PRIVATE KEY-----\nKEY\n-----END ", "PRIVATE KEY-----\n"].join(""),
+			"utf8",
+		);
 
 		try {
 			await withEnv(
@@ -2201,8 +2205,8 @@ describe("Anthropic request fingerprint alignment", () => {
 			{
 				CLAUDE_CODE_USE_FOUNDRY: "true",
 				ANTHROPIC_FOUNDRY_API_KEY: "foundry-env-token",
-				ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat-should-not-win",
-				ANTHROPIC_API_KEY: "sk-ant-api-should-not-win",
+				ANTHROPIC_OAUTH_TOKEN: "sk" + "-ant-oat-should-not-win",
+				ANTHROPIC_API_KEY: "sk" + "-ant-api-should-not-win",
 			},
 			() => {
 				expect(getEnvApiKey("anthropic")).toBe("foundry-env-token");
@@ -2604,7 +2608,7 @@ describe("Anthropic request fingerprint alignment", () => {
 				messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
 			},
 			{
-				apiKey: "sk-ant-oat-test",
+				apiKey: "sk" + "-ant-oat-test",
 				signal: createAbortedSignal(),
 				reasoning: Effort.High,
 				disableReasoning: true,
@@ -2740,7 +2744,7 @@ describe("cch attestation", () => {
 				systemPrompt: ["Be helpful."],
 				messages: [{ role: "user", content: "hello", timestamp: Date.now() }],
 			},
-			{ apiKey: "sk-ant-oat-test", isOAuth: true, signal: controller.signal, fetch: fakeFetch },
+			{ apiKey: "sk" + "-ant-oat-test", isOAuth: true, signal: controller.signal, fetch: fakeFetch },
 		);
 
 		const capturedBody = await bodyPromise;

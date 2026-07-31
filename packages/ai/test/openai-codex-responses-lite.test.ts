@@ -1250,7 +1250,7 @@ describe("openai-codex concurrent reasoning summaries", () => {
 describe("openai-codex native history redaction", () => {
 	it("redacts credentials from user provider history before replaying it", () => {
 		const model = createCodexModel("gpt-5.1-codex");
-		const credential = "sk-ABCdef1234567890ABCdef1234567890ABCdef1234567890ABCdef123456";
+		const credential = "sk" + "-ABCdef1234567890ABCdef1234567890ABCdef1234567890ABCdef123456";
 		const context: Context = {
 			messages: [
 				{

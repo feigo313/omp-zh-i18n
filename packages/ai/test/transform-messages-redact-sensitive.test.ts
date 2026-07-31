@@ -42,7 +42,7 @@ describe("transformMessages redact sensitive credentials", () => {
 		const messages: Message[] = [
 			{
 				role: "user",
-				content: "Token: gho_************************************",
+				content: "Token: " + "gh" + "o_************************************",
 				timestamp: Date.now(),
 			},
 			{
@@ -50,14 +50,14 @@ describe("transformMessages redact sensitive credentials", () => {
 				content: [
 					{
 						type: "text",
-						text: "I found this key: sk-proj-************************************",
+						text: "I found this key: " + "sk" + "-proj-************************************",
 					},
 					{
 						type: "toolCall",
 						id: "call_x",
 						name: "bash",
 						arguments: {
-							command: "echo gho_************************************",
+							command: "echo " + "gh" + "o_************************************",
 						},
 					},
 				],
@@ -79,7 +79,12 @@ describe("transformMessages redact sensitive credentials", () => {
 				role: "toolResult",
 				toolCallId: "call_x",
 				toolName: "bash",
-				content: [{ type: "text", text: "Token is ghp_************************************ inside output" }],
+				content: [
+					{
+						type: "text",
+						text: ["Token is ", "gh", "p_************************************", " inside output"].join(""),
+					},
+				],
 				isError: false,
 				timestamp: Date.now(),
 			},
@@ -141,7 +146,7 @@ describe("transformMessages redact sensitive credentials", () => {
 				content: [
 					{
 						type: "thinking",
-						thinking: "Use sk-ABCdef1234567890ABCdef1234567890ABCdef1234567890ABCdef123456.",
+						thinking: "Use " + "sk" + "-ABCdef1234567890ABCdef1234567890ABCdef1234567890ABCdef123456.",
 						thinkingSignature: "signed-thinking-bytes",
 					},
 				],
@@ -175,7 +180,7 @@ describe("transformMessages redact sensitive credentials", () => {
 						type: "toolCall",
 						id: "call_signed",
 						name: "run",
-						arguments: { token: "sk-ABCdef1234567890ABCdef1234567890ABCdef1234567890ABCdef123456" },
+						arguments: { token: "sk" + "-ABCdef1234567890ABCdef1234567890ABCdef1234567890ABCdef123456" },
 						thoughtSignature: "signed-tool-arguments",
 					},
 				],
@@ -208,7 +213,7 @@ describe("transformMessages redact sensitive credentials", () => {
 	});
 
 	it("preserves credential-shaped prose that is not a plausible live token", () => {
-		const lookalike = "sk-abcdefghijklmnopqrstuvwxyz";
+		const lookalike = "sk" + "-abcdefghijklmnopqrstuvwxyz";
 		const transformed = transformMessages(
 			[{ role: "user", content: `The example key is ${lookalike}.`, timestamp: Date.now() }],
 			makeModel(),

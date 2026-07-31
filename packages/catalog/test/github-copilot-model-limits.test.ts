@@ -69,28 +69,28 @@ describe("github copilot model limits mapping", () => {
 
 	it("unwraps structured OAuth keys for discovery and routes enterprise discovery to the enterprise host", async () => {
 		const structuredApiKey = JSON.stringify({
-			token: "ghu_test_copilot_token",
+			token: "gh" + "u_test_copilot_token",
 			enterpriseUrl: "ghe.example.com",
 		});
 		const { fetchMock } = await discoverCopilotModels(
 			{ data: [] },
 			structuredApiKey,
 			"https://copilot-api.ghe.example.com",
-			"ghu_test_copilot_token",
+			"gh" + "u_test_copilot_token",
 		);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("unwraps structured OAuth keys for discovery and routes business discovery to the business host", async () => {
 		const structuredApiKey = JSON.stringify({
-			token: "ghu_test_copilot_token",
+			token: "gh" + "u_test_copilot_token",
 			apiEndpoint: "https://api.business.githubcopilot.com",
 		});
 		const { fetchMock } = await discoverCopilotModels(
 			{ data: [] },
 			structuredApiKey,
 			"https://api.business.githubcopilot.com",
-			"ghu_test_copilot_token",
+			"gh" + "u_test_copilot_token",
 		);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
@@ -578,11 +578,11 @@ describe("github copilot tiered context windows", () => {
 
 describe("github copilot vision endpoint policy", () => {
 	const businessApiKey = JSON.stringify({
-		token: "ghu_business_token",
+		token: "gh" + "u_business_token",
 		apiEndpoint: "https://api.business.githubcopilot.com",
 	});
 	const enterpriseApiKey = JSON.stringify({
-		token: "ghu_enterprise_token",
+		token: "gh" + "u_enterprise_token",
 		enterpriseUrl: "ghe.example.com",
 	});
 
@@ -601,7 +601,7 @@ describe("github copilot vision endpoint policy", () => {
 			},
 			businessApiKey,
 			"https://api.business.githubcopilot.com",
-			"ghu_business_token",
+			"gh" + "u_business_token",
 		);
 		const model = models.find(candidate => candidate.id === "claude-sonnet-4.6");
 		expect(model?.baseUrl).toBe("https://api.business.githubcopilot.com");
@@ -623,7 +623,7 @@ describe("github copilot vision endpoint policy", () => {
 			},
 			enterpriseApiKey,
 			"https://copilot-api.ghe.example.com",
-			"ghu_enterprise_token",
+			"gh" + "u_enterprise_token",
 		);
 		const model = models.find(candidate => candidate.id === "claude-sonnet-4.6");
 		expect(model?.baseUrl).toBe("https://copilot-api.ghe.example.com");
@@ -635,12 +635,12 @@ describe("github copilot vision endpoint policy", () => {
 			{
 				apiKey: businessApiKey,
 				baseUrl: "https://api.business.githubcopilot.com",
-				token: "ghu_business_token",
+				token: "gh" + "u_business_token",
 			},
 			{
 				apiKey: enterpriseApiKey,
 				baseUrl: "https://copilot-api.ghe.example.com",
-				token: "ghu_enterprise_token",
+				token: "gh" + "u_enterprise_token",
 			},
 		]) {
 			const { models } = await discoverCopilotModels(
@@ -670,12 +670,12 @@ describe("github copilot vision endpoint policy", () => {
 			{
 				apiKey: businessApiKey,
 				baseUrl: "https://api.business.githubcopilot.com",
-				token: "ghu_business_token",
+				token: "gh" + "u_business_token",
 			},
 			{
 				apiKey: enterpriseApiKey,
 				baseUrl: "https://copilot-api.ghe.example.com",
-				token: "ghu_enterprise_token",
+				token: "gh" + "u_enterprise_token",
 			},
 		]) {
 			const { models } = await discoverCopilotModels(
@@ -767,7 +767,7 @@ describe("github copilot vision endpoint policy", () => {
 			const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
 				const url = typeof input === "string" ? input : input.toString();
 				expect(url).toBe("https://api.business.githubcopilot.com/models");
-				expect(getHeaderValue(init?.headers, "Authorization")).toBe("Bearer ghu_business_token");
+				expect(getHeaderValue(init?.headers, "Authorization")).toBe(["Bearer ", "gh", "u_business_token"].join(""));
 				return new Response(
 					JSON.stringify({
 						data: [

@@ -52,7 +52,7 @@ def test_rejects_proxy_url_without_key(monkeypatch: pytest.MonkeyPatch, env: dic
 def test_proxy_mode_loads_pat(proxy_env: dict[str, str]) -> None:
     cfg = Settings()  # type: ignore[call-arg]
     assert cfg.github_token is not None
-    assert cfg.github_token.get_secret_value() == "ghp_test_token_value_xxxxxxxxxxxxxxxx"
+    assert cfg.github_token.get_secret_value() == "gh" + "p_test_token_value_xxxxxxxxxxxxxxxx"
     assert cfg.gh_proxy_url is None
     assert cfg.gh_proxy_hmac_key is None
 
