@@ -27,5 +27,17 @@
  * @property {EmbeddedAddonArchive=} archive
  */
 
-/** @type {EmbeddedAddon|null} */
-export const embeddedAddon = null;
+import archivePath from "../native/embedded-addons.win32-x64.tar.gz" with { type: "file" };
+
+export const embeddedAddon = {
+	platformTag: "win32-x64",
+	version: "17.0.8",
+	archive: {
+		format: "tar.gz",
+		filename: "embedded-addons.win32-x64.tar.gz",
+		filePath: archivePath,
+	},
+	files: [
+		{ variant: "baseline", filename: "pi_natives.win32-x64-baseline.node", size: 150683136 },
+	],
+};
