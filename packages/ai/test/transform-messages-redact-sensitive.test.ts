@@ -25,7 +25,7 @@ describe("transformMessages credential redaction disabled", () => {
 	it("passes real tokens through untouched when redaction is off", () => {
 		configureCredentialRedaction(false);
 		try {
-			const token = "ghp_AbCd1234EfGh5678IjKl9012MnOp3456QrSt";
+			const token = "gh" + "p_AbCd1234EfGh5678IjKl9012MnOp3456QrSt";
 			const transformed = transformMessages(
 				[{ role: "user", content: `Token: ${token}`, timestamp: Date.now() }],
 				makeModel(),

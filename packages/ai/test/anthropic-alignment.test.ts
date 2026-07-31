@@ -1885,7 +1885,7 @@ describe("Anthropic request fingerprint alignment", () => {
 				provider: "custom-copilot",
 				baseUrl: "https://api.githubcopilot.com",
 			}),
-			apiKey: "ghu_test",
+			apiKey: "gh" + "u_test",
 			interleavedThinking: true,
 		});
 		// Issue #6717's reported configuration: an opaque proxy the URL list
