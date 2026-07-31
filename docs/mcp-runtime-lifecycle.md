@@ -158,6 +158,19 @@ Both return structured tool output and convert remaining transport/tool errors i
 
 There is also a follow-up path for late connections: after waiting for a specific server, if status becomes `connected`, it re-runs `session.refreshMCPTools(...)` so newly available tools are rebound in-session.
 
+
+## Server-initiated notifications
+
+MCP servers may push JSON-RPC notification frames at any point after `initialize` completes. The transport surfaces them via `onNotification`; the manager fans them out in two paths:
+
+1. **Internal refresh** for known methods:
+   - `notifications/tools/list_changed` → `refreshServerTools`
+   - `notifications/resources/list_changed` → `refreshServerResources`
+   - `notifications/resources/updated` → `#onResourcesChanged` (only for currently subscribed URIs)
+   - `notifications/prompts/list_changed` → `refreshServerPrompts`
+2. **Listener fanout**: every notification (including the known ones AND server-custom methods) is delivered to registered listeners AFTER the internal refresh runs. Registered via `MCPManager.addNotificationListener(listener)`, which returns an unsubscribe function. Multiple listeners are supported; each is invoked with independent error isolation — a synchronous throw in one listener does not prevent others from firing (thrown errors are logged at `debug`).
+
+`sdk.ts` registers one listener that bridges to the extension runner's `mcp_notification` event, so extensions receive every server-initiated frame with `{ server, method, params }`. The listener is captured with `postmortem` so it is released on session teardown.
 ## Health, reconnect, and partial failure behavior
 
 Current runtime behavior is connection-event driven:

@@ -83,6 +83,10 @@ export default class Index extends Command {
 			description: "Load an extra config.yml-style overlay for this run (repeatable)",
 			multiple: true,
 		}),
+		"add-dir": Flags.string({
+			description: "Add a workspace directory beyond the working directory (repeatable)",
+			multiple: true,
+		}),
 		print: Flags.boolean({
 			char: "p",
 			description: "Non-interactive mode: process prompt and exit",
@@ -94,6 +98,12 @@ export default class Index extends Command {
 		resume: Flags.string({
 			char: "r",
 			description: "Resume a session (by ID prefix, path, or picker if omitted)",
+		}),
+		"from-claude": Flags.boolean({
+			description: "Import a Claude Code session into OMP",
+		}),
+		"from-codex": Flags.boolean({
+			description: "Import a Codex session into OMP",
 		}),
 		"session-dir": Flags.string({
 			description: "Directory for session storage and lookup",

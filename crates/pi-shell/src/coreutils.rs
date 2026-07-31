@@ -7,9 +7,11 @@
 //! thread-local context isolated across concurrent pipeline stages and avoids
 //! blocking the async runtime on synchronous utility I/O.
 
+#[cfg(unix)]
+use std::ffi::OsStr;
 use std::{
 	collections::HashMap,
-	ffi::{OsStr, OsString},
+	ffi::OsString,
 	io::{self, Read, Write},
 	panic::catch_unwind,
 	sync::{
@@ -106,6 +108,7 @@ async fn run_uutil<SE: ShellExtensions>(
 
 	// brush passes the command name as the first `CommandArg`, which is exactly
 	// the argv[0] uutils' argument parsing expects.
+	#[cfg_attr(not(unix), allow(unused_mut))]
 	let mut argv: Vec<OsString> = args
 		.iter()
 		.map(|arg| OsString::from(arg.to_string()))
@@ -244,6 +247,7 @@ uutil_builtin!(pub fn mv_builtin => uu_mv::run);
 uutil_builtin!(pub fn cat_builtin => uu_cat::run);
 uutil_builtin!(pub fn uniq_builtin => uu_uniq::run);
 uutil_builtin!(pub fn base64_builtin => uu_base64::run);
+uutil_builtin!(pub fn cmp_builtin => crate::cmp::run);
 uutil_builtin!(pub fn md5sum_builtin => uu_md5sum::run);
 uutil_builtin!(pub fn sha1sum_builtin => uu_sha1sum::run);
 uutil_builtin!(pub fn sha224sum_builtin => uu_sha224sum::run);
@@ -278,6 +282,13 @@ uutil_builtin!(pub fn comm_builtin => uu_comm::run);
 uutil_builtin!(pub fn sed_builtin => uu_sed::run);
 uutil_builtin!(pub fn xargs_builtin => uu_xargs::run);
 uutil_builtin!(pub fn jq_builtin => jaq::run);
+uutil_builtin!(pub fn ts_builtin => crate::moreutils::ts::run);
+uutil_builtin!(pub fn sponge_builtin => crate::moreutils::sponge::run);
+uutil_builtin!(pub fn ifne_builtin => crate::moreutils::ifne::run);
+uutil_builtin!(pub fn isutf8_builtin => crate::moreutils::isutf8::run);
+uutil_builtin!(pub fn combine_builtin => crate::moreutils::combine::run);
+#[cfg(unix)]
+uutil_builtin!(pub fn errno_builtin => crate::moreutils::errno::run);
 
 #[cfg(test)]
 mod tests {

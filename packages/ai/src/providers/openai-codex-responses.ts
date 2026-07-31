@@ -22,7 +22,7 @@ import {
 import { type } from "arktype";
 import packageJson from "../../package.json" with { type: "json" };
 import * as AIError from "../error";
-import { getEnvApiKey } from "../stream";
+import { getEnvApiKey, isOfficialCodexApiUrl } from "../stream";
 import type {
 	Api,
 	AssistantMessage,
@@ -41,6 +41,7 @@ import type {
 	Tool,
 	ToolCall,
 	ToolChoice,
+	ToolResultMessage,
 	Usage,
 } from "../types";
 import {
@@ -50,9 +51,11 @@ import {
 	normalizeSystemPrompts,
 	sanitizeOpenAIResponsesAssistantFallbackItemsForReplay,
 	sanitizeOpenAIResponsesAssistantHistoryItemsForReplay,
+	stripOpenAIResponsesComputerLinkedReasoningIdsForReplay,
 } from "../utils";
 import { clearStreamingPartialJson, kStreamingLastParseLen, kStreamingPartialJson } from "../utils/block-symbols";
 import { AssistantMessageEventStream } from "../utils/event-stream";
+import { escapeHarmonyControlTokens, isHarmonyDialectModel } from "../utils/harmony-leak";
 import type { RawHttpRequestDump } from "../utils/http-inspector";
 import {
 	armPreResponseTimeout,
@@ -60,7 +63,7 @@ import {
 	getOpenAIStreamIdleTimeoutMs,
 	iterateWithIdleTimeout,
 } from "../utils/idle-iterator";
-import { getProxyForProvider, shouldBypassProxy } from "../utils/proxy";
+import { getProxyForUrl } from "../utils/proxy";
 import { createRequestDebugSession, isRequestDebugEnabled, type RequestDebugResponseLog } from "../utils/request-debug";
 import { adaptSchemaForStrict, NO_STRICT, sanitizeSchemaForOpenAIResponses, toolWireSchema } from "../utils/schema";
 import { notifyRawSseEvent } from "../utils/sse-debug";
@@ -75,6 +78,7 @@ import {
 } from "./openai-codex/request-transformer";
 import { CodexApiError } from "./openai-codex/response-handler";
 import type {
+	ResponseComputerToolCall,
 	ResponseCustomToolCall,
 	ResponseFunctionToolCall,
 	ResponseInput,
@@ -95,16 +99,19 @@ import {
 	applyOpenAIServiceTier,
 	applyReasoningSummaryDone,
 	buildResponsesDeltaInput,
+	computerCallMetadata,
 	convertResponsesAssistantMessage,
 	convertResponsesInputContent,
 	createSequentialCutoffSummaryState,
 	encodeResponsesToolCallId,
 	encodeTextSignatureV1,
+	escapeReplayedClientText,
 	finalizeCustomToolCallInputDone,
 	finalizeMessageText,
 	finalizePendingResponsesToolCalls,
 	finalizeReasoningThinking,
 	finalizeToolCallArgumentsDone,
+	hasExecutableIncompleteResponsesToolCalls,
 	isOpenAIResponsesProgressEvent,
 	mapOpenAIResponsesStopReason,
 	normalizeOpenAIPromptCacheKey,
@@ -120,7 +127,6 @@ export interface OpenAICodexResponsesOptions extends StreamOptions {
 	/** `reasoning.context` replay scope; defaults to `all_turns` when unset. The `all_turns` value is gated to gpt-5.4+ Codex models — older ids reject it, so it is suppressed and `context` omitted. */
 	reasoningContext?: CodexReasoningContext;
 	textVerbosity?: "low" | "medium" | "high";
-	include?: string[];
 	codexMode?: boolean;
 	toolChoice?: ToolChoice;
 	preferWebsockets?: boolean;
@@ -142,6 +148,14 @@ export interface OpenAICodexResponsesOptions extends StreamOptions {
 	 */
 	clientMetadata?: Record<string, string>;
 	/**
+	 * Turn id of the initiating (parent) Codex turn for nested requests such as
+	 * subagent spawns (codex-rs `parent_turn_id`, #35835). Emitted both as the
+	 * flat `client_metadata.parent_turn_id` key and inside the
+	 * `x-codex-turn-metadata` JSON blob; blank values are ignored. The key is
+	 * reserved: `clientMetadata` extras cannot supply it.
+	 */
+	parentTurnId?: string;
+	/**
 	 * Invoked when the server streams a `response.metadata` event carrying
 	 * ChatGPT moderation metadata (`metadata.openai_chatgpt_moderation_metadata`)
 	 * for first-party presentation parity. Diagnostic observer: failures are
@@ -159,6 +173,8 @@ export interface OpenAICodexCompatibilityMetadataOptions {
 	startNewTurn?: boolean;
 	turnStartedAtUnixMs?: number;
 	clientMetadata?: Readonly<Record<string, string>>;
+	/** Parent Codex turn id for nested requests; see {@link OpenAICodexResponsesOptions.parentTurnId}. */
+	parentTurnId?: string;
 	/** Add the direct installation header required by `/responses/compact`. */
 	includeInstallationHeader?: boolean;
 }
@@ -196,6 +212,12 @@ export function createOpenAICodexCompactionRequestContext(options: {
 const CODEX_DEBUG = $flag("PI_CODEX_DEBUG");
 const CODEX_MAX_RETRIES = 5;
 const CODEX_RETRY_DELAY_MS = 500;
+
+function resolveCodexSseMaxAttempts(value: number | undefined): number {
+	if (value === undefined) return CODEX_MAX_RETRIES + 1;
+	if (!Number.isFinite(value)) return 1;
+	return Math.max(1, Math.trunc(value));
+}
 const CODEX_WEBSOCKET_CONNECT_TIMEOUT_MS = 10000;
 const CODEX_WEBSOCKET_PING_INTERVAL_MS = Number($env.PI_CODEX_WEBSOCKET_PING_INTERVAL_MS || 10_000);
 const CODEX_WEBSOCKET_PONG_TIMEOUT_MS = Number($env.PI_CODEX_WEBSOCKET_PONG_TIMEOUT_MS || 60_000);
@@ -230,7 +252,7 @@ const CODEX_WEBSOCKET_IDLE_TIMEOUT_MS = Number($env.PI_CODEX_WEBSOCKET_IDLE_TIME
  * SSE. Generous default so legitimately slow first-token providers still get
  * a chance on the WS transport before falling through.
  */
-const CODEX_WEBSOCKET_FIRST_EVENT_TIMEOUT_MS = Number($env.PI_CODEX_WEBSOCKET_FIRST_EVENT_TIMEOUT_MS || 60_000);
+const CODEX_WEBSOCKET_FIRST_EVENT_TIMEOUT_MS = Number($env.PI_CODEX_WEBSOCKET_FIRST_EVENT_TIMEOUT_MS || 300_000);
 const CODEX_WEBSOCKET_RETRY_BUDGET = Number($env.PI_CODEX_WEBSOCKET_RETRY_BUDGET || CODEX_MAX_RETRIES);
 const CODEX_WEBSOCKET_RETRY_DELAY_MS = Number($env.PI_CODEX_WEBSOCKET_RETRY_DELAY_MS || CODEX_RETRY_DELAY_MS);
 const CODEX_WEBSOCKET_TRANSPORT_ERROR_PREFIX = "Codex websocket transport error";
@@ -238,6 +260,42 @@ const CODEX_RETRYABLE_EVENT_CODES = new Set(["model_error", "server_error", "int
 const CODEX_RETRYABLE_EVENT_MESSAGE =
 	/processing your request|retry your request|temporar(?:y|ily)|overloaded|service.?unavailable|internal error|server error/i;
 const CODEX_PROVIDER_SESSION_STATE_KEY = "openai-codex-responses";
+
+/**
+ * Host integration boundary for just-in-time `x-oai-attestation` header
+ * values (codex-rs `AttestationProvider`). Resolves to the full header value
+ * — an `{"v":1,"s":0,"t":"v1.…"}` envelope — or `undefined` when no
+ * attestation should be sent.
+ */
+export type CodexAttestationProvider = () => Promise<string | undefined>;
+
+let codexAttestationProvider: CodexAttestationProvider | undefined;
+
+/**
+ * Install the process-wide attestation hook consulted for upstream Codex
+ * requests (codex-rs stores its provider on `ModelClient` construction). The
+ * hook is only consulted for ChatGPT-OAuth credentials and runs just-in-time
+ * per request; WebSocket handshakes resolve once per connection because the
+ * header is connection-scoped there.
+ */
+export function setCodexAttestationProvider(provider: CodexAttestationProvider | undefined): void {
+	codexAttestationProvider = provider;
+}
+
+/**
+ * Resolve the `x-oai-attestation` header value for one upstream request.
+ * Gated on ChatGPT-OAuth credentials (a Codex JWT carries `chatgpt_account_id`;
+ * codex-rs gates on `auth.is_chatgpt_auth()`). A throwing hook degrades to no
+ * header rather than failing the request.
+ */
+export async function getCodexAttestationHeader(accountId: string | undefined): Promise<string | undefined> {
+	if (!accountId || !codexAttestationProvider) return undefined;
+	try {
+		return await codexAttestationProvider();
+	} catch {
+		return undefined;
+	}
+}
 const X_CODEX_TURN_STATE_HEADER = "x-codex-turn-state";
 const X_MODELS_ETAG_HEADER = "x-models-etag";
 /** WebSocket frames cannot carry per-request HTTP headers; codex-rs mirrors the lite marker into `client_metadata` under this key. */
@@ -295,7 +353,12 @@ function createCodexWebSocketTimeoutMessage(reason: string, details: CodexWebSoc
 }
 
 type CodexTransport = "sse" | "websocket";
-type CodexEventItem = ResponseReasoningItem | ResponseOutputMessage | ResponseFunctionToolCall | ResponseCustomToolCall;
+type CodexEventItem =
+	| ResponseReasoningItem
+	| ResponseOutputMessage
+	| ResponseFunctionToolCall
+	| ResponseCustomToolCall
+	| ResponseComputerToolCall;
 type CodexOutputBlock =
 	| ThinkingContent
 	| TextContent
@@ -439,9 +502,14 @@ const CODEX_RESERVED_METADATA_KEYS: Record<string, true> = {
 	[OPENAI_HEADERS.SUBAGENT]: true,
 	request_kind: true,
 	compaction: true,
+	// codex-rs reserves `code_mode_tool_names` for its Responses Lite Code Mode
+	// mapping (#35271); OMP never emits it, but callers must not smuggle it in
+	// as an extra either.
+	code_mode_tool_names: true,
 	turn_started_at_unix_ms: true,
 	forked_from_thread_id: true,
 	parent_thread_id: true,
+	parent_turn_id: true,
 	subagent_kind: true,
 	thread_source: true,
 	sandbox: true,
@@ -513,6 +581,7 @@ function createCodexRequestMetadata(
 		startNewTurn: boolean;
 		turnStartedAtUnixMs?: number;
 		clientMetadata?: Readonly<Record<string, string>>;
+		parentTurnId?: string;
 		compaction?: CodexCompactionRequestContext;
 	},
 ): CodexRequestMetadata {
@@ -521,6 +590,9 @@ function createCodexRequestMetadata(
 		session.turnStartedAtUnixMs = options.turnStartedAtUnixMs;
 	}
 	const identity = createCodexCompatibilityIdentity(session);
+	// codex-rs `set_parent_turn_id` ignores blank values; keep the original
+	// spelling when non-blank.
+	const parentTurnId = options.parentTurnId?.trim() ? options.parentTurnId : undefined;
 	const extra: Record<string, string> = {};
 	const callerMetadata = options.clientMetadata;
 	if (callerMetadata) {
@@ -536,6 +608,7 @@ function createCodexRequestMetadata(
 		window_id: identity.windowId,
 		request_kind: requestKind,
 	};
+	if (parentTurnId) turnMetadata.parent_turn_id = parentTurnId;
 	if (options.compaction) {
 		turnMetadata.compaction = {
 			trigger: options.compaction.trigger,
@@ -550,18 +623,22 @@ function createCodexRequestMetadata(
 	}
 	for (const key in extra) turnMetadata[key] = extra[key];
 	const turnMetadataJson = toAsciiJsonString(turnMetadata);
+	const clientMetadata: Record<string, string> = {
+		[OPENAI_HEADERS.INSTALLATION_ID]: identity.installationId,
+		session_id: identity.sessionId,
+		thread_id: identity.threadId,
+		[OPENAI_HEADERS.WINDOW_ID]: identity.windowId,
+		turn_id: session.turnId,
+	};
+	// Both projections, mirroring codex-rs `CodexResponsesMetadata::to_client_metadata`:
+	// the flat key above/below AND the field inside the turn-metadata JSON.
+	if (parentTurnId) clientMetadata.parent_turn_id = parentTurnId;
+	clientMetadata[OPENAI_HEADERS.TURN_METADATA] = turnMetadataJson;
 	return {
 		...identity,
 		turnId: session.turnId,
 		turnMetadataJson,
-		clientMetadata: {
-			[OPENAI_HEADERS.INSTALLATION_ID]: identity.installationId,
-			session_id: identity.sessionId,
-			thread_id: identity.threadId,
-			[OPENAI_HEADERS.WINDOW_ID]: identity.windowId,
-			turn_id: session.turnId,
-			[OPENAI_HEADERS.TURN_METADATA]: turnMetadataJson,
-		},
+		clientMetadata,
 	};
 }
 
@@ -596,6 +673,7 @@ export function createOpenAICodexCompatibilityMetadata(
 		startNewTurn,
 		turnStartedAtUnixMs: options.turnStartedAtUnixMs ?? (startNewTurn || !session.turnId ? Date.now() : undefined),
 		clientMetadata: options.clientMetadata,
+		parentTurnId: options.parentTurnId,
 		compaction: options.compaction,
 	});
 	const headers = new Headers();
@@ -1096,10 +1174,18 @@ export function normalizeCodexToolChoice(
 			: undefined;
 		const offeredTool = customTool ?? directTool;
 		if (!offeredTool) return undefined;
+		if (offeredTool.native?.type === "computer" && model?.supportsComputerUse === true) {
+			return { type: "computer" };
+		}
 		return customTool
 			? { type: "custom", name: customTool.customWireName ?? customTool.name }
 			: { type: "function", name: offeredTool.name };
 	};
+	if (choice.type === "computer") {
+		const computer = tools.find(tool => tool.native?.type === "computer");
+		if (!computer) return undefined;
+		return model?.supportsComputerUse === true ? { type: "computer" } : { type: "function", name: computer.name };
+	}
 	if (choice.type === "function") {
 		if ("function" in choice && choice.function?.name) {
 			return mapName(choice.function.name);
@@ -1112,6 +1198,75 @@ export function normalizeCodexToolChoice(
 		return mapName(choice.name);
 	}
 	return undefined;
+}
+function unrollCodexComputerItems(items: ResponseInput, supportsImageDetailOriginal: boolean): ResponseInput {
+	const replayItems = stripOpenAIResponsesComputerLinkedReasoningIdsForReplay(items);
+	const unrolled: ResponseInput = [];
+	for (const item of replayItems) {
+		if (item.type === "computer_call") {
+			const actions = item.actions ?? (item.action ? [item.action] : []);
+			unrolled.push({
+				type: "function_call",
+				call_id: item.call_id,
+				name: "computer",
+				arguments: JSON.stringify({ actions }),
+				status: item.status,
+			});
+			continue;
+		}
+		if (item.type === "computer_call_output") {
+			const image =
+				typeof item.output.image_url === "string" && item.output.image_url.length > 0
+					? ({
+							type: "input_image",
+							detail: supportsImageDetailOriginal ? "original" : "auto",
+							image_url: item.output.image_url,
+						} satisfies ResponseInputContent)
+					: typeof item.output.file_id === "string" && item.output.file_id.length > 0
+						? ({
+								type: "input_image",
+								detail: supportsImageDetailOriginal ? "original" : "auto",
+								file_id: item.output.file_id,
+							} satisfies ResponseInputContent)
+						: undefined;
+			unrolled.push({
+				type: "function_call_output",
+				call_id: item.call_id,
+				output: image ? "(see attached image)" : "",
+			});
+			if (image) {
+				unrolled.push({
+					role: "user",
+					content: [{ type: "input_text", text: "Attached image from computer tool result:" }, image],
+				});
+			}
+			continue;
+		}
+		unrolled.push(item);
+	}
+	return unrolled;
+}
+
+function unrollCodexComputerAssistantMessage(message: AssistantMessage): AssistantMessage {
+	let changed = false;
+	const content = message.content.map(block => {
+		if (block.type !== "toolCall" || block.providerMetadata?.type !== "computer") return block;
+		changed = true;
+		const call: ToolCall = {
+			...block,
+			arguments: { actions: structuredCloneJSON(block.providerMetadata.actions) },
+		};
+		delete call.providerMetadata;
+		return call;
+	});
+	return changed ? { ...message, content } : message;
+}
+
+function unrollCodexComputerToolResult(message: ToolResultMessage): ToolResultMessage {
+	if (message.providerMetadata?.type !== "computer") return message;
+	const result: ToolResultMessage = { ...message };
+	delete result.providerMetadata;
+	return result;
 }
 
 function getCodexServiceTierCostMultiplier(
@@ -1281,6 +1436,7 @@ async function buildCodexRequestContext(
 				: undefined
 			: getCodexTurnStartedAtUnixMs(context),
 		clientMetadata: transformedBody.client_metadata,
+		parentTurnId: options?.parentTurnId,
 		compaction,
 	});
 	transformedBody.client_metadata = requestMetadata.clientMetadata;
@@ -1455,6 +1611,7 @@ async function openCodexWebSocketTransport(
 		websocketState,
 		requestContext.responsesLite,
 		requestContext.requestMetadata,
+		await getCodexAttestationHeader(requestContext.accountId),
 	);
 	const requestBodyForState = structuredCloneJSON(requestContext.transformedBody);
 	// `onPayload` may rewrite the outgoing frame (e.g. drop `stream_options`);
@@ -1555,6 +1712,7 @@ async function openCodexSseTransport(
 				requestContext.requestMetadata,
 				requestSetup.requestSignal,
 				requestSetup.firstEventTimeoutMs,
+				options?.codexSseMaxAttempts,
 				event => options?.onSseEvent?.(event, model),
 				options?.fetch,
 			),
@@ -1595,6 +1753,16 @@ function createOutputBlockForItem(item: CodexEventItem): CodexOutputBlock | null
 			name: item.name,
 			arguments: {},
 			[kStreamingPartialJson]: item.arguments || "",
+		};
+	}
+	if (item.type === "computer_call") {
+		return {
+			type: "toolCall",
+			id: encodeResponsesToolCallId(item.call_id, item.id),
+			name: "computer",
+			arguments: {},
+			providerMetadata: computerCallMetadata(item),
+			[kStreamingPartialJson]: "",
 		};
 	}
 	if (item.type === "custom_tool_call") {
@@ -1782,9 +1950,10 @@ class CodexStreamProcessor {
 
 		if (eventType === "response.reasoning_summary_part.added") {
 			if (this.#sequentialCutoffSummaries) return firstTokenTime;
-			if (this.runtime.currentItem?.type === "reasoning") {
+			const entry = this.runtime.openItemForEvent(rawEvent);
+			if (entry?.item.type === "reasoning") {
 				appendReasoningSummaryPart(
-					this.runtime.currentItem,
+					entry.item,
 					(rawEvent as { part: ResponseReasoningItem["summary"][number] }).part,
 				);
 			}
@@ -1859,9 +2028,10 @@ class CodexStreamProcessor {
 		}
 
 		if (eventType === "response.content_part.added") {
-			if (this.runtime.currentItem?.type === "message") {
+			const entry = this.runtime.openItemForEvent(rawEvent);
+			if (entry?.item.type === "message") {
 				appendMessageContentPart(
-					this.runtime.currentItem,
+					entry.item,
 					(rawEvent as { part?: ResponseOutputMessage["content"][number] }).part,
 				);
 			}
@@ -1869,14 +2039,15 @@ class CodexStreamProcessor {
 		}
 
 		if (eventType === "response.output_text.delta" || eventType === "response.refusal.delta") {
-			if (this.runtime.currentItem?.type === "message" && this.runtime.currentBlock?.type === "text") {
+			const entry = this.runtime.openItemForEvent(rawEvent);
+			if (entry?.item.type === "message" && entry.block?.type === "text") {
 				appendMessageTextDelta(
-					this.runtime.currentItem,
-					this.runtime.currentBlock,
+					entry.item,
+					entry.block,
 					(rawEvent as { delta?: string }).delta || "",
 					stream,
 					output,
-					output.content.length - 1,
+					entry.contentIndex,
 					eventType === "response.refusal.delta" ? "refusal" : "output_text",
 				);
 			}
@@ -1930,6 +2101,12 @@ class CodexStreamProcessor {
 		}
 
 		if (eventType === "response.metadata") {
+			// The WebSocket transport has no per-response HTTP headers; codex-rs
+			// mirrors them into this event's `headers` and reads
+			// `x-codex-turn-state` from there (ResponsesStreamEvent::turn_state).
+			// Pick up the refresh so same-turn follow-ups echo the latest turn
+			// state on either transport.
+			updateCodexSessionMetadataFromHeaders(this.requestContext.websocketState, toCodexHeaders(rawEvent.headers));
 			const moderation = asRecord(rawEvent.metadata)?.[CODEX_MODERATION_METADATA_KEY];
 			if (moderation !== undefined) {
 				try {
@@ -2030,6 +2207,29 @@ class CodexStreamProcessor {
 			return;
 		}
 
+		if (item.type === "computer_call") {
+			const toolCall: ToolCall = {
+				type: "toolCall",
+				id: encodeResponsesToolCallId(item.call_id, item.id),
+				name: "computer",
+				arguments: {},
+				providerMetadata: computerCallMetadata(item),
+			};
+			let resolvedContentIndex = contentIndex;
+			if (block?.type === "toolCall") {
+				block.id = toolCall.id;
+				block.providerMetadata = toolCall.providerMetadata;
+				clearStreamingPartialJson(block);
+			} else {
+				output.content.push(toolCall);
+				resolvedContentIndex = output.content.length - 1;
+			}
+			runtime.closeOpenItem(entry);
+			runtime.canSafelyReplayWebsocketOverSse = false;
+			stream.push({ type: "toolcall_end", contentIndex: resolvedContentIndex, toolCall, partial: output });
+			return;
+		}
+
 		if (item.type === "custom_tool_call") {
 			const partial = block?.type === "toolCall" ? block[kStreamingPartialJson] : undefined;
 			const rawInput = partial && partial.length > 0 ? partial : (item.input ?? "");
@@ -2089,12 +2289,29 @@ class CodexStreamProcessor {
 			}
 		}
 
+		const incompleteDetails =
+			response &&
+			"incomplete_details" in response &&
+			response.incomplete_details &&
+			typeof response.incomplete_details === "object"
+				? response.incomplete_details
+				: undefined;
+		const shouldPromoteIncompleteToolUse =
+			status === "incomplete" &&
+			incompleteDetails !== undefined &&
+			"reason" in incompleteDetails &&
+			incompleteDetails.reason === "max_output_tokens" &&
+			hasExecutableIncompleteResponsesToolCalls(output);
 		finalizePendingResponsesToolCalls(output);
 
 		calculateCost(model, output.usage);
 		applyCodexServiceTierPricing(model, output.usage, serviceTier, runtime.requestBodyForState.service_tier);
 		output.stopReason = mapOpenAIResponsesStopReason(status);
-		promoteResponsesToolUseStopReason(output, endTurn === true ? true : endTurn === false ? false : undefined);
+		promoteResponsesToolUseStopReason(
+			output,
+			endTurn === true ? true : endTurn === false ? false : undefined,
+			shouldPromoteIncompleteToolUse,
+		);
 	}
 
 	async #recoverStreamError(error: unknown): Promise<boolean> {
@@ -2597,6 +2814,7 @@ export async function prewarmOpenAICodexResponses(
 	);
 	const codexClientVersion = CODEX_CLIENT_VERSION;
 	const requestIdentity = createCodexCompatibilityIdentity(metadataSession);
+	const attestation = await getCodexAttestationHeader(accountId);
 	const headers = logger.time(
 		"prewarmCodex:createHeaders",
 		createCodexHeaders,
@@ -2609,6 +2827,7 @@ export async function prewarmOpenAICodexResponses(
 		state,
 		responsesLite,
 		requestIdentity,
+		attestation,
 	);
 	await logger.time(
 		"prewarmCodex:establishWs",
@@ -3672,15 +3891,7 @@ async function getOrCreateCodexWebSocketConnection(
 	provider: string,
 	signal?: AbortSignal,
 ): Promise<CodexWebSocketConnection> {
-	const targetUrl = new URL(url);
-	const proxy = shouldBypassProxy(targetUrl)
-		? undefined
-		: (getProxyForProvider(provider) ??
-			(targetUrl.protocol === "wss:"
-				? Bun.env.HTTPS_PROXY || Bun.env.https_proxy
-				: Bun.env.HTTP_PROXY || Bun.env.http_proxy) ??
-			Bun.env.ALL_PROXY ??
-			Bun.env.all_proxy);
+	const proxy = getProxyForUrl(provider, new URL(url));
 	const headerRecord = headersToRecord(headers);
 	// Join an in-flight handshake instead of tearing it down: closing a
 	// CONNECTING socket rejects the concurrent caller (prewarm racing the first
@@ -3729,6 +3940,24 @@ async function getOrCreateCodexWebSocketConnection(
 	return state.connection;
 }
 
+/**
+ * Compress an SSE request body with zstd. Returns `undefined` when
+ * compression is disabled or fails, in which case the caller sends the
+ * plain JSON string without a `content-encoding` header.
+ */
+function compressCodexRequestBody(bodyJson: string, baseUrl: string): Uint8Array | undefined {
+	if (!isOfficialCodexApiUrl(baseUrl) || !$flag("PI_CODEX_ZSTD", true)) return undefined;
+	try {
+		return Bun.zstdCompressSync(bodyJson, { level: 3 });
+	} catch (error) {
+		CODEX_DEBUG &&
+			logger.debug("[codex] codex request body compression failed", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+		return undefined;
+	}
+}
+
 async function openCodexSseEventStream(
 	url: string,
 	requestHeaders: Record<string, string> | undefined,
@@ -3742,6 +3971,7 @@ async function openCodexSseEventStream(
 	requestMetadata: CodexRequestMetadata | undefined,
 	signal: AbortSignal | undefined,
 	firstEventTimeoutMs: number | undefined,
+	codexSseMaxAttempts: number | undefined,
 	onSseEvent?: OpenAICodexResponsesOptions["onSseEvent"],
 	fetchOverride?: FetchImpl,
 ): Promise<AsyncGenerator<Record<string, unknown>>> {
@@ -3755,15 +3985,8 @@ async function openCodexSseEventStream(
 		state,
 		responsesLite,
 		requestMetadata,
+		await getCodexAttestationHeader(accountId),
 	);
-	CODEX_DEBUG &&
-		logger.debug("[codex] codex request", {
-			url,
-			model: body.model,
-			headers: redactHeaders(headers),
-			sentTurnStateHeader: headers.has(X_CODEX_TURN_STATE_HEADER),
-			sentModelsEtagHeader: headers.has(X_MODELS_ETAG_HEADER),
-		});
 	// `wrapCodexSseStream` arms the iterator-level idle watchdog only after this
 	// fetch resolves. Each transport attempt needs its own pre-response timer:
 	// the retry loop's base signal remains reserved for caller cancellation, so
@@ -3777,24 +4000,51 @@ async function openCodexSseEventStream(
 			clearPreResponseTimeout = undefined;
 		}
 	};
-	let response: Response;
-	try {
-		response = await fetchWithRetry(url, {
+	const bodyJson = JSON.stringify(body);
+	const compressedBody = compressCodexRequestBody(bodyJson, url);
+	if (compressedBody !== undefined) {
+		headers.set("content-encoding", "zstd");
+	}
+	CODEX_DEBUG &&
+		logger.debug("[codex] codex request", {
+			url,
+			model: body.model,
+			headers: redactHeaders(headers),
+			sentTurnStateHeader: headers.has(X_CODEX_TURN_STATE_HEADER),
+			sentModelsEtagHeader: headers.has(X_MODELS_ETAG_HEADER),
+		});
+
+	const send = (requestBody: string | Uint8Array): Promise<Response> =>
+		fetchWithRetry(url, {
 			method: "POST",
 			headers,
-			body: JSON.stringify(body),
+			body: requestBody,
 			signal,
 			prepareInit: () => {
 				const watchdog = armPreResponseTimeout(signal, firstEventTimeoutMs);
 				clearPreResponseTimeout = watchdog.clear;
 				return { signal: watchdog.signal };
 			},
-			maxAttempts: CODEX_MAX_RETRIES + 1,
+			maxAttempts: resolveCodexSseMaxAttempts(codexSseMaxAttempts),
 			defaultDelayMs: attempt => CODEX_RETRY_DELAY_MS * (attempt + 1),
 			maxDelayMs: CODEX_RATE_LIMIT_BUDGET_MS,
 			fetch: fetchAttempt,
 			timeout: false,
 		});
+	let response: Response;
+	try {
+		response = await send(compressedBody ?? bodyJson);
+		if (compressedBody !== undefined && (response.status === 400 || response.status === 415)) {
+			const rejectedStatus = response.status;
+			await response.body?.cancel();
+			headers.delete("content-encoding");
+			CODEX_DEBUG &&
+				logger.debug("[codex] retrying request without zstd after encoding rejection", {
+					url,
+					status: rejectedStatus,
+				});
+			response = await send(bodyJson);
+		}
 	} finally {
 		clearPreResponseTimeout?.();
 	}
@@ -3828,11 +4078,17 @@ function createCodexHeaders(
 	state?: CodexWebSocketSessionState,
 	responsesLite = false,
 	requestMetadata?: CodexCompatibilityIdentity,
+	attestation?: string,
 ): Headers {
 	const headers = new Headers(initHeaders ?? {});
 	headers.delete("x-api-key");
 	headers.set("Authorization", `Bearer ${accessToken}`);
 	if (accountId) headers.set(OPENAI_HEADERS.ACCOUNT_ID, accountId);
+	if (attestation) {
+		headers.set(OPENAI_HEADERS.ATTESTATION, attestation);
+	} else {
+		headers.delete(OPENAI_HEADERS.ATTESTATION);
+	}
 	const betaHeader =
 		transport === "websocket"
 			? OPENAI_HEADER_VALUES.BETA_RESPONSES_WEBSOCKETS_V2
@@ -3947,6 +4203,7 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 	// `function_call_output` (OpenAI rejects mismatched pairs).
 	const customCallIds = new Set<string>();
 	const knownCallIds = new Set<string>();
+	const computerCallIds = new Set<string>();
 
 	for (const msg of transformedMessages) {
 		if (msg.role === "user" || msg.role === "developer") {
@@ -3956,13 +4213,20 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 				| undefined;
 			if (historyItems) {
 				const redactedHistoryItems = redactSensitiveInObject(historyItems).result as Array<ResponseInput[number]>;
-				for (const item of redactedHistoryItems) {
-					const maybe = item as { type?: string; call_id?: string };
-					if (maybe.type === "custom_tool_call" && typeof maybe.call_id === "string") {
-						customCallIds.add(maybe.call_id);
+				const replayItems =
+					model.supportsComputerUse === true
+						? redactedHistoryItems
+						: unrollCodexComputerItems(redactedHistoryItems, model.compat.supportsImageDetailOriginal);
+				for (const item of replayItems) {
+					if (item.type === "custom_tool_call") {
+						customCallIds.add(item.call_id);
+					}
+					if (item.type === "computer_call") computerCallIds.add(item.call_id);
+					if ((item.type === "function_call" || item.type === "custom_tool_call") && item.call_id) {
+						knownCallIds.add(item.call_id);
 					}
 				}
-				messages.push(...redactedHistoryItems);
+				messages.push(...(isHarmonyDialectModel(model) ? escapeReplayedClientText(replayItems) : replayItems));
 				msgIndex += 1;
 				continue;
 			}
@@ -3988,16 +4252,23 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 			if (historyItems) {
 				const sanitizedHistoryItems = sanitizeOpenAIResponsesAssistantHistoryItemsForReplay(historyItems);
 				if (sanitizedHistoryItems) {
-					for (const item of sanitizedHistoryItems) {
-						const maybe = item as { type?: string; call_id?: string };
-						if (maybe.type === "custom_tool_call" && typeof maybe.call_id === "string") {
-							customCallIds.add(maybe.call_id);
+					const replayItems =
+						model.supportsComputerUse === true
+							? sanitizedHistoryItems
+							: unrollCodexComputerItems(sanitizedHistoryItems, model.compat.supportsImageDetailOriginal);
+					for (const item of replayItems) {
+						if (item.type === "custom_tool_call") {
+							customCallIds.add(item.call_id);
+						}
+						if (item.type === "computer_call") computerCallIds.add(item.call_id);
+						if ((item.type === "function_call" || item.type === "custom_tool_call") && item.call_id) {
+							knownCallIds.add(item.call_id);
 						}
 					}
 					if (providerPayload?.dt) {
-						messages.push(...sanitizedHistoryItems);
+						messages.push(...replayItems);
 					} else {
-						messages.splice(0, messages.length, ...sanitizedHistoryItems);
+						messages.splice(0, messages.length, ...replayItems);
 						// Keep customCallIds from the pre-splice state since historyItems may re-introduce them.
 					}
 					msgIndex += 1;
@@ -4007,12 +4278,16 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 			}
 
 			const convertedOutputItems = convertResponsesAssistantMessage(
-				msg as AssistantMessage,
+				model.supportsComputerUse === true ? assistantMsg : unrollCodexComputerAssistantMessage(assistantMsg),
 				model,
 				msgIndex,
 				knownCallIds,
 				!suppressHiddenEmptyFallback,
 				customCallIds,
+				false,
+				true,
+				undefined,
+				computerCallIds,
 			);
 			const outputItems = suppressHiddenEmptyFallback
 				? sanitizeOpenAIResponsesAssistantFallbackItemsForReplay(convertedOutputItems)
@@ -4027,12 +4302,14 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 		if (msg.role === "toolResult") {
 			appendResponsesToolResultMessages(
 				messages,
-				msg,
+				model.supportsComputerUse === true ? msg : unrollCodexComputerToolResult(msg),
 				model,
 				false,
 				model.compat.supportsImageDetailOriginal,
 				knownCallIds,
 				customCallIds,
+				true,
+				computerCallIds,
 			);
 		}
 
@@ -4046,14 +4323,23 @@ function normalizeInputMessageContent(
 	model: Model<"openai-codex-responses">,
 	content: string | Array<{ type: "text"; text: string } | { type: "image"; mimeType: string; data: string }>,
 ): ResponseInputContent[] {
+	// gpt-5.x codex rejects reserved Harmony control-token spellings in input
+	// data; escape the transport copy of untrusted user text so ordinary docs or
+	// grep results cannot poison the session (#6913). History is left untouched.
+	const escapeControlTokens = isHarmonyDialectModel(model);
 	if (typeof content === "string") {
 		if (!content || content.trim() === "") return [];
-		return [{ type: "input_text", text: content.toWellFormed() }];
+		const text = content.toWellFormed();
+		return [{ type: "input_text", text: escapeControlTokens ? escapeHarmonyControlTokens(text) : text }];
 	}
 
 	return (
-		convertResponsesInputContent(content, model.input.includes("image"), model.compat.supportsImageDetailOriginal) ??
-		[]
+		convertResponsesInputContent(
+			content,
+			model.input.includes("image"),
+			model.compat.supportsImageDetailOriginal,
+			escapeControlTokens,
+		) ?? []
 	);
 }
 
@@ -4061,6 +4347,7 @@ function normalizeInputMessageContent(
 export { convertMessages as convertCodexResponsesMessages };
 
 type CodexToolPayload =
+	| { type: "computer"; name?: never }
 	| {
 			type: "function";
 			name: string;
@@ -4081,9 +4368,16 @@ export function convertOpenAICodexResponsesTools(
 	model: Model<"openai-codex-responses">,
 ): CodexToolPayload[] {
 	const allowFreeform = model.applyPatchToolType === "freeform";
-	return tools.map((tool): CodexToolPayload => {
+	const payloads: CodexToolPayload[] = [];
+	for (const tool of tools) {
+		// Subscription models default to the function fallback. Explicit metadata
+		// remains authoritative for future Codex endpoints that implement GA computer use.
+		if (tool.native?.type === "computer" && model.supportsComputerUse === true) {
+			payloads.push({ type: "computer" });
+			continue;
+		}
 		if (allowFreeform && tool.customFormat) {
-			return {
+			payloads.push({
 				type: "custom",
 				name: tool.customWireName ?? tool.name,
 				description: tool.description || "",
@@ -4092,24 +4386,21 @@ export function convertOpenAICodexResponsesTools(
 					syntax: tool.customFormat.syntax,
 					definition: compactGrammarDefinition(tool.customFormat.syntax, tool.customFormat.definition),
 				},
-			};
+			});
+			continue;
 		}
 		const strict = !!(!NO_STRICT && tool.strict);
 		const baseParameters = sanitizeSchemaForOpenAIResponses(toolWireSchema(tool));
 		const { schema: parameters, strict: effectiveStrict } = adaptSchemaForStrict(baseParameters, strict);
-		return {
+		payloads.push({
 			type: "function",
 			name: tool.name,
 			description: tool.description || "",
 			parameters,
-			// See openai-responses.ts::convertTools — explicit `strict: false` is
-			// preserved on the wire because some backends distinguish it from
-			// omitted (#4336). `strict: true` still requires enforcement success,
-			// and the `PI_NO_STRICT` global bypass MUST suppress the flag entirely
-			// so Codex proxies that reject the `strict` key stay silent.
 			...(effectiveStrict ? { strict: true } : !NO_STRICT && tool.strict === false ? { strict: false } : {}),
-		};
-	});
+		});
+	}
+	return payloads;
 }
 
 export class CodexWebSocketTransportError extends Error {

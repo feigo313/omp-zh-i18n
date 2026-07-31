@@ -18,12 +18,10 @@ const EN_TIPS: readonly string[] = tipsText
 	.map(line => line.trim())
 	.filter(line => line.length > 0);
 
-/** Runtime-resolved tips: translated when i18n is active, fallback to English. */
 function resolveTips(): readonly string[] {
 	return interceptTips(EN_TIPS);
 }
 
-/** Lazy-loaded tips array. */
 let _tips: readonly string[] | null = null;
 function getTips(): readonly string[] {
 	if (_tips === null) _tips = resolveTips();
@@ -61,7 +59,6 @@ const NEW_GLOW_PERIOD_MS = 1500;
  *  affordance surfaces this many times as often. */
 const NEW_TIP_WEIGHT = 4;
 
-/** Per-tip selection weights, parallel to {@link getTips}. */
 function computeTipWeights(tips: readonly string[]): readonly number[] {
 	return tips.map(tip => (NEW_TIP_MARKER.test(tip) ? NEW_TIP_WEIGHT : 1));
 }

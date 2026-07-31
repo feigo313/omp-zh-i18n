@@ -121,7 +121,7 @@ export class HashlineFilesystem extends Filesystem {
 			throw error;
 		}
 		// Refuse edits against generated files (lockfiles, models.json, …).
-		assertEditableFileContent(content, relativePath);
+		assertEditableFileContent(content, relativePath, this.session.settings);
 		return content;
 	}
 
@@ -198,9 +198,33 @@ export class HashlineFilesystem extends Filesystem {
 		const finalContent = await serializeEditFileText(absolutePath, relativePath, content);
 
 		// Route through ACP bridge when available; skips internal artifacts.
-		if (await routeWriteThroughBridge(this.session, relativePath, absolutePath, finalContent, this.#signal)) {
+		// `finalContent` is storage-space (e.g. a notebook's full JSON); the
+		// bridge may also report content that diverges from it (e.g. the
+		// client reformatted on save). `WriteResult.text` must stay in
+		// view-space — the same space `readText` returns — so a follow-up
+		// `readText` sees exactly what this write reports.
+		const bridgeResult = await routeWriteThroughBridge(
+			this.session,
+			relativePath,
+			absolutePath,
+			finalContent,
+			this.#signal,
+		);
+		if (bridgeResult) {
 			this.#diagnosticsByPath.set(relativePath, undefined);
-			return { text: finalContent };
+			if (!bridgeResult.driftedFromRequest) {
+				// No client-side transform: the view we sent is what's on disk.
+				return { text: content };
+			}
+			// Drifted (e.g. format-on-save): re-derive the view from what
+			// actually landed on disk instead of assuming `content` still
+			// matches. Falls back to `content` if the drifted file can't be
+			// re-read as a valid view (e.g. a formatter broke notebook JSON).
+			try {
+				return { text: await readEditFileText(absolutePath, relativePath) };
+			} catch {
+				return { text: content };
+			}
 		}
 
 		const diagnostics = await this.#writethrough(
@@ -213,7 +237,7 @@ export class HashlineFilesystem extends Filesystem {
 		);
 		invalidateFsScanAfterWrite(absolutePath);
 		this.#diagnosticsByPath.set(relativePath, diagnostics);
-		return { text: finalContent };
+		return { text: content };
 	}
 
 	async exists(relativePath: string): Promise<boolean> {

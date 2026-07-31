@@ -27,6 +27,7 @@ const fileOperationLocks = new Map<string, Promise<void>>();
 /** Negative cache of recent init failures so a broken server fails fast instead of re-spawning per call. */
 const INIT_FAILURE_BACKOFF_MS = 3 * 60 * 1000;
 const initFailures = new Map<string, { at: number; message: string }>();
+const READER_EXIT_GRACE_MS = 100;
 
 // Idle timeout configuration (disabled by default)
 let idleTimeoutMs: number | null = null;
@@ -200,10 +201,10 @@ function abortReason(signal: AbortSignal): Error {
 	return signal.reason instanceof Error ? signal.reason : new ToolAbortError();
 }
 
-class LspFlushAbortError extends Error {
+class LspDrainAbortError extends Error {
 	constructor(readonly reason: Error) {
 		super(reason.message);
-		this.name = "LspFlushAbortError";
+		this.name = "LspDrainAbortError";
 	}
 }
 
@@ -216,26 +217,30 @@ async function writeMessage(
 		throw abortReason(signal);
 	}
 	const content = JSON.stringify(message);
-	sink.write(`Content-Length: ${Buffer.byteLength(content, "utf-8")}\r\n\r\n${content}`);
-	const flush = Promise.resolve(sink.flush());
+	const write = Promise.resolve(
+		sink.write(`Content-Length: ${Buffer.byteLength(content, "utf-8")}\r\n\r\n${content}`),
+	);
+	// Attach before flush(): it may throw synchronously after write() returned a
+	// rejected Promise, and leaving that rejection unobserved kills the host.
+	void write.catch(() => {});
+	const drain = Promise.all([write, Promise.resolve(sink.flush())]).then(() => {});
 	if (!signal) {
-		await flush;
+		await drain;
 		return;
 	}
-	// The sink's flush blocks on the OS-level pipe drain: if the server is
-	// alive but stopped reading stdin, `await sink.flush()` never resolves.
-	// Race the flush against the caller's signal so a wedged server surfaces
-	// as the tool's normal timeout/cancel instead of a permanent hang.
+	// Either sink operation can block on the OS-level pipe drain when a live
+	// server stops reading stdin. Race the combined drain against the caller's
+	// signal so a wedged server surfaces as the tool's normal timeout/cancel.
 	const { promise, resolve, reject } = Promise.withResolvers<void>();
 	const onAbort = () => {
 		signal.removeEventListener("abort", onAbort);
-		// The underlying flush stays pending in the background; suppress its
+		// The underlying drain stays pending in the background; suppress its
 		// eventual settlement so we do not surface an unhandled rejection.
-		flush.catch(() => {});
-		reject(new LspFlushAbortError(abortReason(signal)));
+		drain.catch(() => {});
+		reject(new LspDrainAbortError(abortReason(signal)));
 	};
 	signal.addEventListener("abort", onAbort, { once: true });
-	flush.then(
+	drain.then(
 		() => {
 			signal.removeEventListener("abort", onAbort);
 			resolve();
@@ -249,8 +254,8 @@ async function writeMessage(
 }
 
 /**
- * Kill a client whose write queue is stuck (aborted flush left the sink's
- * flush promise pending, so subsequent writes queue behind a wedge forever).
+ * Kill a client whose write queue is stuck (an aborted drain left a sink
+ * operation pending, so subsequent writes queue behind the wedge forever).
  * Remove it from `clients` immediately so concurrent `getOrCreateClient`
  * callers do not grab the corpse before `proc.exited` cleans up.
  */
@@ -270,8 +275,8 @@ function queueWriteMessage(
 ): Promise<void> {
 	const write = client.writeQueue.catch(() => {}).then(() => writeMessage(client.proc.stdin, message, signal));
 	const result = write.catch((err: unknown) => {
-		if (err instanceof LspFlushAbortError) {
-			// Only an abort that raced this write's in-flight flush leaves
+		if (err instanceof LspDrainAbortError) {
+			// Only an abort that raced this write's in-flight drain leaves
 			// the sink pending. Pre-write aborts and queued caller timeouts
 			// must not kill a healthy shared client.
 			teardownWedgedClient(client);
@@ -299,6 +304,7 @@ async function startMessageReader(client: LspClient): Promise<void> {
 
 	const framer = new MessageFramer(Buffer.from(client.messageBuffer));
 
+	let readerFailed = false;
 	try {
 		while (true) {
 			const { done, value } = await reader.read();
@@ -364,7 +370,15 @@ async function startMessageReader(client: LspClient): Promise<void> {
 						if (pending) {
 							client.pendingRequests.delete(message.id);
 							if ("error" in message && message.error) {
-								pending.reject(new Error(`LSP error: ${message.error.message}`));
+								// Include the JSON-RPC error code: `isMethodNotFoundError` matches
+								// `-32601` by substring, so method-not-found is recognized even when
+								// the server's message text is nonstandard (e.g. "Unknown request").
+								const code = message.error.code;
+								pending.reject(
+									new Error(
+										`LSP error${typeof code === "number" ? ` ${code}` : ""}: ${message.error.message}`,
+									),
+								);
 							} else {
 								pending.resolve(message.result);
 							}
@@ -379,6 +393,7 @@ async function startMessageReader(client: LspClient): Promise<void> {
 			}
 		}
 	} catch (err) {
+		readerFailed = true;
 		// Connection closed or error - reject all pending requests
 		for (const pending of Array.from(client.pendingRequests.values())) {
 			pending.reject(new Error(`LSP connection closed: ${err}`));
@@ -389,6 +404,9 @@ async function startMessageReader(client: LspClient): Promise<void> {
 		client.messageBuffer = framer.remainder();
 		reader.releaseLock();
 		client.isReading = false;
+		if (!readerFailed && client.proc.exitCode === null) {
+			await waitForExit(client, READER_EXIT_GRACE_MS);
+		}
 		// Reader exited while the server process is still alive (unrecoverable
 		// read error or bad stream state): nothing will route responses anymore,
 		// so tear the client down — the next call respawns instead of timing out.
@@ -664,6 +682,15 @@ const PROJECT_LOAD_TIMEOUT_MS = 15_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const EXIT_TIMEOUT_MS = 1_000;
 
+function clientKey(config: ServerConfig, cwd: string): string {
+	return `${config.command}:${cwd}`;
+}
+
+/** Allow an explicit user reload to retry a matching initialization failure immediately. */
+export function clearInitializationFailure(config: ServerConfig, cwd: string): void {
+	initFailures.delete(clientKey(config, cwd));
+}
+
 /**
  * Get or create an LSP client for the given server configuration and working directory.
  * @param config - Server configuration
@@ -680,7 +707,7 @@ export async function getOrCreateClient(
 	initTimeoutMs?: number,
 	signal?: AbortSignal,
 ): Promise<LspClient> {
-	const key = `${config.command}:${cwd}`;
+	const key = clientKey(config, cwd);
 
 	// Check if client already exists
 	const existingClient = clients.get(key);
@@ -846,6 +873,29 @@ export async function getOrCreateClient(
 	return clientPromise;
 }
 
+/** Return an active or already-starting client without starting a language server. */
+export async function getActiveOrPendingClient(
+	config: ServerConfig,
+	cwd: string,
+	signal?: AbortSignal,
+): Promise<LspClient | undefined> {
+	throwIfAborted(signal);
+	const client = clients.get(clientKey(config, cwd));
+	if (client) {
+		client.lastActivity = Date.now();
+		return client;
+	}
+
+	const pending = clientLocks.get(clientKey(config, cwd));
+	if (!pending) return undefined;
+	try {
+		return await untilAborted(signal, pending);
+	} catch {
+		throwIfAborted(signal);
+		return undefined;
+	}
+}
+
 /**
  * Ensure a file is opened in the LSP client.
  * Sends didOpen notification if the file is not already tracked.
@@ -883,7 +933,7 @@ export async function ensureFileOpen(client: LspClient, filePath: string, signal
 			if (isEnoent(err)) return;
 			throw err;
 		}
-		const languageId = detectLanguageId(filePath);
+		const languageId = client.config.languageId ?? detectLanguageId(filePath);
 		throwIfAborted(signal);
 
 		await sendNotification(
@@ -957,7 +1007,7 @@ export async function syncContent(
 
 		if (!info) {
 			// Open file with provided content instead of reading from disk
-			const languageId = detectLanguageId(filePath);
+			const languageId = client.config.languageId ?? detectLanguageId(filePath);
 			throwIfAborted(signal);
 			await sendNotification(
 				client,
@@ -1036,7 +1086,7 @@ const WATCHED_FILES_NOTIFY_TIMEOUT_MS = 2_000;
  * This covers sibling files that are not open text documents, such as generated
  * CSS modules or type files that another edited document imports immediately.
  *
- * The underlying stdin flush is self-bounded by
+ * The underlying stdin write drain is self-bounded by
  * {@link WATCHED_FILES_NOTIFY_TIMEOUT_MS}; only an abort of the caller's
  * `signal` rejects.
  */
@@ -1158,9 +1208,19 @@ async function waitForExit(client: LspClient, timeoutMs: number): Promise<boolea
 }
 
 /**
- * Shutdown a specific client instance using the LSP shutdown/exit handshake.
+ * Tear down a specific client instance using the LSP shutdown/exit handshake.
+ *
+ * Removes the client from the registry by identity first (never evicting a
+ * newer client already republished under the same key), then performs a bounded
+ * graceful shutdown, force-killing and awaiting confirmed process exit.
+ *
+ * @returns `true` once the process is confirmed exited, `false` if it outlived
+ * the shutdown budget — callers reporting a restart must treat `false` as a
+ * failed teardown, not a completed restart.
  */
-async function shutdownClientInstance(client: LspClient): Promise<void> {
+export async function shutdownClientInstance(client: LspClient): Promise<boolean> {
+	if (clients.get(client.name) === client) clients.delete(client.name);
+
 	const err = new Error("LSP client shutdown");
 	for (const pending of Array.from(client.pendingRequests.values())) {
 		pending.reject(err);
@@ -1173,21 +1233,23 @@ async function shutdownClientInstance(client: LspClient): Promise<void> {
 	);
 	if (shutdownCompleted) {
 		await sendNotification(client, "exit", undefined).catch(() => {});
-		if (await waitForExit(client, EXIT_TIMEOUT_MS)) return;
+		if (await waitForExit(client, EXIT_TIMEOUT_MS)) return true;
 	}
 
 	client.proc.kill();
-	await waitForExit(client, EXIT_TIMEOUT_MS);
+	return await waitForExit(client, EXIT_TIMEOUT_MS);
 }
 
 /**
  * Shutdown a specific client by key.
+ *
+ * @returns `true` when the client is gone (already absent or confirmed exited),
+ * `false` if a live process outlived the shutdown budget.
  */
-export async function shutdownClient(key: string): Promise<void> {
+export async function shutdownClient(key: string): Promise<boolean> {
 	const client = clients.get(key);
-	if (!client) return;
-	clients.delete(key);
-	await shutdownClientInstance(client);
+	if (!client) return true;
+	return await shutdownClientInstance(client);
 }
 
 // =============================================================================

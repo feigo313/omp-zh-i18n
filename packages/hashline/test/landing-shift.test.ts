@@ -85,8 +85,8 @@ describe("after-insert landing shift", () => {
 	});
 
 	it("refuses to cross a line targeted by another hunk", () => {
-		const { text, warnings } = apply(FILE, "INS.POST 3:\n+    c();\nDEL 4");
-		// The closer on line 4 is owned by the delete; the insert stays put.
+		const { text, warnings } = apply(FILE, "INS.POST 3:\n+    c();\nCUT 4");
+		// The closer on line 4 is owned by the cut; the insert stays put.
 		expect(text).toBe(["function f() {", "    if (x) {", "        a();", "    c();", "    b();", "}", ""].join("\n"));
 		expect(warnings).toHaveLength(0);
 	});

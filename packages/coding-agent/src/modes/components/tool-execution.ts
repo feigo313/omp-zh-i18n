@@ -1,4 +1,4 @@
-import type { SnapshotStore } from "@oh-my-pi/hashline";
+import type { Clipboard, SnapshotStore } from "@oh-my-pi/hashline";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import {
 	Box,
@@ -19,27 +19,13 @@ import { EDIT_MODE_STRATEGIES, type EditMode, type PerFileDiffPreview } from "..
 import type { Theme } from "../../modes/theme/theme";
 import { getThemeEpoch, theme } from "../../modes/theme/theme";
 import { BASH_DEFAULT_PREVIEW_LINES } from "../../tools/bash";
+import { formatDefaultToolExecution } from "../../tools/default-renderer";
 import { EVAL_DEFAULT_PREVIEW_LINES } from "../../tools/eval";
 import { isWaitingPollDetails } from "../../tools/hub";
-import {
-	formatArgsInline,
-	JSON_TREE_MAX_DEPTH_COLLAPSED,
-	JSON_TREE_MAX_DEPTH_EXPANDED,
-	JSON_TREE_MAX_LINES_COLLAPSED,
-	JSON_TREE_MAX_LINES_EXPANDED,
-	JSON_TREE_SCALAR_LEN_COLLAPSED,
-	JSON_TREE_SCALAR_LEN_EXPANDED,
-	renderJsonTreeLines,
-} from "../../tools/json-tree";
-import {
-	formatExpandHint,
-	formatStatusIcon,
-	replaceTabs,
-	resolveImageOptions,
-	truncateToWidth,
-} from "../../tools/render-utils";
+import { formatStatusIcon, replaceTabs, resolveImageOptions } from "../../tools/render-utils";
 import { type FirstResultViewportRepaint, toolRenderers } from "../../tools/renderers";
 import { TODO_STRIKE_TOTAL_FRAMES, type TodoToolDetails } from "../../tools/todo";
+import type { XdevState } from "../../tools/xdev";
 import { isFramedBlockComponent, markFramedBlockComponent, renderStatusLine, WidthAwareText } from "../../tui";
 import { sanitizeWithOptionalSixelPassthrough } from "../../utils/sixel";
 import { renderDiff } from "./diff";
@@ -217,6 +203,13 @@ class SafeToolRendererComponent implements Component {
  */
 export interface TranscriptLiveRegionProbe {
 	isBlockInLiveRegion(component: Component): boolean;
+	/**
+	 * Whether none of the block's rows have entered native scrollback (see
+	 * `TranscriptContainer.isBlockUncommitted`). Optional: standalone hosts
+	 * without commit tracking omit it, and blocks treat their rows as
+	 * uncommitted.
+	 */
+	isBlockUncommitted?(component: Component): boolean;
 }
 
 /** Minimal TUI surface ToolExecutionComponent uses to schedule repaints and share image budget. */
@@ -229,6 +222,8 @@ export interface ToolExecutionUi {
 
 export interface ToolExecutionOptions {
 	snapshots?: SnapshotStore;
+	/** Session-persistent edit clipboard register, forked per preview frame. */
+	clipboard?: Clipboard;
 	showImages?: boolean; // default: true (only used if terminal supports images)
 	editFuzzyThreshold?: number;
 	editAllowFuzzy?: boolean;
@@ -292,6 +287,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	#editFuzzyThreshold: number | undefined;
 	#editAllowFuzzy: boolean | undefined;
 	#snapshots?: SnapshotStore;
+	#clipboard?: Clipboard;
 	#isPartial = true;
 	#resultVersion = 0;
 	#lastDisplayKey: string | undefined;
@@ -351,10 +347,21 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	// transcript, e.g. in tests): whether this block is still repaintable.
 	#liveRegion?: TranscriptLiveRegionProbe;
 	// One-way latch for a detached (`async.state === "running"`) task block
-	// that left the transcript live region: its rows are commit-eligible
-	// history, so progress renders static gray and further partial snapshots are
-	// dropped (see #maybeFreezeBackgroundTask).
+	// whose rows became native-scrollback history — it left the transcript
+	// live region, or its head rows were committed while it was still the
+	// live tail. Further partial snapshots are dropped so committed rows are
+	// never mutated (see #maybeFreezeBackgroundTask).
 	#backgroundTaskFrozen = false;
+	// Whether the freeze may restyle the progress rows static gray. Set only
+	// when the latch fired while no row was committed: a recolor of rows
+	// already on the tape would itself diverge immutable history and force an
+	// erase-replay (or, with scrollback rebuild off, a duplicate slab).
+	#backgroundTaskFrozenStyled = false;
+	// Wall clock captured at each repaintable rebuild of a task card and
+	// reused verbatim once the card freezes or any of its rows commit, so
+	// time-derived rows (current-tool elapsed, retry countdown) cannot drift
+	// a committed byte on later rebuilds (theme epoch, image toggles).
+	#taskRenderNowMs = Date.now();
 	// Set on each `render()` when the last painted pending shape must be
 	// replayed wholesale when the first result arrives. Reset gates key off
 	// these so a topology-changing update that lands before the shape reaches
@@ -389,6 +396,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		this.#editFuzzyThreshold = options.editFuzzyThreshold;
 		this.#editAllowFuzzy = options.editAllowFuzzy;
 		this.#snapshots = options.snapshots;
+		this.#clipboard = options.clipboard;
 		this.#liveRegion = options.liveRegion;
 		this.#tool = tool;
 		this.#ui = ui;
@@ -402,7 +410,21 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		// strips PLAIN-blank edges, so framed/minimal blocks (no bg set) drop these
 		// lines and keep their tight spacing — only tinted lines survive.
 		this.#contentBox = new Box(0, 1);
-		this.#contentText = new WidthAwareText(contentWidth => this.#formatToolExecution(contentWidth), 1, 1);
+		this.#contentText = new WidthAwareText(
+			contentWidth =>
+				formatDefaultToolExecution(
+					{
+						label: this.#toolLabel,
+						args: this.#args,
+						result: this.#result ? { output: this.#getTextOutput(), isError: this.#result.isError } : undefined,
+						options: this.#renderState,
+					},
+					contentWidth,
+					theme,
+				),
+			1,
+			1,
+		);
 
 		// Use Box for custom tools or built-in tools that have renderers
 		const hasRenderer = toolName in toolRenderers;
@@ -532,6 +554,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 				cwd: this.#cwd,
 				signal: controller.signal,
 				snapshots: this.#snapshots!,
+				clipboard: this.#clipboard,
 				fuzzyThreshold: this.#editFuzzyThreshold,
 				allowFuzzy: this.#editAllowFuzzy,
 				isStreaming,
@@ -559,13 +582,17 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		_toolCallId?: string,
 	): void {
 		// A detached task spawn keeps streaming progress snapshots after the
-		// block froze (left the transcript live region). Drop them: the rows are
-		// static gray history now, and repainting would rewrite rows the engine
-		// may already have committed to native scrollback. The terminal snapshot
-		// (async completed/failed → isPartial=false) still applies so a block
-		// that is still on screen settles on real results.
-		if (isPartial && this.#toolName === "task" && this.#maybeFreezeBackgroundTask()) {
-			return;
+		// block froze (left the transcript live region, or its rows entered
+		// native scrollback). Drop them: repainting would rewrite rows the
+		// engine may already have committed. The terminal snapshot (async
+		// completed/failed → isPartial=false) still settles a card that is
+		// wholly uncommitted (still on screen); once any row is on the tape
+		// the card is immutable history — replacing it would re-commit the
+		// whole slab below the stale copy — so the settlement is dropped and
+		// the job's result surfaces through its own delivery message.
+		if (this.#toolName === "task" && this.#maybeFreezeBackgroundTask()) {
+			if (isPartial) return;
+			if (!(this.#liveRegion?.isBlockUncommitted?.(this) ?? true)) return;
 		}
 		const hadNoResult = this.#result === undefined;
 		const wasPartialResult = this.#result !== undefined && this.#isPartial;
@@ -713,22 +740,30 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	}
 
 	/**
-	 * Freeze a detached (`async.state === "running"`) task block once it leaves
-	 * the transcript's live region. Past that seam its rows are commit-eligible
-	 * native-scrollback history: repaint the progress rows static gray and drop
-	 * further partial snapshots. One-way — blocks never re-enter the live
-	 * region. Returns whether the block is frozen.
+	 * Freeze a detached (`async.state === "running"`) task block once its rows
+	 * become native-scrollback history: the block left the transcript's live
+	 * region (a later block streams below it), or — while it is still the
+	 * live tail — its head rows were committed because the frame outgrew the
+	 * viewport. Committed rows are immutable, so from that point every further
+	 * partial snapshot is dropped. Rows restyle static gray only when nothing
+	 * is committed yet; otherwise the bytes stay exactly as painted. One-way —
+	 * blocks never re-enter the live region. Returns whether the block is
+	 * frozen.
 	 */
 	#maybeFreezeBackgroundTask(): boolean {
 		if (this.#backgroundTaskFrozen) return true;
 		if (this.#toolName !== "task" || this.#liveRegion === undefined) return false;
 		const asyncState = (this.#result?.details as { async?: { state?: string } } | undefined)?.async?.state;
 		if (asyncState !== "running") return false;
-		if (this.#liveRegion.isBlockInLiveRegion(this)) return false;
+		const uncommitted = this.#liveRegion.isBlockUncommitted?.(this) ?? true;
+		if (uncommitted && this.#liveRegion.isBlockInLiveRegion(this)) return false;
 		this.#backgroundTaskFrozen = true;
 		this.#updateSpinnerAnimation();
-		this.#updateDisplay();
-		this.#ui.requestRender();
+		if (uncommitted) {
+			this.#backgroundTaskFrozenStyled = true;
+			this.#updateDisplay();
+			this.#ui.requestRender();
+		}
 		return true;
 	}
 
@@ -782,9 +817,18 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		return this.isTranscriptBlockFinalized() ? undefined : 0;
 	}
 
-	/** Keeps the in-flight `vibe_wait` TV wall out of immutable native scrollback. */
+	/**
+	 * Keeps in-flight TV-wall frames out of immutable native scrollback: the
+	 * `vibe_wait` wall, displaceable snapshots (`hub` waiting polls, `todo`
+	 * lists), and live `task` calls. Their frames replace each other rather
+	 * than append — task progress rows rewrite in place on every snapshot —
+	 * so an unpinned commit records a per-tick frozen snapshot (and for
+	 * displaceable blocks force-seals them, stacking the next poll below).
+	 * The finalized frame commits exactly once when the pin lifts.
+	 */
 	isNativeScrollbackLiveRegionPinned(): boolean {
-		return this.#toolName === "vibe_wait" && !this.isTranscriptBlockFinalized();
+		if (this.isTranscriptBlockFinalized()) return false;
+		return this.#toolName === "vibe_wait" || this.#toolName === "task" || this.#displaceableByToolName !== undefined;
 	}
 
 	/**
@@ -818,8 +862,12 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		this.#sealed = true;
 		this.#displaceableByToolName = undefined;
 		// A sealed detached task is abandoned history: settle its progress rows
-		// on static gray.
+		// on static gray — but only while none of them are committed; a recolor
+		// on the tape would diverge immutable history.
 		this.#backgroundTaskFrozen = true;
+		if (this.#liveRegion?.isBlockUncommitted?.(this) ?? true) {
+			this.#backgroundTaskFrozenStyled = true;
+		}
 		this.stopAnimation();
 		this.#updateDisplay();
 		this.#ui.requestRender();
@@ -879,7 +927,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		// TUI startup, so a result rendered before it lands must re-shape once it
 		// does (it gates Image children vs text fallback in #rebuildDisplay); keyed
 		// here for the same reason markdown.ts keys its render cache on it.
-		const key = `${this.#resultVersion}|${this.#expanded}|${this.#isPartial}|${this.#spinnerFrame ?? "-"}|${this.#showImages}|${getThemeEpoch()}|${this.#displayInputVersion}|${this.#backgroundTaskFrozen}|${TERMINAL.imageProtocol ?? "-"}|${this.#imageSizeKey()}`;
+		const key = `${this.#resultVersion}|${this.#expanded}|${this.#isPartial}|${this.#spinnerFrame ?? "-"}|${this.#showImages}|${getThemeEpoch()}|${this.#displayInputVersion}|${this.#backgroundTaskFrozenStyled}|${TERMINAL.imageProtocol ?? "-"}|${this.#imageSizeKey()}`;
 		if (key === this.#lastDisplayKey && this.#displayBuilt) return;
 		this.#lastDisplayKey = key;
 
@@ -1283,9 +1331,17 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 			// draws every dispatched agent as a progress/result line, so tell
 			// `renderCall` to drop its duplicate streaming preview list.
 			context.hasResult = Boolean(this.#result);
-			// Out of the transcript live region: progress rows render static gray
-			// (see task/render.ts).
-			context.frozen = this.#backgroundTaskFrozen;
+			// Settled as history (out of the live region, before any row entered
+			// the tape): progress rows render static gray (see task/render.ts).
+			context.frozen = this.#backgroundTaskFrozenStyled;
+			// Freeze the render clock alongside the latch — and independently the
+			// moment any row commits, closing the window between a commit paint
+			// and the next snapshot where a settings-triggered rebuild could
+			// re-derive elapsed/countdown bytes under committed rows.
+			if (!this.#backgroundTaskFrozen && (this.#liveRegion?.isBlockUncommitted?.(this) ?? true)) {
+				this.#taskRenderNowMs = Date.now();
+			}
+			context.nowMs = this.#taskRenderNowMs;
 		} else if (isEditLikeToolName(this.#toolName)) {
 			context.editMode = this.#editMode;
 			const previews = this.#editDiffPreview;
@@ -1308,13 +1364,13 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 			}
 			context.renderDiff = renderDiff;
 		} else if (this.#toolName === "write") {
-			// Device-dispatch previews delegate to the mounted tool's own renderer;
-			// expose the session's xd:// registry so custom/MCP renderers survive dispatch.
-			const writeTool = this.#tool as
-				| { session?: { xdevRegistry?: { get(name: string): AgentTool | undefined } } }
-				| undefined;
-			const registry = writeTool?.session?.xdevRegistry;
-			if (registry) context.resolveXdevMounted = (name: string) => registry.get(name);
+			// Device-dispatch previews resolve renderers from the canonical tool map.
+			const writeTool = this.#tool as { session?: { xdev?: XdevState } } | undefined;
+			const xdev = writeTool?.session?.xdev;
+			if (xdev) {
+				context.resolveXdevMounted = (name: string) =>
+					xdev.mountedNames.has(name) ? xdev.tools.get(name) : undefined;
+			}
 		}
 
 		return context;
@@ -1343,97 +1399,5 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		}
 
 		return output;
-	}
-
-	/**
-	 * Format a generic tool execution (fallback for tools without custom renderers)
-	 */
-	#formatToolExecution(contentWidth: number): string {
-		const lines: string[] = [];
-		const icon = this.#isPartial
-			? this.#spinnerFrame !== undefined
-				? "running"
-				: "pending"
-			: this.#result?.isError
-				? "error"
-				: "done";
-		lines.push(renderStatusLine({ icon, spinnerFrame: this.#spinnerFrame, title: this.#toolLabel }, theme));
-
-		const argsObject = this.#args && typeof this.#args === "object" ? (this.#args as Record<string, unknown>) : null;
-		if (!this.#expanded && argsObject && Object.keys(argsObject).length > 0) {
-			// Budget the inline preview against the render width, leaving room for
-			// the ` └─ ` connector prefix instead of a fixed cap.
-			const inlineBudget = Math.max(20, contentWidth - Bun.stringWidth(theme.tree.last) - 2);
-			const preview = formatArgsInline(argsObject, inlineBudget);
-			if (preview) {
-				lines.push(` ${theme.fg("dim", theme.tree.last)} ${theme.fg("dim", preview)}`);
-			}
-		}
-
-		if (this.#expanded && this.#args !== undefined) {
-			lines.push("");
-			lines.push(theme.fg("dim", "Args"));
-			const tree = renderJsonTreeLines(
-				this.#args,
-				theme,
-				JSON_TREE_MAX_DEPTH_EXPANDED,
-				JSON_TREE_MAX_LINES_EXPANDED,
-				JSON_TREE_SCALAR_LEN_EXPANDED,
-			);
-			lines.push(...tree.lines);
-			if (tree.truncated) {
-				lines.push(theme.fg("dim", "…"));
-			}
-			lines.push("");
-		}
-
-		if (!this.#result) {
-			return lines.join("\n");
-		}
-
-		const textContent = this.#getTextOutput().trimEnd();
-		if (!textContent) {
-			lines.push(theme.fg("dim", "(no output)"));
-			return lines.join("\n");
-		}
-
-		if (textContent.startsWith("{") || textContent.startsWith("[")) {
-			try {
-				const parsed = JSON.parse(textContent);
-				const maxDepth = this.#expanded ? JSON_TREE_MAX_DEPTH_EXPANDED : JSON_TREE_MAX_DEPTH_COLLAPSED;
-				const maxLines = this.#expanded ? JSON_TREE_MAX_LINES_EXPANDED : JSON_TREE_MAX_LINES_COLLAPSED;
-				const maxScalarLen = this.#expanded ? JSON_TREE_SCALAR_LEN_EXPANDED : JSON_TREE_SCALAR_LEN_COLLAPSED;
-				const tree = renderJsonTreeLines(parsed, theme, maxDepth, maxLines, maxScalarLen);
-
-				if (tree.lines.length > 0) {
-					lines.push(...tree.lines);
-					if (!this.#expanded) {
-						lines.push(formatExpandHint(theme, this.#expanded, true));
-					} else if (tree.truncated) {
-						lines.push(theme.fg("dim", "…"));
-					}
-					return lines.join("\n");
-				}
-			} catch {
-				// Fall through to raw output
-			}
-		}
-
-		const outputLines = textContent.split("\n");
-		const maxOutputLines = this.#expanded ? 12 : 4;
-		const displayLines = outputLines.slice(0, maxOutputLines);
-
-		for (const line of displayLines) {
-			lines.push(theme.fg("toolOutput", truncateToWidth(replaceTabs(line), contentWidth)));
-		}
-
-		if (outputLines.length > maxOutputLines) {
-			const remaining = outputLines.length - maxOutputLines;
-			lines.push(`${theme.fg("dim", `… ${remaining} more lines`)} ${formatExpandHint(theme, this.#expanded, true)}`);
-		} else if (!this.#expanded) {
-			lines.push(formatExpandHint(theme, this.#expanded, true));
-		}
-
-		return lines.join("\n");
 	}
 }

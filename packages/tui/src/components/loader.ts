@@ -24,6 +24,8 @@ export class Loader extends Text {
 	#lastSpinnerTick = 0;
 	#layoutSource?: readonly string[];
 	#layout?: readonly { leading: string; content: string; trailing: string }[];
+	#layoutFrames: readonly string[];
+	#layoutFrame: string;
 
 	constructor(
 		ui: TUI,
@@ -37,6 +39,17 @@ export class Loader extends Text {
 		if (spinnerFrames && spinnerFrames.length > 0) {
 			this.#frames = spinnerFrames;
 		}
+		const representatives = new Map<number, string>();
+		this.#layoutFrames = this.#frames.map(frame => {
+			const width = visibleWidth(frame);
+			const representative = representatives.get(width);
+			if (representative !== undefined) {
+				return representative;
+			}
+			representatives.set(width, frame);
+			return frame;
+		});
+		this.#layoutFrame = this.#layoutFrames[0];
 		this.start();
 	}
 
@@ -58,12 +71,16 @@ export class Loader extends Text {
 		}
 
 		const frame = this.#frames[this.#currentFrame];
+		// The wrapped text carries one stable representative per frame width.
+		// Same-width frames swap only the visible glyph here; crossing widths
+		// rewraps against the representative selected by #syncText.
+		const sentinel = this.#layoutFrame;
 		const lines = [""];
 		const layout = this.#layout ?? [];
 		for (let i = 0; i < layout.length; i++) {
 			const { leading, content, trailing } = layout[i];
-			if (i === 0 && content.startsWith(frame)) {
-				const remainder = content.slice(frame.length);
+			if (i === 0 && content.startsWith(sentinel)) {
+				const remainder = content.slice(sentinel.length);
 				const separator = remainder.startsWith(" ") ? " " : "";
 				const message = remainder.slice(separator.length);
 				lines.push(
@@ -78,7 +95,8 @@ export class Loader extends Text {
 
 	start() {
 		this.#lastSpinnerTick = performance.now();
-		this.#updateDisplay();
+		this.#syncText();
+		this.#requestPaint();
 		const intervalMs = this.messageColorFn.animated === true ? RENDER_INTERVAL_MS : SPINNER_ADVANCE_MS;
 		this.#intervalId = setInterval(() => {
 			const now = performance.now();
@@ -88,9 +106,10 @@ export class Loader extends Text {
 				const steps = Math.floor(elapsed / SPINNER_ADVANCE_MS);
 				this.#currentFrame = (this.#currentFrame + steps) % this.#frames.length;
 				this.#lastSpinnerTick += steps * SPINNER_ADVANCE_MS;
+				this.#syncText();
 			}
 			if (shouldAdvanceSpinner || this.#ui?.synchronizedOutput === true) {
-				this.#updateDisplay();
+				this.#requestPaint();
 			}
 		}, intervalMs);
 	}
@@ -112,22 +131,29 @@ export class Loader extends Text {
 			return;
 		}
 		this.message = message;
-		this.#updateDisplay();
+		this.#syncText();
+		this.#requestPaint();
 	}
 
-	#updateDisplay() {
-		const frame = this.#frames[this.#currentFrame];
-		const textChanged = this.setText(`${frame} ${this.message}`);
-		if ((textChanged || this.messageColorFn.animated === true) && this.#ui) {
-			// Direct write: a loader tick changes only this component, so the TUI
-			// can update the already-positioned rows without driving the full
-			// compose/prepare/diff pipeline. Lightweight test stubs may not carry
-			// the newer API; keep their legacy component-scoped path working.
-			if (typeof this.#ui.requestDirectWrite === "function") {
-				this.#ui.requestDirectWrite(this);
-			} else {
-				this.#ui.requestComponentRender(this);
-			}
+	/** Re-wrap the underlying Text only when its message or frame width changes. */
+	#syncText(): boolean {
+		const layoutFrame = this.#layoutFrames[this.#currentFrame];
+		this.#layoutFrame = layoutFrame;
+		return this.setText(`${layoutFrame} ${this.message}`);
+	}
+
+	#requestPaint() {
+		if (!this.#ui) {
+			return;
+		}
+		// Direct write: a loader tick changes only this component, so the TUI can
+		// update the already-positioned rows without driving the full
+		// compose/prepare/diff pipeline. Lightweight test stubs may not carry the
+		// newer API; keep their legacy component-scoped path working.
+		if (typeof this.#ui.requestDirectWrite === "function") {
+			this.#ui.requestDirectWrite(this);
+		} else {
+			this.#ui.requestComponentRender(this);
 		}
 	}
 }

@@ -23,8 +23,31 @@ describe("parseRateLimitReason", () => {
 		).toBe("QUOTA_EXHAUSTED");
 	});
 
-	it("classifies 'resource exhausted' (exact gRPC phrase) as MODEL_CAPACITY_EXHAUSTED", () => {
+	it("classifies 'resource exhausted' (space phrase) as MODEL_CAPACITY_EXHAUSTED", () => {
 		expect(parseRateLimitReason("resource exhausted")).toBe("MODEL_CAPACITY_EXHAUSTED");
+	});
+
+	// Connect/gRPC end-streams carry the status name `resource_exhausted` (underscore),
+	// not the space phrase. It must classify identically to the space form so the
+	// session retry path uses the 45–75s MODEL_CAPACITY backoff instead of the 30-min
+	// QUOTA_EXHAUSTED block. Regression for #7032.
+	it("classifies bare Connect resource_exhausted as MODEL_CAPACITY_EXHAUSTED", () => {
+		expect(parseRateLimitReason("Connect error resource_exhausted: Error")).toBe("MODEL_CAPACITY_EXHAUSTED");
+	});
+
+	// parseConnectEndStream repeats the default status phrase in the message body:
+	// `Connect error resource_exhausted: resource exhausted`. Both tokens must be
+	// stripped so the leftover "exhausted" doesn't trip the generic quota branch.
+	it("classifies repeated bare resource-exhausted tokens as MODEL_CAPACITY_EXHAUSTED", () => {
+		expect(parseRateLimitReason("Connect error resource_exhausted: resource exhausted")).toBe(
+			"MODEL_CAPACITY_EXHAUSTED",
+		);
+	});
+
+	it("keeps explicit quota details authoritative after resource_exhausted", () => {
+		expect(parseRateLimitReason("Connect error resource_exhausted: Quota exceeded for this account")).toBe(
+			"QUOTA_EXHAUSTED",
+		);
 	});
 
 	it("classifies Too many requests as RATE_LIMIT_EXCEEDED", () => {
@@ -224,6 +247,15 @@ describe("isUsageLimitOutcome", () => {
 		expect(
 			isUsageLimitOutcome(403, "403 订阅额度不足或未配置订阅: subscription quota insufficient, need=14447"),
 		).toBe(true);
+	});
+
+	// The MODEL_CAPACITY reclassification of resource_exhausted (#7032) must NOT
+	// remove stream/session credential rotation: USAGE_LIMIT_PATTERN's
+	// `resource.?exhausted` still flags both forms as a usage-limit outcome so a
+	// sibling credential is tried before the short backoff.
+	it("still rotates on bare Connect resource_exhausted regardless of status", () => {
+		expect(isUsageLimitOutcome(undefined, "Connect error resource_exhausted: Error")).toBe(true);
+		expect(isUsageLimitOutcome(undefined, "Connect error resource exhausted: Error")).toBe(true);
 	});
 
 	it("rotates on xAI Grok 403 credit/spending-limit exhaustion regardless of status", () => {

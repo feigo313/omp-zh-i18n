@@ -4,6 +4,8 @@ export * from "./EmptyState";
 export * from "./ErrorState";
 export * from "./JsonBlock";
 export * from "./MetricCluster";
+export * from "./ModelFilter";
+export * from "./Pagination";
 export * from "./Panel";
 export * from "./RequestDrawer";
 export * from "./SegmentedControl";

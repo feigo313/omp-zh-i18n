@@ -13,6 +13,9 @@
 import {
 	type BlockResolution,
 	buildCompactDiffPreview,
+	type Clipboard,
+	commitClipboard,
+	forkClipboard,
 	MismatchError as HashlineMismatchError,
 	Patch,
 	Patcher,
@@ -25,6 +28,7 @@ import type { ToolSession } from "../../tools";
 import { outputMeta } from "../../tools/output-meta";
 import { ToolError } from "../../tools/tool-errors";
 import { generateDiffString } from "../diff";
+import { getEditClipboard } from "../edit-clipboard";
 import { getFileSnapshotStore } from "../file-snapshot-store";
 import type { EditToolDetails, EditToolPerFileResult, LspBatchRequest } from "../renderer";
 import { pruneOversizedEditSnapshots } from "../snapshot-details";
@@ -98,12 +102,24 @@ interface RenderedSection {
 	perFileResult: EditToolPerFileResult;
 }
 
+const BLOCK_OP_LABELS: Record<BlockResolution["op"], string> = {
+	replace: "SWAP.BLK",
+	insert_after: "INS.BLK.POST",
+	cut: "CUT.BLK",
+	paste_after: "PASTE.BLK.POST",
+};
+
 function formatBlockResolution(resolution: BlockResolution): string {
-	const op = resolution.op === "delete" ? "DEL.BLK" : resolution.op === "insert_after" ? "INS.BLK.POST" : "SWAP.BLK";
+	const op = BLOCK_OP_LABELS[resolution.op];
 	const lines = resolution.end - resolution.start + 1;
 	const span =
 		resolution.start === resolution.end ? `line ${resolution.start}` : `lines ${resolution.start}-${resolution.end}`;
-	const suffix = resolution.op === "insert_after" ? `; body lands after line ${resolution.end}` : "";
+	const suffix =
+		resolution.op === "insert_after"
+			? `; body lands after line ${resolution.end}`
+			: resolution.op === "paste_after"
+				? `; clipboard lands after line ${resolution.end}`
+				: "";
 	return `${op} ${resolution.anchorLine} → resolved ${span} (${lines} line${lines === 1 ? "" : "s"})${suffix}`;
 }
 
@@ -213,12 +229,19 @@ export async function executeHashlineSingle(
 	const enforceSeenLines = options.session.settings.get("edit.enforceSeenLines");
 	const patcher = new Patcher({ fs, snapshots, blockResolver: nativeBlockResolver, enforceSeenLines });
 
+	// The clipboard register is session-persistent: `CUT` in one edit call can
+	// `PASTE` in a later one. Each batch works on a fork and publishes it back
+	// only after writes land.
+	const sessionClipboard = getEditClipboard(options.session);
+	const clipboard = forkClipboard(sessionClipboard);
+
 	// Single-section fast path: prepare, commit, render.
 	const inputHash = hashPatchInput(options.input);
 	if (patch.sections.length === 1) {
 		fs.setBatchRequest(narrowBatchRequest(options.batchRequest, true));
-		const prepared = await patcher.prepare(patch.sections[0]);
+		const prepared = await patcher.prepare(patch.sections[0], clipboard);
 		const sectionResult = await patcher.commit(prepared);
+		commitClipboard(clipboard, sessionClipboard);
 		if (sectionResult.op === "noop") {
 			const { count, escalate } = recordNoopEdit(options.session, sectionResult.canonicalPath, inputHash);
 			if (escalate) {
@@ -231,9 +254,18 @@ export async function executeHashlineSingle(
 	}
 
 	// Multi-section: prepare every section up front so we fail fast before
-	// any write hits the filesystem.
+	// any write hits the filesystem. One clipboard register spans the batch,
+	// so `CUT` in one section feeds `PASTE` in a later one.
 	const prepared: PreparedSection[] = [];
-	for (const section of patch.sections) prepared.push(await patcher.prepare(section));
+	// Register state after each section's prepare. Commits are non-atomic: a
+	// mid-batch write failure leaves earlier sections on disk, so the session
+	// register must reflect exactly the landed prefix — content a landed CUT
+	// deleted would otherwise be lost.
+	const sectionStates: Clipboard[] = [];
+	for (const section of patch.sections) {
+		prepared.push(await patcher.prepare(section, clipboard));
+		sectionStates.push(forkClipboard(clipboard));
+	}
 	assertUniqueCanonicalPaths(prepared);
 	for (const entry of prepared) {
 		if (entry.isNoop) {
@@ -251,6 +283,7 @@ export async function executeHashlineSingle(
 		const isLast = i === prepared.length - 1;
 		fs.setBatchRequest(narrowBatchRequest(options.batchRequest, isLast));
 		const sectionResult = await patcher.commit(prepared[i]);
+		commitClipboard(sectionStates[i], sessionClipboard);
 		if (sectionResult.op === "noop") {
 			const { count, escalate } = recordNoopEdit(options.session, sectionResult.canonicalPath, inputHash);
 			throw escalate
@@ -260,7 +293,6 @@ export async function executeHashlineSingle(
 		resetNoopEdit(options.session, sectionResult.canonicalPath);
 		rendered.push(renderSection(sectionResult, fs.consumeDiagnostics(sectionResult.path), prepared[i].section.path));
 	}
-
 	return {
 		content: [
 			{

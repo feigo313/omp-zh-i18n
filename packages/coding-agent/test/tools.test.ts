@@ -1450,7 +1450,6 @@ function b() {
 			expect(result.details?.async?.state).toBe("running");
 			expect(result.details?.async?.type).toBe("bash");
 			expect(getTextOutput(result)).toContain("Backgrounded as job");
-			expect(getTextOutput(result)).toContain("start");
 
 			const jobId = result.details?.async?.jobId;
 			if (!jobId) {
@@ -1463,8 +1462,62 @@ function b() {
 			await asyncJobManager.drainDeliveries({ timeoutMs: 1 });
 			expect(deliveries).toHaveLength(1);
 			expect(deliveries[0]?.jobId).toBe(jobId);
+			expect(deliveries[0]?.text).toContain("start");
 			expect(deliveries[0]?.text).toContain("done");
 			expect(updates).toEqual(updatesAtBackground);
+			await asyncJobManager.dispose();
+		});
+
+		it("backgrounds a running command when the steering signal fires mid-wait", async () => {
+			const asyncJobManager = new AsyncJobManager({});
+			const autoBackgroundBashTool = wrapToolWithMetaNotice(
+				new BashTool(
+					createTestToolSession(
+						testDir,
+						Settings.isolated({
+							"bash.autoBackground.enabled": true,
+							// High threshold: only the steering signal can background this.
+							"bash.autoBackground.thresholdMs": 60_000,
+						}),
+						{
+							getSessionId: () => "test-session",
+							asyncJobManager,
+						},
+					),
+				),
+			);
+
+			const steering = new AbortController();
+			steering.abort();
+			const result = await autoBackgroundBashTool.execute(
+				"test-call-steer-background",
+				{ command: "printf 'start\\n'; sleep 0.05; printf 'done\\n'" },
+				undefined,
+				undefined,
+				{
+					...createTestToolContext([]),
+					toolCall: {
+						batchId: "batch-1",
+						index: 0,
+						total: 1,
+						toolCalls: [{ id: "test-call-steer-background", name: "bash" }],
+						steeringSignal: steering.signal,
+					},
+				},
+			);
+
+			// The steer backgrounds the command instead of killing it: the call
+			// returns a running job and the command finishes on its own.
+			expect(result.details?.async?.state).toBe("running");
+			expect(getTextOutput(result)).toContain("Backgrounded early to handle an incoming message");
+			const jobId = result.details?.async?.jobId;
+			if (!jobId) {
+				throw new Error("expected a steer-backgrounded job id");
+			}
+			const job = asyncJobManager.getJob(jobId);
+			expect(job?.status).toBe("running");
+			await job?.promise;
+			expect(asyncJobManager.getJob(jobId)?.status).toBe("completed");
 			await asyncJobManager.dispose();
 		});
 

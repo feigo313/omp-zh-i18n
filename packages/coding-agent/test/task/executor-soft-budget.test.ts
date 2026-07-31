@@ -8,7 +8,7 @@ import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
+import { resolveSoftRequestBudget, runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -105,10 +105,10 @@ function mockCreateAgentSession(session: AgentSession) {
 		eventBus: new EventBus(),
 	} satisfies CreateAgentSessionResult);
 }
-// Named "task": bundled scout/sonic budgets are built-in and override the
-// `task.softRequestBudget` setting, which these tests pin to a tiny value.
+// Use a bundled scout so these runSubprocess tests exercise the built-in
+// ceiling together with a lower task.softRequestBudget setting.
 const baseAgent: AgentDefinition = {
-	name: "task",
+	name: "scout",
 	description: "test",
 	systemPrompt: "test",
 	source: "bundled",
@@ -270,5 +270,27 @@ describe("runSubprocess soft request budget", () => {
 		expect(receipt.outcome).toBe("failed");
 		expect(receipt.error).toMatch(/hard-aborted/);
 		expect(receipt.error).toMatch(new RegExp(`history://${id}`));
+	});
+});
+
+describe("resolveSoftRequestBudget", () => {
+	it("lets a configured budget lower a bundled agent's ceiling", () => {
+		expect(resolveSoftRequestBudget("scout", 20)).toBe(20);
+		expect(resolveSoftRequestBudget("sonic", 20)).toBe(20);
+	});
+
+	it("keeps the bundled ceiling when the configured budget is higher", () => {
+		expect(resolveSoftRequestBudget("scout", 200)).toBe(100);
+		expect(resolveSoftRequestBudget("sonic", 200)).toBe(100);
+	});
+
+	it("uses the configured budget for agents without a bundled entry", () => {
+		expect(resolveSoftRequestBudget("task", 20)).toBe(20);
+	});
+
+	it("keeps 0 disabled and normalizes negative or fractional budgets", () => {
+		expect(resolveSoftRequestBudget("scout", 0)).toBe(0);
+		expect(resolveSoftRequestBudget("scout", -5)).toBe(0);
+		expect(resolveSoftRequestBudget("scout", 20.9)).toBe(20);
 	});
 });

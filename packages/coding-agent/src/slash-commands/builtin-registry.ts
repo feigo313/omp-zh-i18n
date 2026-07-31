@@ -3,11 +3,16 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { type AutocompleteItem, Spacer } from "@oh-my-pi/pi-tui";
-import { APP_NAME, getProjectDir, setProjectDir } from "@oh-my-pi/pi-utils";
+import { APP_NAME, getMCPConfigPath, getProjectDir, logger, setProjectDir } from "@oh-my-pi/pi-utils";
 import { reset as resetCapabilities } from "../capability";
 import { COLLAB_GUEST_ALLOWED_COMMANDS, CollabGuestLink } from "../collab/guest";
 import { CollabHost } from "../collab/host";
-import { expandRoleAlias, getModelMatchPreferences, resolveCliModel } from "../config/model-resolver";
+import {
+	expandRoleAlias,
+	formatModelString,
+	getModelMatchPreferences,
+	resolveCliModel,
+} from "../config/model-resolver";
 import { applyProviderGlobalsFromSettings } from "../config/provider-globals";
 import type { SettingPath, SettingValue } from "../config/settings";
 import { settings } from "../config/settings";
@@ -16,6 +21,7 @@ import {
 	resolveActiveProjectRegistryPath,
 	resolveOrDefaultProjectRegistryPath,
 } from "../discovery/helpers.js";
+import { parseExportArgs } from "../export/html/args";
 import { shareSession } from "../export/share";
 import { PluginManager } from "../extensibility/plugins";
 import {
@@ -26,16 +32,21 @@ import {
 	MarketplaceManager,
 } from "../extensibility/plugins/marketplace";
 import { interceptSlashCommand } from "../i18n/interceptor";
+import { readMCPConfigFile } from "../mcp/config-writer";
 import { resolveMemoryBackend } from "../memory-backend";
 import { runPauseScreen } from "../modes/components/pause-screen";
+import { collectMcpServerNames } from "../modes/controllers/mcp-command-controller";
 import { describeLoopLimitRuntime } from "../modes/loop-limit";
 import { theme } from "../modes/theme/theme";
 import type { InteractiveModeContext } from "../modes/types";
 import { extractLastCodeBlock, extractLastCommand } from "../modes/utils/copy-targets";
 import type { AgentSession, FreshSessionResult } from "../session/agent-session";
+import type { SessionOAuthAccountList } from "../session/agent-session-types";
 import { COMPACT_MODES, parseCompactArgs } from "../session/compact-modes";
 import { resolveResumableSession } from "../session/session-listing";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
+import type { ComputerTool } from "../tools/computer";
+import { computerExposureMode } from "../tools/computer/exposure";
 import { expandTilde, resolveToCwd } from "../tools/path-utils";
 import { urlHyperlinkAlways } from "../tui";
 import {
@@ -45,6 +56,7 @@ import {
 	renderChangelogEntries,
 } from "../utils/changelog";
 import { copyToClipboard } from "../utils/clipboard";
+import type { InspectImageMode } from "../utils/inspect-image-mode";
 import { CollabQrCodeComponent } from "./helpers/collab-qrcode";
 import { buildContextReportText } from "./helpers/context-report";
 import { formatDuration } from "./helpers/format";
@@ -52,6 +64,8 @@ import { createMarketplaceManager } from "./helpers/marketplace-manager";
 import { handleMcpAcp } from "./helpers/mcp";
 import { commandConsumed, errorMessage, parseSlashCommand, parseSubcommand, usage } from "./helpers/parse";
 import { describeRedeemOutcome, type ResetUsageAccount, toResetUsageAccounts } from "./helpers/reset-usage";
+import { handleSecurityCommand } from "./helpers/security";
+import { matchSessionPinAccounts, toSessionPinAccounts } from "./helpers/session-pin";
 import { handleSshAcp } from "./helpers/ssh";
 import { launchStatsDashboard, parseStatsDashboardArgs } from "./helpers/stats-dashboard";
 import { handleTodoAcp } from "./helpers/todo";
@@ -86,6 +100,87 @@ function refreshStatusLine(ctx: InteractiveModeContext): void {
 /** `/fast status` label for the active model: "on" when its family is priority, else "off". */
 function formatFastModeStatus(session: AgentSession): string {
 	return session.isFastModeEnabled() ? "on" : "off";
+}
+
+/** Detailed, session-effective `/computer status` diagnostics. */
+function formatComputerUseStatus(session: AgentSession): string {
+	const enabled = session.settings.get("computer.enabled");
+	const active = session.getEnabledToolNames().includes("computer");
+	const model = session.model;
+	const modelName = model ? formatModelString(model) : "none";
+	const exposure = !enabled || !active ? "not exposed" : computerExposureMode(model);
+	const toolState = active ? "active" : enabled ? "unavailable" : "inactive";
+	const configured = {
+		backend: session.settings.get("computer.backend"),
+		display: session.settings.get("computer.display"),
+		maxWidth: session.settings.get("computer.maxWidth"),
+		maxHeight: session.settings.get("computer.maxHeight"),
+	};
+	const computerTool = session.getToolByName("computer") as Pick<ComputerTool, "effectiveConfiguration"> | undefined;
+	const effective = computerTool?.effectiveConfiguration ?? configured;
+	const configurationChanged =
+		effective.backend !== configured.backend ||
+		effective.display !== configured.display ||
+		effective.maxWidth !== configured.maxWidth ||
+		effective.maxHeight !== configured.maxHeight;
+	return [
+		`Computer use: ${enabled ? "enabled" : "disabled"}`,
+		`tool: ${toolState}`,
+		`backend: ${effective.backend}`,
+		`display: ${effective.display}`,
+		`capture: ${effective.maxWidth}×${effective.maxHeight}`,
+		...(configurationChanged
+			? [
+					`next-session settings: backend=${configured.backend}, display=${configured.display}, capture=${configured.maxWidth}×${configured.maxHeight}`,
+				]
+			: []),
+		`model: ${modelName}`,
+		`exposure: ${exposure}`,
+	].join(" · ");
+}
+
+/**
+ * Apply a session-scoped computer-use toggle: flip the active tool slate first
+ * (so a failed enable never leaves a stale settings override), then record the
+ * runtime override — never `settings.set`, which would persist to settings.json.
+ * Returns the operator feedback line.
+ */
+async function applyComputerUseToggle(session: AgentSession, enable: boolean): Promise<string> {
+	const applied = await session.setComputerToolEnabled(enable);
+	if (enable && !applied) {
+		return "Computer use is unavailable in this session.";
+	}
+	session.settings.override("computer.enabled", enable);
+	return enable
+		? `Computer use enabled for this session. ${formatComputerUseStatus(session)}`
+		: "Computer use disabled for this session.";
+}
+
+/** Session-effective `/vision status` line. */
+function formatVisionStatus(session: AgentSession): string {
+	const { mode, active, model } = session.inspectImageState();
+	const override = session.getInspectImageModeOverride();
+	const modelObj = session.model;
+	const capability = modelObj
+		? modelObj.input.includes("image")
+			? "native image input"
+			: "no native image input"
+		: "no active model";
+	return [
+		`inspect_image: ${active ? "active" : "inactive"}`,
+		`mode: ${mode}${override ? " (session override)" : ""}`,
+		...(override ? [`configured: ${session.settings.get("inspect_image.mode")}`] : []),
+		`model: ${model ?? "none"} (${capability})`,
+	].join(" · ");
+}
+
+/** Applies a `/vision` mode for this session and returns the operator feedback line. */
+async function applyVisionMode(session: AgentSession, mode: InspectImageMode): Promise<string> {
+	const applied = await session.setInspectImageMode(mode);
+	if (!applied) {
+		return "inspect_image is unavailable in this session.";
+	}
+	return `Vision mode: ${mode}. ${formatVisionStatus(session)}`;
 }
 
 const AUTOCOMPLETE_DETAIL_LIMIT = 48;
@@ -196,6 +291,74 @@ async function handleUsageResetCommand(
 	await output(describeRedeemOutcome(outcome, target.label));
 }
 
+async function handleSessionPinCommand(
+	arg: string,
+	session: AgentSession,
+	output: SlashCommandRuntime["output"],
+): Promise<void> {
+	if (session.isStreaming) {
+		await output("Cannot pin an account while the session is streaming.");
+		return;
+	}
+	let accountList: SessionOAuthAccountList | undefined;
+	try {
+		accountList = await session.listCurrentProviderOAuthAccounts();
+	} catch (error) {
+		await output(`Could not load provider accounts: ${errorMessage(error)}`);
+		return;
+	}
+	if (!accountList) {
+		await output("Select a model before pinning a provider account.");
+		return;
+	}
+	const provider = getOAuthProviders().find(candidate => candidate.id === accountList.provider);
+	const providerName = provider?.name ?? accountList.provider;
+	const accounts = toSessionPinAccounts(accountList.accounts);
+	if (accounts.length === 0) {
+		const source = session.modelRegistry.authStorage.describeCredentialSource(
+			accountList.provider,
+			session.sessionId,
+		);
+		await output(
+			source
+				? `No stored OAuth accounts for ${providerName}. Current auth comes from ${source}.`
+				: `No stored OAuth accounts for ${providerName}. Use /login to add one.`,
+		);
+		return;
+	}
+
+	const selector = arg.trim();
+	if (!selector) {
+		const lines = [`OAuth accounts for ${providerName}:`];
+		for (const account of accounts) {
+			lines.push(`${account.position + 1}. ${account.label}${account.active ? " (active)" : ""}`);
+		}
+		lines.push("", "Pin one with `/session pin <number|email|account id>`.");
+		await output(lines.join("\n"));
+		return;
+	}
+
+	const matches = matchSessionPinAccounts(accounts, selector);
+	if (matches.length === 0) {
+		await output(`No ${providerName} account matches "${selector}".`);
+		return;
+	}
+	if (matches.length > 1) {
+		await output(
+			`"${selector}" matches multiple ${providerName} accounts: ${matches
+				.map(account => `${account.position + 1}. ${account.label}`)
+				.join(", ")}. Use the account number.`,
+		);
+		return;
+	}
+	const account = matches[0];
+	if (!account || !session.pinCurrentProviderOAuthAccount(account.credentialId)) {
+		await output(`${account?.label ?? selector} is no longer available to pin.`);
+		return;
+	}
+	await output(`Pinned ${account.label} to this session for ${providerName}.`);
+}
+
 /** Parse the `/shake` subcommand into a {@link ShakeMode}; empty defaults to elide. */
 function parseShakeMode(args: string): ShakeMode | { error: string } {
 	const verb = args.trim().toLowerCase();
@@ -204,7 +367,35 @@ function parseShakeMode(args: string): ShakeMode | { error: string } {
 	return { error: `Unknown /shake mode "${verb}". Use elide or images.` };
 }
 
+/** Format the session's workspace directories (cwd + additional) for display. */
+function formatWorkspaceDirectories(runtime: SlashCommandRuntime, note?: string): string {
+	const cwd = runtime.sessionManager.getCwd();
+	const additional = runtime.sessionManager.getAdditionalDirectories();
+	const lines = ["Workspace directories:", `  ${cwd} (working directory)`, ...additional.map(d => `  ${d}`)];
+	return note ? `${note}\n${lines.join("\n")}` : lines.join("\n");
+}
+
 const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
+	{
+		name: "security",
+		description: "Plan, run, inspect, import, and compare OMP-native security scans",
+		allowArgs: true,
+		acpInputHint: "<plan|scan|status|cancel|scans|show|import|export|validate|compare|disposition>",
+		subcommands: [
+			{ name: "plan", description: "Create an immutable security scan plan" },
+			{ name: "scan", description: "Start a planned or newly planned native scan" },
+			{ name: "status", description: "Show native scan operation status" },
+			{ name: "cancel", description: "Cancel a running native scan" },
+			{ name: "scans", description: "List stored project security scans" },
+			{ name: "show", description: "Render a scan or security:// resource" },
+			{ name: "import", description: "Import SARIF or a Codex Security bundle" },
+			{ name: "export", description: "Export a canonical bundle, SARIF, or report" },
+			{ name: "validate", description: "Validate one finding with OMP-native tools" },
+			{ name: "compare", description: "Compare finding lineage across two scans" },
+			{ name: "disposition", description: "Set a finding disposition with rationale" },
+		],
+		handle: handleSecurityCommand,
+	},
 	{
 		name: "settings",
 		description: "Open settings menu",
@@ -301,12 +492,15 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "guided-goal",
-		description: "Interview and refine a goal before enabling goal mode",
+		description: "Have the agent interview you in chat, then set up goal mode",
 		inlineHint: "[rough objective]",
 		allowArgs: true,
 		handleTui: async (command, runtime) => {
-			await runtime.ctx.handleGuidedGoalCommand(command.args || undefined);
+			// Clear the slash draft BEFORE the await: the handler blocks for the
+			// whole kickoff turn, and a post-await clear would wipe an answer the
+			// user starts typing while the first interview question streams.
 			runtime.ctx.editor.setText("");
+			await runtime.ctx.handleGuidedGoalCommand(command.args || undefined);
 		},
 	},
 	{
@@ -465,6 +659,91 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 		},
 	},
 	{
+		name: "computer",
+		description: "Toggle the native computer-use tool for this session",
+		acpDescription: "Toggle computer use",
+		acpInputHint: "[on|off|status]",
+		subcommands: [
+			{ name: "on", description: "Enable computer use for this session" },
+			{ name: "off", description: "Disable computer use for this session" },
+			{ name: "status", description: "Show computer use status" },
+		],
+		allowArgs: true,
+		getTuiAutocompleteDescription: runtime =>
+			`Computer: ${runtime.ctx.session.settings.get("computer.enabled") ? "on" : "off"}`,
+		handle: async (command, runtime) => {
+			const arg = command.args.trim().toLowerCase();
+			if (arg === "status") {
+				await runtime.output(formatComputerUseStatus(runtime.session));
+				return commandConsumed();
+			}
+			if (!arg || arg === "toggle" || arg === "on" || arg === "off") {
+				const enable = arg === "off" ? false : arg === "on" || !runtime.session.settings.get("computer.enabled");
+				await runtime.output(await applyComputerUseToggle(runtime.session, enable));
+				return commandConsumed();
+			}
+			return usage("Usage: /computer [on|off|status]", runtime);
+		},
+		handleTui: async (command, runtime) => {
+			const arg = command.args.trim().toLowerCase();
+			if (arg === "status") {
+				runtime.ctx.showStatus(formatComputerUseStatus(runtime.ctx.session));
+				runtime.ctx.editor.setText("");
+				return;
+			}
+			if (!arg || arg === "toggle" || arg === "on" || arg === "off") {
+				const enable =
+					arg === "off" ? false : arg === "on" || !runtime.ctx.session.settings.get("computer.enabled");
+				runtime.ctx.showStatus(await applyComputerUseToggle(runtime.ctx.session, enable));
+				runtime.ctx.editor.setText("");
+				return;
+			}
+			runtime.ctx.showStatus("Usage: /computer [on|off|status]");
+			runtime.ctx.editor.setText("");
+		},
+	},
+	{
+		name: "vision",
+		description: "Control the inspect_image vision-delegation tool for this session",
+		acpDescription: "Toggle vision delegation",
+		acpInputHint: "[on|off|auto|status]",
+		subcommands: [
+			{ name: "on", description: "Always expose inspect_image this session" },
+			{ name: "off", description: "Never expose inspect_image this session" },
+			{ name: "auto", description: "Follow inspect_image.mode (auto hides it for vision-capable models)" },
+			{ name: "status", description: "Show inspect_image status" },
+		],
+		allowArgs: true,
+		getTuiAutocompleteDescription: runtime => `Vision: ${runtime.ctx.session.inspectImageState().mode}`,
+		handle: async (command, runtime) => {
+			const arg = command.args.trim().toLowerCase();
+			if (arg === "status") {
+				await runtime.output(formatVisionStatus(runtime.session));
+				return commandConsumed();
+			}
+			if (arg === "on" || arg === "off" || arg === "auto") {
+				await runtime.output(await applyVisionMode(runtime.session, arg));
+				return commandConsumed();
+			}
+			return usage("Usage: /vision [on|off|auto|status]", runtime);
+		},
+		handleTui: async (command, runtime) => {
+			const arg = command.args.trim().toLowerCase();
+			if (arg === "status") {
+				runtime.ctx.showStatus(formatVisionStatus(runtime.ctx.session));
+				runtime.ctx.editor.setText("");
+				return;
+			}
+			if (arg === "on" || arg === "off" || arg === "auto") {
+				runtime.ctx.showStatus(await applyVisionMode(runtime.ctx.session, arg));
+				runtime.ctx.editor.setText("");
+				return;
+			}
+			runtime.ctx.showStatus("Usage: /vision [on|off|auto|status]");
+			runtime.ctx.editor.setText("");
+		},
+	},
+	{
 		name: "prewalk",
 		description: "Switch to a fast/cheap model at the next action (works even without --prewalk)",
 		acpDescription: "Prewalk at the next action",
@@ -607,19 +886,15 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	{
 		name: "export",
 		description: "Export session to HTML file",
-		inlineHint: "[path]",
+		inlineHint: "[--themes] [path]",
 		allowArgs: true,
 		handle: async (command, runtime) => {
-			const arg = command.args.trim();
-			// Match the interactive `/export` behavior: clipboard aliases are not a
-			// valid export target. Without this, the literal value (`copy`,
-			// `--copy`, `clipboard`) is passed to `exportToHtml` and becomes the
-			// output filename.
-			if (arg === "--copy" || arg === "clipboard" || arg === "copy") {
-				return usage("Use /dump to copy the session to clipboard.", runtime);
-			}
 			try {
-				const filePath = await runtime.session.exportToHtml(arg || undefined);
+				const { outputPath, useUserThemes } = parseExportArgs(command.args);
+				if (outputPath === "--copy" || outputPath === "clipboard" || outputPath === "copy") {
+					return usage("Use /dump to copy the session to clipboard.", runtime);
+				}
+				const filePath = await runtime.session.exportToHtml(outputPath, useUserThemes);
 				await runtime.output(`Session exported to: ${filePath}`);
 				return commandConsumed();
 			} catch (err) {
@@ -977,15 +1252,21 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	{
 		name: "session",
 		description: "Session management commands",
-		acpDescription: "Show session information",
-		acpInputHint: "info|delete",
+		acpDescription: "Show or configure the current session",
+		acpInputHint: "[info|delete|pin [account]]",
 		subcommands: [
 			{ name: "info", description: "Show session info and stats" },
 			{ name: "delete", description: "Delete current session and return to selector" },
+			{
+				name: "pin",
+				description: "Pin the current provider to a stored OAuth account",
+				usage: "[account]",
+			},
 		],
 		allowArgs: true,
 		handle: async (command, runtime) => {
-			if (!command.args || command.args === "info") {
+			const { verb, rest } = parseSubcommand(command.args);
+			if (!verb || (verb === "info" && !rest)) {
 				await runtime.output(
 					[
 						`Session: ${runtime.session.sessionId}`,
@@ -995,7 +1276,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 				);
 				return commandConsumed();
 			}
-			if (command.args === "delete") {
+			if (verb === "delete" && !rest) {
 				if (runtime.session.isStreaming) return usage("Cannot delete the session while streaming.", runtime);
 				const sessionFile = runtime.sessionManager.getSessionFile();
 				if (!sessionFile) return usage("No session file to delete (in-memory session).", runtime);
@@ -1014,17 +1295,34 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 				);
 				return commandConsumed();
 			}
-			return usage("Usage: /session [info|delete]", runtime);
+			if (verb === "pin") {
+				await handleSessionPinCommand(rest, runtime.session, runtime.output);
+				return commandConsumed();
+			}
+			return usage("Usage: /session [info|delete|pin [account]]", runtime);
 		},
 		handleTui: async (command, runtime) => {
-			const sub = command.args.trim().toLowerCase() || "info";
-			if (sub === "delete") {
+			const { verb, rest } = parseSubcommand(command.args);
+			if (verb === "delete" && !rest) {
 				runtime.ctx.editor.setText("");
 				await runtime.ctx.handleSessionDeleteCommand();
 				return;
 			}
-			// Default: show session info
-			await runtime.ctx.handleSessionCommand();
+			if (verb === "pin") {
+				if (rest) {
+					await handleSessionPinCommand(rest, runtime.ctx.session, text => runtime.ctx.showStatus(text));
+					refreshStatusLine(runtime.ctx);
+				} else {
+					await runtime.ctx.showSessionPinSelector();
+				}
+				runtime.ctx.editor.setText("");
+				return;
+			}
+			if (!verb || (verb === "info" && !rest)) {
+				await runtime.ctx.handleSessionCommand();
+			} else {
+				runtime.ctx.showStatus("Usage: /session [info|delete|pin [account]]");
+			}
 			runtime.ctx.editor.setText("");
 		},
 	},
@@ -1516,11 +1814,16 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	{
 		name: "resume",
 		description: "Resume a different session",
-		inlineHint: "[session id]",
+		inlineHint: "[session id|@claude|@codex]",
 		allowArgs: true,
 		handleTui: async (command, runtime) => {
 			const sessionArg = command.args.trim();
 			runtime.ctx.editor.setText("");
+			const foreignSource = sessionArg === "@claude" ? "claude" : sessionArg === "@codex" ? "codex" : undefined;
+			if (foreignSource) {
+				runtime.ctx.showSessionSelector(foreignSource);
+				return;
+			}
 			if (!sessionArg) {
 				runtime.ctx.showSessionSelector();
 				return;
@@ -1713,7 +2016,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 				return usage(`Failed to save pending settings: ${errorMessage(err)}`, runtime);
 			}
 			try {
-				await runtime.sessionManager.moveTo(resolvedPath);
+				await runtime.session.moveSession(resolvedPath);
 			} catch (err) {
 				return usage(`Move failed: ${errorMessage(err)}`, runtime);
 			}
@@ -1732,6 +2035,74 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 			runtime.ctx.editor.addToHistory(command.text);
 			runtime.ctx.editor.setText("");
 			await runtime.ctx.handleMoveCommand(command.args || undefined);
+		},
+	},
+	{
+		name: "add-dir",
+		description: "Add a workspace directory to this session (multi-root)",
+		acpDescription: "Add a workspace directory to this session",
+		inlineHint: "<path>",
+		allowArgs: true,
+		handle: async (command, runtime) => {
+			if (runtime.session.isStreaming) return usage("Cannot add a directory while streaming.", runtime);
+			if (!command.args) return usage(formatWorkspaceDirectories(runtime, "Usage: /add-dir <path>"), runtime);
+			const resolved = resolveToCwd(command.args, runtime.cwd);
+			try {
+				const stat = await fs.stat(resolved);
+				if (!stat.isDirectory()) return usage(`Not a directory: ${resolved}`, runtime);
+			} catch {
+				return usage(`Directory does not exist: ${resolved}`, runtime);
+			}
+			let added: string | null;
+			try {
+				added = await runtime.sessionManager.addWorkspaceDirectory(resolved);
+			} catch (err) {
+				return usage(errorMessage(err), runtime);
+			}
+			if (added === null) {
+				await runtime.output(`Already in the workspace: ${resolved}`);
+				return commandConsumed();
+			}
+			await runtime.session.refreshBaseSystemPrompt();
+			await runtime.output(formatWorkspaceDirectories(runtime, `Added ${added}.`));
+			return commandConsumed();
+		},
+	},
+	{
+		name: "remove-dir",
+		description: "Remove a workspace directory from this session",
+		acpDescription: "Remove a workspace directory from this session",
+		inlineHint: "<path>",
+		allowArgs: true,
+		handle: async (command, runtime) => {
+			if (runtime.session.isStreaming) return usage("Cannot remove a directory while streaming.", runtime);
+			if (!command.args) return usage("Usage: /remove-dir <path>", runtime);
+			const resolved = resolveToCwd(command.args, runtime.cwd);
+			if (resolved === path.resolve(runtime.cwd)) {
+				return usage("Cannot remove the working directory; use /move to change it.", runtime);
+			}
+			let removed: string | null;
+			try {
+				removed = await runtime.sessionManager.removeWorkspaceDirectory(resolved);
+			} catch (err) {
+				return usage(errorMessage(err), runtime);
+			}
+			if (removed === null) {
+				await runtime.output(`Not a workspace directory: ${resolved}`);
+				return commandConsumed();
+			}
+			await runtime.session.refreshBaseSystemPrompt();
+			await runtime.output(formatWorkspaceDirectories(runtime, `Removed ${removed}.`));
+			return commandConsumed();
+		},
+	},
+	{
+		name: "dirs",
+		description: "List this session's workspace directories",
+		acpDescription: "List this session's workspace directories",
+		handle: async (_command, runtime) => {
+			await runtime.output(formatWorkspaceDirectories(runtime));
+			return commandConsumed();
 		},
 	},
 	{
@@ -2319,6 +2690,14 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 		},
 	},
 	{
+		name: "live",
+		description: "Start Codex-backed realtime voice mode",
+		handleTui: async (_command, runtime) => {
+			runtime.ctx.editor.setText("");
+			await runtime.ctx.handleLiveCommand();
+		},
+	},
+	{
 		name: "pause",
 		description: "Freeze all agents (main, subagents, advisor) until resumed",
 		handleTui: async (_command, runtime) => {
@@ -2362,6 +2741,124 @@ function buildArgumentCompletions(subcommands: SubcommandDef[]): (prefix: string
 			}));
 		return matches.length > 0 ? matches : null;
 	};
+}
+
+/** /mcp subcommands whose argument is a server name (per their `usage: "<name>..."`). */
+const MCP_SERVER_NAME_SUBCOMMANDS: Readonly<Record<string, true>> = {
+	enable: true,
+	disable: true,
+	test: true,
+	remove: true,
+	reconnect: true,
+	reauth: true,
+	unauth: true,
+};
+
+/** Subcommands that accept names found only in `userConfig.disabledServers`. */
+const MCP_DISABLED_ONLY_ELIGIBLE_SUBCOMMANDS: Readonly<Record<string, true>> = {
+	enable: true,
+	disable: true,
+};
+
+/**
+ * Subcommands that accept configured servers whose `enabled` flag is false.
+ * `unauth` can clear persisted credentials without connecting; test,
+ * reconnect, and reauth explicitly require an enabled server.
+ */
+const MCP_DISABLED_CONFIG_ELIGIBLE_SUBCOMMANDS: Readonly<Record<string, true>> = {
+	enable: true,
+	disable: true,
+	unauth: true,
+};
+
+/**
+ * Build getArgumentCompletions for /mcp. Delegates to the generic
+ * declarative subcommand completer while the subcommand name itself is
+ * still being typed, then switches to MCP server-name completion (sourced
+ * from {@link collectMcpServerNames}) once a recognized server-name
+ * subcommand (enable/disable/test/remove/reconnect/reauth/unauth) is
+ * followed by a space. `remove` gets its own scope-aware completions (see
+ * {@link buildMcpRemoveCompletions}) since — unlike the others —
+ * it only ever succeeds against a config-file entry. Subcommands with a
+ * different argument shape (add, smithery-search, ...) get no argument
+ * completion.
+ */
+function buildMcpArgumentCompletions(
+	subcommands: SubcommandDef[],
+	runtime: TuiSlashCommandRuntime,
+): (argumentPrefix: string) => Promise<AutocompleteItem[] | null> {
+	const genericCompletions = buildArgumentCompletions(subcommands);
+	return async (argumentPrefix: string) => {
+		const spaceIndex = argumentPrefix.indexOf(" ");
+		if (spaceIndex === -1) return genericCompletions(argumentPrefix);
+
+		const rawSubcommand = argumentPrefix.slice(0, spaceIndex);
+		const lowerSubcommand = rawSubcommand.toLowerCase();
+		if (MCP_SERVER_NAME_SUBCOMMANDS[lowerSubcommand] !== true) return null;
+		const namePrefix = argumentPrefix.slice(spaceIndex + 1).toLowerCase();
+		if (lowerSubcommand === "remove") {
+			return await buildMcpRemoveCompletions(rawSubcommand, namePrefix);
+		}
+
+		let serverNames: string[];
+		try {
+			serverNames = await collectMcpServerNames(
+				runtime.ctx,
+				undefined,
+				MCP_DISABLED_ONLY_ELIGIBLE_SUBCOMMANDS[lowerSubcommand] === true,
+				MCP_DISABLED_CONFIG_ELIGIBLE_SUBCOMMANDS[lowerSubcommand] === true,
+			);
+		} catch (error) {
+			logger.warn("MCP server-name autocomplete failed to read config", { error });
+			return null;
+		}
+		const matches: AutocompleteItem[] = serverNames
+			.filter(name => name.toLowerCase().startsWith(namePrefix))
+			.map(name => ({ value: `${rawSubcommand} ${name} `, label: name }));
+		return matches.length > 0 ? matches : null;
+	};
+}
+
+/**
+ * Build `/mcp remove <name>` completions. Unlike the other server-name
+ * subcommands, `#handleRemove` only ever succeeds against a config-file
+ * `mcpServers` entry in the target scope (project by default, user with an
+ * explicit `--scope user`) — a purely runtime-discovered server has no
+ * config entry to remove and always fails with `Server "<name>" not found
+ * in <scope> config.`. Completions are therefore restricted to config-file
+ * names, and a name that exists only in the user config is completed with
+ * `--scope user` appended so the inserted command is directly executable.
+ */
+async function buildMcpRemoveCompletions(
+	rawSubcommand: string,
+	namePrefix: string,
+): Promise<AutocompleteItem[] | null> {
+	const cwd = getProjectDir();
+	let projectNames: string[];
+	let userNames: string[];
+	try {
+		const [projectConfig, userConfig] = await Promise.all([
+			readMCPConfigFile(getMCPConfigPath("project", cwd)),
+			readMCPConfigFile(getMCPConfigPath("user", cwd)),
+		]);
+		projectNames = Object.keys(projectConfig.mcpServers ?? {});
+		userNames = Object.keys(userConfig.mcpServers ?? {});
+	} catch (error) {
+		logger.warn("MCP remove autocomplete failed to read config", { error });
+		return null;
+	}
+
+	const projectNameSet = new Set(projectNames);
+	const allNames = new Set([...projectNames, ...userNames]);
+	const matches: AutocompleteItem[] = [...allNames]
+		.filter(name => name.toLowerCase().startsWith(namePrefix))
+		.map(name =>
+			projectNameSet.has(name)
+				? { value: `${rawSubcommand} ${name} `, label: name }
+				: { value: `${rawSubcommand} ${name} --scope user `, label: `${name} (user)` },
+		)
+		.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+	return matches.length > 0 ? matches : null;
 }
 
 /**
@@ -2533,16 +3030,17 @@ function materializeTuiBuiltinSlashCommand(
 	const materialized: TuiBuiltinSlashCommand = {
 		...cmd,
 		description: translated.description,
-	};
-	if (translated.subcommands) {
-		materialized.subcommands = cmd.subcommands!.map((sub, i) => ({
+		subcommands: cmd.subcommands?.map((sub, index) => ({
 			...sub,
-			description: translated.subcommands![i].description,
-		}));
-	}
-	if (cmd.subcommands) {
-		materialized.getArgumentCompletions = buildArgumentCompletions(materialized.subcommands!);
-		materialized.getInlineHint = buildSubcommandInlineHint(cmd.subcommands);
+			description: translated.subcommands?.[index]?.description ?? sub.description,
+		})),
+	};
+	if (materialized.subcommands) {
+		materialized.getArgumentCompletions =
+			materialized.name === "mcp" && runtime
+				? buildMcpArgumentCompletions(materialized.subcommands, runtime)
+				: buildArgumentCompletions(materialized.subcommands);
+		materialized.getInlineHint = buildSubcommandInlineHint(materialized.subcommands);
 	} else if (cmd.name === "move") {
 		materialized.getArgumentCompletions = buildDirectoryArgumentCompletions();
 		if (cmd.inlineHint) materialized.getInlineHint = buildStaticInlineHint(cmd.inlineHint);

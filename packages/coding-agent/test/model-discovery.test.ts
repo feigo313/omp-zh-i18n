@@ -8,8 +8,9 @@ import type { OAuthCredentials } from "@oh-my-pi/pi-ai/oauth/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { resolveOllamaModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
 import type { ModelSpec, OpenAICompat } from "@oh-my-pi/pi-catalog/types";
-import { applyLlamaCppQwenThinking } from "@oh-my-pi/pi-coding-agent/config/model-discovery";
+import { applyLlamaCppQwenThinking, discoveryProbeTimeoutMs } from "@oh-my-pi/pi-coding-agent/config/model-discovery";
 import { kNoAuth, ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
@@ -74,7 +75,7 @@ describe("ModelRegistry runtime discovery", () => {
 	});
 
 	function writeCachedOllamaModels(models: Model<"openai-completions">[], updatedAt = Date.now()) {
-		writeModelCache("ollama", updatedAt, models, true, "", cacheDbPath);
+		writeModelCache(resolveOllamaModelCacheProviderId("ollama"), updatedAt, models, true, "", cacheDbPath);
 	}
 
 	function getModelsForProvider(registry: ModelRegistry, provider: string) {
@@ -541,6 +542,41 @@ describe("ModelRegistry runtime discovery", () => {
 
 		const model = registry.find("ollama", "phi4-mini");
 		expect(model?.baseUrl).toBe("http://omp-ollama.example:2222/v1");
+	});
+
+	test("refreshes implicit Ollama discovery when the configured endpoint changes", async () => {
+		const requested: string[] = [];
+		{
+			using _baseUrl = withEnv("OLLAMA_BASE_URL", "http://old-ollama.example:11434/v1/");
+			const fetchOld = mockOllamaDiscovery(["old-model"], "http://old-ollama.example:11434");
+			const registry = new ModelRegistry(authStorage, modelsJsonPath, {
+				fetch: async (input, init) => {
+					requested.push(String(input));
+					return fetchOld(input, init);
+				},
+			});
+			await registry.refresh();
+			expect(registry.find("ollama", "old-model")).toBeDefined();
+		}
+
+		{
+			using _baseUrl = withEnv("OLLAMA_BASE_URL", "http://new-ollama.example:11434");
+			const fetchNew = mockOllamaDiscovery(["new-model"], "http://new-ollama.example:11434");
+			const registry = new ModelRegistry(authStorage, modelsJsonPath, {
+				fetch: async (input, init) => {
+					requested.push(String(input));
+					return fetchNew(input, init);
+				},
+			});
+			// The old endpoint has a fresh cache row, but default refresh must
+			// miss that namespace and discover against the new endpoint.
+			await registry.refresh();
+			expect(registry.find("ollama", "old-model")).toBeUndefined();
+			expect(registry.find("ollama", "new-model")?.baseUrl).toBe("http://new-ollama.example:11434/v1");
+		}
+
+		expect(requested).toContain("http://old-ollama.example:11434/api/tags");
+		expect(requested).toContain("http://new-ollama.example:11434/api/tags");
 	});
 
 	test("uses OLLAMA_CONTEXT_LENGTH for implicit ollama context accounting", async () => {
@@ -1203,6 +1239,36 @@ describe("ModelRegistry runtime discovery", () => {
 		expect(requested).not.toContain("http://127.0.0.1:8080/v1/models");
 	});
 
+	test("discoveryProbeTimeoutMs keeps loopback fast but gives non-loopback hosts a larger budget", () => {
+		// Regression: the loopback-tuned probe timeout was applied to every host,
+		// so a remote/LAN LLAMA_CPP_BASE_URL with normal round-trip latency timed
+		// out and the model list came back empty (#7087). Loopback keeps the tight
+		// budget; anything reached over the network gets a strictly larger one.
+		const loopbackMs = 250;
+		for (const host of [
+			"http://127.0.0.1:8080",
+			"http://127.5.6.7:8080",
+			"http://localhost:8080",
+			"http://[::1]:8080",
+			"http://0.0.0.0:8080",
+		]) {
+			expect(discoveryProbeTimeoutMs(host, loopbackMs)).toBe(loopbackMs);
+		}
+		const remoteBudgets = [
+			"http://remote-llama.test:8080",
+			"http://192.168.1.50:8080",
+			"http://172.18.0.3:8080",
+			"http://10.0.0.4:8080",
+			"http://box.local:8080",
+		].map(host => discoveryProbeTimeoutMs(host, loopbackMs));
+		for (const budget of remoteBudgets) {
+			expect(budget).toBeGreaterThan(loopbackMs);
+		}
+		// A consistent budget for every non-loopback host, independent of the tight cap.
+		expect(new Set(remoteBudgets).size).toBe(1);
+		expect(discoveryProbeTimeoutMs("http://remote-llama.test:8080", 150)).toBe(remoteBudgets[0]);
+	});
+
 	test("llama.cpp discovery marks per-model architecture image modalities as vision-capable", async () => {
 		const fetchMock: FetchImpl = async input => {
 			const url = String(input);
@@ -1466,6 +1532,44 @@ describe("ModelRegistry runtime discovery", () => {
 		expect(refreshed.contextWindow).toBe(16384);
 		expect(refreshed.maxTokens).toBe(16384);
 		expect(registry.find("llama.cpp", "cold-preset")?.contextWindow).toBe(16384);
+
+		await authStorage.set("projection-provider", {
+			type: "oauth",
+			access: "access-token",
+			refresh: "refresh-token",
+			expires: Date.now() + 60_000,
+		});
+		try {
+			registry.registerProvider(
+				"projection-provider",
+				{
+					api: "anthropic-messages",
+					baseUrl: "https://example.invalid/",
+					models: [
+						{
+							id: "projection-model",
+							name: "Projection Model",
+							reasoning: false,
+							input: ["text"],
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+							contextWindow: 128000,
+							maxTokens: 8192,
+						},
+					],
+					oauth: {
+						name: "Projection OAuth",
+						login: async () => ({ access: "a", refresh: "r", expires: Date.now() + 60_000 }),
+						refreshToken: async credentials => credentials,
+						getApiKey: credentials => credentials.access,
+						modifyModels: models => models,
+					},
+				},
+				"ext://metadata-projection",
+			);
+			expect(registry.find("llama.cpp", "cold-preset")?.contextWindow).toBe(16384);
+		} finally {
+			registry.clearSourceRegistrations("ext://metadata-projection");
+		}
 	});
 
 	test("llama.cpp selected model refresh patches newly loaded meta n_ctx and unlimited output limit", async () => {

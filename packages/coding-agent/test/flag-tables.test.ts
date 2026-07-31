@@ -130,3 +130,17 @@ describe("parseArgs @file parsing with quotes", () => {
 		expect(result.fileArgs).toEqual(["foo bar.png"]);
 	});
 });
+
+describe("foreign session import flags", () => {
+	it("parses each source flag without consuming the initial message", () => {
+		const claude = parseArgs(["--from-claude", "continue this session"]);
+		const codex = parseArgs(["--from-codex", "continue this session"]);
+
+		expect(claude.fromClaude).toBe(true);
+		expect(claude.messages).toEqual(["continue this session"]);
+		expect(claude.unrecognizedFlags).toEqual([]);
+		expect(codex.fromCodex).toBe(true);
+		expect(codex.messages).toEqual(["continue this session"]);
+		expect(codex.unrecognizedFlags).toEqual([]);
+	});
+});

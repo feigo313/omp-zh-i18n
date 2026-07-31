@@ -2,10 +2,16 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { estimateTokens } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, TextContent } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { raceWithSignal } from "@oh-my-pi/pi-ai/utils/abort";
 import { type CursorExecResolvedCarrier, kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { logger } from "@oh-my-pi/pi-utils";
 import { obfuscateToolArguments, type SecretObfuscator } from "../secrets/obfuscator";
-import { formatSessionHistoryMarkdown, PRIMARY_CONTEXT_CUSTOM_TYPES } from "../session/session-history-format";
+import {
+	formatExecutionSourcePreview,
+	formatSessionHistoryMarkdown,
+	formatToolResultErrorPreview,
+	PRIMARY_CONTEXT_CUSTOM_TYPES,
+} from "../session/session-history-format";
 
 /**
  * Minimal slice of `Agent` the runtime drives — satisfied by pi-agent-core
@@ -42,7 +48,7 @@ export interface AdvisorRuntimeHost {
 	 * recovery path must never replay the full primary transcript.
 	 * Optional: hosts that omit it get no proactive maintenance.
 	 */
-	maintainContext?(incomingTokens: number): Promise<boolean>;
+	maintainContext?(incomingTokens: number, signal: AbortSignal): Promise<boolean>;
 	/**
 	 * Called immediately before each `agent.prompt(batch)` cycle. Lets the host
 	 * clear per-update advisor state — currently the one-advise-per-update gate
@@ -62,6 +68,7 @@ export interface AdvisorRuntimeHost {
 	onTurnError?(
 		error: unknown,
 		failedMessages: readonly AgentMessage[],
+		signal: AbortSignal,
 	): Promise<boolean | undefined> | boolean | undefined;
 	/** Called after a successful advisor turn so the host can finish fallback lifecycle reporting. */
 	onTurnSuccess?(): Promise<void> | void;
@@ -71,6 +78,8 @@ export interface AdvisorRuntimeHost {
 	 *  recovery (credential switch, fallback chain) declined. Cleared only by
 	 *  an explicit reset (`/new`, config rebuild, session restart). */
 	notifyQuotaExhausted?(): void;
+	/** Stable identity for the live advisor model. Used to restore full transcript rendering after a model switch. */
+	getModelIdentity?(): string;
 }
 
 /**
@@ -213,8 +222,16 @@ export function buildAdvisorQuarantineSourceText(currentInput: string, messages:
  */
 const MAX_COALESCE_ROUNDS = 3;
 
+/**
+ * Consecutive quarantined advisor turns tolerated before the failure is surfaced
+ * to the host UI. A quarantine discards the advisor's whole turn before dispatch,
+ * so its advice never reaches the primary; one silent re-prime is allowed to
+ * recover a one-off hallucination, but a persistent quarantine loop is a real
+ * supervision gap the user must see (issue #6661). Reset on any successful turn.
+ */
+const MAX_QUARANTINE_RETRIES = 2;
+
 const ADVISOR_RENDER_OPTIONS = {
-	includeThinking: true,
 	includeToolIntent: true,
 	watchedRoles: true,
 	expandPrimaryContext: true,
@@ -267,11 +284,21 @@ export class AdvisorRuntime {
 	#seenContext = new Map<string, string>();
 	/** Incremented whenever the advisor loses context so queued raw deltas are re-rendered against fresh dedupe state. */
 	#renderRevision = 0;
+	/** Regex secret values observed in primary deltas and retained until advisor context resets. */
+	#advisorRegexSecretValues = new Set<string>();
 	#pending: PendingDelta[] = [];
 	#busy = false;
+	#sessionTransitionPaused = false;
+	#promptInFlight: Promise<void> | undefined;
+	#iterationAbort: AbortController | undefined;
 	#backlog = 0;
 	#consecutiveFailures = 0;
 	#failureNotified = false;
+	/** Consecutive quarantined turns since the last success/reset (issue #6661). */
+	#consecutiveQuarantines = 0;
+	/** Whether primary reasoning is included in advisor deltas for the current model. */
+	#includeThinking = true;
+	#modelIdentity: string | undefined;
 	/** Completed 3-failure backlog-drop cycles since the last success/reset. */
 	#droppedBacklogs = 0;
 	/**
@@ -320,18 +347,6 @@ export class AdvisorRuntime {
 	/** True after the runtime hard-stopped on repeated or permanent failures. */
 	get halted(): boolean {
 		return this.#halted;
-	}
-
-	/**
-	 * True when `#pending` is non-empty while the drain loop is busy — i.e., newer
-	 * primary turns arrived after the current batch's transcript window was fixed
-	 * but before the advisor model finished processing it. The delivery path uses
-	 * this to annotate advice that was generated without seeing those newer turns.
-	 * Can be true during `agent.prompt()`, a `maintainContext` await, or a retry
-	 * sleep — any time `#drain` is busy and a concurrent `onTurnEnd` pushed.
-	 */
-	get hasFreshBacklog(): boolean {
-		return this.#pending.length > 0;
 	}
 
 	/**
@@ -422,12 +437,14 @@ export class AdvisorRuntime {
 	}
 
 	dispose(): void {
+		this.#iterationAbort?.abort("advisor disposed");
 		this.disposed = true;
 		this.#epoch++;
 		this.#pending = [];
 		this.#backlog = 0;
 		this.#consecutiveFailures = 0;
 		this.#failureNotified = false;
+		this.#advisorRegexSecretValues.clear();
 		this.#wakeAllWaiters();
 		try {
 			this.agent.abort("advisor disposed");
@@ -436,12 +453,12 @@ export class AdvisorRuntime {
 
 	#clearSeenContext(): void {
 		this.#seenContext.clear();
+		this.#advisorRegexSecretValues.clear();
 		this.#renderRevision++;
 	}
 
 	#clearAdvisorContextAtCurrentCursor(): void {
 		this.#consecutiveFailures = 0;
-		this.#failureNotified = false;
 		this.#clearSeenContext();
 		try {
 			this.agent.reset();
@@ -483,6 +500,31 @@ export class AdvisorRuntime {
 		});
 	}
 
+	/** Stop new advisor work and wait only for the active prompt's recorder-visible events. */
+	pauseForSessionTransition(): Promise<void> {
+		if (!this.#sessionTransitionPaused) {
+			this.#sessionTransitionPaused = true;
+			this.#wakeAllWaiters();
+			this.#iterationAbort?.abort("advisor session transition");
+			try {
+				this.agent.abort("advisor session transition");
+			} catch {}
+		}
+		return (
+			this.#promptInFlight?.then(
+				() => {},
+				() => {},
+			) ?? Promise.resolve()
+		);
+	}
+
+	/** Continue queued work after a session transition rolls back or preserves the conversation. */
+	resumeAfterSessionTransition(): void {
+		if (!this.#sessionTransitionPaused) return;
+		this.#sessionTransitionPaused = false;
+		if (!this.#quotaExhausted && !this.#halted) void this.#drain();
+	}
+
 	/**
 	 * Re-prime the advisor after a history rewrite (compaction, session
 	 * switch/resume, branch). Clears the advisor's own (non-persisted) context
@@ -491,11 +533,15 @@ export class AdvisorRuntime {
 	 * leaving it blind to everything before the rewrite.
 	 */
 	reset(): void {
+		this.#iterationAbort?.abort("advisor reset");
 		this.#epoch++;
+		this.#sessionTransitionPaused = false;
 		this.#quotaExhausted = false;
 		this.#halted = false;
 		this.#failing = false;
 		this.#droppedBacklogs = 0;
+		this.#consecutiveQuarantines = 0;
+		this.#failureNotified = false;
 		this.#resetAdvisorContext(true, true);
 	}
 
@@ -521,15 +567,60 @@ export class AdvisorRuntime {
 		this.#wakeAllWaiters();
 	}
 
+	#syncModelIdentity(): void {
+		const identity = this.host.getModelIdentity?.();
+		if (identity === undefined || identity === this.#modelIdentity) return;
+		this.#modelIdentity = identity;
+		this.#includeThinking = true;
+	}
+
 	#formatRawDelta(rawMessages: AgentMessage[], wip = false): string | null {
 		const delta = rawMessages
 			.filter(message => !(message.role === "custom" && message.customType === "advisor"))
 			.map(message => this.#dedupContextMessage(message));
 		if (delta.length === 0) return null;
 		const obfuscator = this.host.obfuscator;
-		const formattedDelta = obfuscator?.hasSecrets() ? obfuscateAdvisorDelta(obfuscator, delta) : delta;
-		const md = formatSessionHistoryMarkdown(formattedDelta, ADVISOR_RENDER_OPTIONS);
+		let md = formatSessionHistoryMarkdown(delta, {
+			...ADVISOR_RENDER_OPTIONS,
+			includeThinking: this.#includeThinking,
+		});
 		if (!md.trim()) return null;
+		if (obfuscator?.hasSecrets()) {
+			let discoveredNewRegexSecretValue = false;
+			const addRegexValues = (text: string): void => {
+				for (const secretValue of obfuscator.collectRegexSecretValuesForObfuscation(text)) {
+					if (this.#advisorRegexSecretValues.has(secretValue)) continue;
+					this.#advisorRegexSecretValues.add(secretValue);
+					discoveredNewRegexSecretValue = true;
+				}
+			};
+			for (const message of delta) {
+				if (
+					message.role === "custom" &&
+					PRIMARY_CONTEXT_CUSTOM_TYPES.has(message.customType) &&
+					typeof message.content === "string"
+				) {
+					addRegexValues(message.content);
+				}
+			}
+			addRegexValues(md);
+			scrubAdvisorHistory(obfuscator, this.agent.state.messages, this.#advisorRegexSecretValues);
+			if (discoveredNewRegexSecretValue) {
+				this.#pending = this.#pending.map(delta => ({
+					...delta,
+					text: obfuscator.stripUnsafeFriendlyPlaceholderPrefixes(delta.text, this.#advisorRegexSecretValues),
+				}));
+			}
+			md = formatSessionHistoryMarkdown(
+				delta.map(message =>
+					message.role === "custom" && PRIMARY_CONTEXT_CUSTOM_TYPES.has(message.customType)
+						? obfuscateAdvisorMessage(obfuscator, message, this.#advisorRegexSecretValues)
+						: message,
+				),
+				{ ...ADVISOR_RENDER_OPTIONS, includeThinking: this.#includeThinking },
+			);
+			md = obfuscator.obfuscate(md, this.#advisorRegexSecretValues);
+		}
 		const heading = wip ? "### Session update [in progress — more steps follow]" : "### Session update";
 		return `${heading}\n\n${md}`;
 	}
@@ -652,6 +743,7 @@ export class AdvisorRuntime {
 		epoch: number,
 		initial: PendingDelta[],
 		recoveringOverflow: boolean,
+		signal: AbortSignal,
 	): Promise<{
 		batch: string | null;
 		rawMessages: AgentMessage[];
@@ -668,11 +760,12 @@ export class AdvisorRuntime {
 		let wip = initial.at(-1)?.wip ?? false;
 
 		for (let round = 0; round < MAX_COALESCE_ROUNDS; round++) {
+			if (this.#sessionTransitionPaused) break;
 			if (this.host.maintainContext) {
 				const incomingTokens = estimateTokens({ role: "user", content: batchText, timestamp: Date.now() });
 				let shouldResetContext = false;
 				try {
-					shouldResetContext = await this.host.maintainContext(incomingTokens);
+					shouldResetContext = await this.host.maintainContext(incomingTokens, signal);
 				} catch (err) {
 					logger.debug("advisor context maintenance failed", { err: String(err) });
 				}
@@ -689,6 +782,7 @@ export class AdvisorRuntime {
 					// remain queued and ship as their own subsequent batch.
 					if (round > 0) {
 						const lateItems = this.#pending.splice(0);
+						initial.push(...lateItems);
 						turns += lateItems.reduce((sum, b) => sum + b.turns, 0);
 						if (lateItems.length > 0) {
 							wip = lateItems.at(-1)!.wip;
@@ -725,12 +819,17 @@ export class AdvisorRuntime {
 			// update WIP state, and re-check the maintenance budget.
 			const late = this.#pending.splice(0);
 			if (late.length === 0) break;
+			initial.push(...late);
 			batchText = [batchText, ...late.map(b => b.text)].join("\n\n");
 			rawMessages = rawMessages.concat(late.flatMap(b => b.rawMessages));
 			turns += late.reduce((sum, b) => sum + b.turns, 0);
 			wip = late.at(-1)!.wip;
 		}
 
+		const batchObfuscator = this.host.obfuscator;
+		if (batchObfuscator?.hasSecrets()) {
+			batchText = batchObfuscator.stripUnsafeFriendlyPlaceholderPrefixes(batchText, this.#advisorRegexSecretValues);
+		}
 		return { batch: batchText || null, rawMessages, finalTurns: turns, wip, resetContext: false };
 	}
 
@@ -754,10 +853,12 @@ export class AdvisorRuntime {
 	}
 
 	async #drain(): Promise<void> {
-		if (this.#busy) return;
+		if (this.#busy || this.#sessionTransitionPaused) return;
 		this.#busy = true;
 		try {
-			while (!this.disposed && this.#pending.length) {
+			this.#syncModelIdentity();
+			while (!this.disposed && !this.#sessionTransitionPaused && this.#pending.length) {
+				this.#syncModelIdentity();
 				let popped: PendingDelta[];
 				if (this.#pending[0]?.overflowRecovery) {
 					const recovery = this.#pending.shift();
@@ -766,6 +867,8 @@ export class AdvisorRuntime {
 				} else {
 					popped = this.#pending.splice(0);
 				}
+				const iterationAbort = new AbortController();
+				this.#iterationAbort = iterationAbort;
 				const epoch = this.#epoch;
 				for (const delta of popped) {
 					if (delta.renderRevision === this.#renderRevision) continue;
@@ -774,10 +877,19 @@ export class AdvisorRuntime {
 					delta.renderRevision = this.#renderRevision;
 				}
 				const recoveringOverflow = popped.some(delta => delta.overflowRecovery === true);
-				const result = await this.#collectAndMaintainBatch(epoch, popped, recoveringOverflow);
+				const result = await this.#collectAndMaintainBatch(
+					epoch,
+					popped,
+					recoveringOverflow,
+					iterationAbort.signal,
+				);
 
 				// Epoch was invalidated during batch collection; restart the loop.
 				if (result === null) continue;
+				if (this.#sessionTransitionPaused) {
+					this.#pending.unshift(...popped);
+					continue;
+				}
 
 				const { batch, rawMessages, finalTurns, wip, resetContext } = result;
 
@@ -799,7 +911,13 @@ export class AdvisorRuntime {
 					// Reset the host's per-update advisor state (one-advise-per-update
 					// gate) before each model cycle so the new batch starts fresh.
 					this.host.beginAdvisorUpdate?.();
-					await this.agent.prompt(batch);
+					const prompt = this.agent.prompt(batch);
+					this.#promptInFlight = prompt;
+					try {
+						await prompt;
+					} finally {
+						if (this.#promptInFlight === prompt) this.#promptInFlight = undefined;
+					}
 					// Agent.#runLoop catches provider/stream failures internally and
 					// resolves prompt() cleanly with stopReason: "error". Treat that
 					// as a failed turn so endpoint rejections trip the retry path.
@@ -817,14 +935,20 @@ export class AdvisorRuntime {
 					this.#consecutiveFailures = 0;
 					this.#failureNotified = false;
 					this.#droppedBacklogs = 0;
+					this.#consecutiveQuarantines = 0;
 					if (this.host.onTurnSuccess) {
 						try {
-							await this.host.onTurnSuccess();
+							await raceWithSignal(Promise.resolve(this.host.onTurnSuccess()), iterationAbort.signal);
 						} catch (hookErr) {
 							logger.debug("advisor onTurnSuccess hook failed", { err: String(hookErr) });
 						}
 					}
 				} catch (err) {
+					if (this.#sessionTransitionPaused) {
+						this.#rollbackFailedTurn(messageSnapshot);
+						this.#pending.unshift(...popped);
+						continue;
+					}
 					// reset()/dispose() aborts the in-flight prompt; treat it as a
 					// reset, not a transient failure — drop the stale batch.
 					if (this.#epoch !== epoch) continue;
@@ -836,6 +960,9 @@ export class AdvisorRuntime {
 					this.#wakeAllWaiters();
 					const failedMessages = this.agent.state.messages.slice(messageSnapshot);
 					const terminalFailure = this.#terminalAssistantFailure(messageSnapshot);
+					const classifierRefusal =
+						(terminalFailure !== undefined && isClassifierRefusal(terminalFailure)) ||
+						AIError.is(AIError.classify(err), AIError.Flag.ContentBlocked);
 					const terminalFailureId =
 						terminalFailure === undefined ? undefined : AIError.classifyMessage(terminalFailure);
 					const contextOverflow =
@@ -851,13 +978,57 @@ export class AdvisorRuntime {
 						AIError.is(terminalFailureId, AIError.Flag.ContextOverflow);
 					this.#rollbackFailedTurn(messageSnapshot);
 					logger.debug("advisor turn failed", { err: String(err) });
+					if (classifierRefusal) {
+						if (this.#includeThinking) {
+							this.#includeThinking = false;
+							const strippedBatch = this.#formatRawDelta(rawMessages, wip);
+							if (strippedBatch) {
+								this.#pending.unshift({
+									text: strippedBatch,
+									rawMessages,
+									renderRevision: this.#renderRevision,
+									turns: finalTurns,
+									wip,
+									overflowRecovery: recoveringOverflow || undefined,
+								});
+								logger.debug("advisor refusal recovered by stripping primary reasoning");
+								continue;
+							}
+						}
+						this.#notifyFailureOnce(err);
+						this.#clearSeenContext();
+						this.#backlog = Math.max(0, this.#backlog - finalTurns);
+						this.#notifyWaiters();
+						continue;
+					}
 					let recovered = false;
 					try {
-						recovered = (await this.host.onTurnError?.(err, failedMessages)) === true;
+						recovered =
+							(await raceWithSignal(
+								Promise.resolve(this.host.onTurnError?.(err, failedMessages, iterationAbort.signal)),
+								iterationAbort.signal,
+							)) === true;
 					} catch (hookErr) {
 						logger.debug("advisor onTurnError hook failed", { err: String(hookErr) });
 					}
+					if (this.#sessionTransitionPaused) {
+						this.#pending.unshift(...popped);
+						continue;
+					}
 					if (err instanceof AdvisorOutputQuarantinedError) {
+						// A quarantine discards the advisor's whole turn before dispatch, so
+						// its advice never reaches the primary. One re-prime is allowed to
+						// recover a one-off hallucination silently; a persistent quarantine
+						// loop is a supervision gap the user must see in the main UI — not an
+						// unbounded silent retry. Surface it (deduped by #notifyFailureOnce)
+						// and drop the batch to break the loop (issue #6661).
+						this.#consecutiveQuarantines++;
+						if (this.#consecutiveQuarantines >= MAX_QUARANTINE_RETRIES) {
+							this.#notifyFailureOnce(err);
+							this.#consecutiveQuarantines = 0;
+							this.#resetAdvisorContext(true, true);
+							continue;
+						}
 						const rePrime = this.#pending.length > 0 ? this.#latestMessages : undefined;
 						// Wake catchup waiters only when nothing is re-primed; otherwise the
 						// re-primed turn restores the backlog and waiters resolve on its completion.
@@ -958,7 +1129,15 @@ export class AdvisorRuntime {
 								wip,
 								overflowRecovery: recoveringOverflow || undefined,
 							});
-							await Bun.sleep(this.retryDelayMs);
+							if (this.retryDelayMs <= 0) {
+								await Bun.sleep(0);
+							} else {
+								try {
+									await raceWithSignal(Bun.sleep(this.retryDelayMs), iterationAbort.signal);
+								} catch (sleepError) {
+									if (!iterationAbort.signal.aborted) throw sleepError;
+								}
+							}
 						}
 					}
 				}
@@ -969,9 +1148,18 @@ export class AdvisorRuntime {
 				}
 			}
 		} finally {
+			this.#iterationAbort = undefined;
 			this.#busy = false;
 		}
 	}
+}
+
+/** Mirrors turn recovery's refusal classification and retains AIError's provider-neutral content-block fallback. */
+function isClassifierRefusal(message: AssistantMessage): boolean {
+	if (message.stopReason !== "error") return false;
+	const stopType = message.stopDetails?.type;
+	if (stopType === "refusal" || stopType === "sensitive") return true;
+	return AIError.is(AIError.classifyMessage(message), AIError.Flag.ContentBlocked);
 }
 
 /**
@@ -987,12 +1175,16 @@ function getAdvisorTurnError(messages: readonly AgentMessage[]): Error | undefin
 
 type TextualContent = string | readonly (TextContent | ImageContent)[];
 
-function obfuscateTextualContent(obfuscator: SecretObfuscator, content: TextualContent): TextualContent {
-	if (typeof content === "string") return obfuscator.obfuscate(content);
+function obfuscateTextualContent(
+	obfuscator: SecretObfuscator,
+	content: TextualContent,
+	sharedRegexSecretValues: ReadonlySet<string>,
+): TextualContent {
+	if (typeof content === "string") return obfuscator.obfuscate(content, sharedRegexSecretValues);
 	let changed = false;
 	const result = content.map((block): TextContent | ImageContent => {
 		if (block.type !== "text") return block;
-		const text = obfuscator.obfuscate(block.text);
+		const text = obfuscator.obfuscate(block.text, sharedRegexSecretValues);
 		if (text === block.text) return block;
 		changed = true;
 		return { ...block, text };
@@ -1000,17 +1192,50 @@ function obfuscateTextualContent(obfuscator: SecretObfuscator, content: TextualC
 	return changed ? result : content;
 }
 
-function obfuscateAssistantMessage(obfuscator: SecretObfuscator, message: AssistantMessage): AssistantMessage {
+function firstAdvisorToolResultErrorLine(content: TextualContent): string | undefined {
+	if (typeof content === "string") return content.split("\n", 1)[0];
+	const first = content[0];
+	if (first?.type !== "text") return undefined;
+	return first.text.split("\n", 1)[0];
+}
+
+function obfuscateAdvisorToolResultErrorContent(
+	obfuscator: SecretObfuscator,
+	content: TextualContent,
+	sharedRegexSecretValues: ReadonlySet<string>,
+): TextualContent {
+	const firstLine = firstAdvisorToolResultErrorLine(content);
+	if (firstLine === undefined) return content;
+	const preview = formatToolResultErrorPreview(content);
+	const obfuscatedPreview = obfuscator.obfuscate(preview, sharedRegexSecretValues);
+	if (obfuscatedPreview === firstLine) return content;
+	if (typeof content === "string") return obfuscatedPreview + content.slice(firstLine.length);
+	const first = content[0]!;
+	if (first.type !== "text") return content;
+	return [{ ...first, text: obfuscatedPreview + first.text.slice(firstLine.length) }, ...content.slice(1)];
+}
+
+function obfuscateAssistantMessage(
+	obfuscator: SecretObfuscator,
+	message: AssistantMessage,
+	sharedRegexSecretValues: ReadonlySet<string>,
+): AssistantMessage {
 	let changed = false;
 	const content = message.content.map((block): AssistantMessage["content"][number] => {
 		if (block.type === "text") {
-			const text = obfuscator.obfuscate(block.text);
+			const text = obfuscator.obfuscate(block.text, sharedRegexSecretValues);
 			if (text === block.text) return block;
 			changed = true;
 			return { ...block, text };
 		}
+		if (block.type === "thinking") {
+			const thinking = obfuscator.obfuscate(block.thinking, sharedRegexSecretValues);
+			if (thinking === block.thinking) return block;
+			changed = true;
+			return { ...block, thinking, thinkingSignature: undefined };
+		}
 		if (block.type === "toolCall") {
-			const args = obfuscateToolArguments(obfuscator, block.arguments);
+			const args = obfuscateToolArguments(obfuscator, block.arguments, sharedRegexSecretValues);
 			if (args === block.arguments) return block;
 			changed = true;
 			return { ...block, arguments: args };
@@ -1023,68 +1248,83 @@ function obfuscateAssistantMessage(obfuscator: SecretObfuscator, message: Assist
 function obfuscateDetails(
 	obfuscator: SecretObfuscator,
 	details: Record<string, unknown> | undefined,
+	sharedRegexSecretValues: ReadonlySet<string>,
 ): Record<string, unknown> | undefined {
 	if (!details) return details;
 	// Walk strings at every depth: `customOneLiner` renders nested fields
 	// (e.g. `async-result` reads `details.jobs[].label`/`jobId`), so a shallow
 	// pass leaks any secret a background job's label happens to contain.
-	return obfuscateToolArguments(obfuscator, details);
+	return obfuscateToolArguments(obfuscator, details, sharedRegexSecretValues);
 }
 
-function obfuscateAdvisorMessage(obfuscator: SecretObfuscator, message: AgentMessage): AgentMessage {
+function obfuscateAdvisorMessage(
+	obfuscator: SecretObfuscator,
+	message: AgentMessage,
+	sharedRegexSecretValues: ReadonlySet<string>,
+): AgentMessage {
 	switch (message.role) {
 		case "user":
 		case "developer": {
-			const content = obfuscateTextualContent(obfuscator, message.content as TextualContent);
+			const content = obfuscateTextualContent(
+				obfuscator,
+				message.content as TextualContent,
+				sharedRegexSecretValues,
+			);
 			return content === message.content ? message : ({ ...(message as object), content } as AgentMessage);
 		}
 		case "toolResult": {
 			const msg = message as AgentMessage & {
 				content: TextualContent;
 				details?: Record<string, unknown>;
+				isError?: boolean;
 			};
-			const content = obfuscateTextualContent(obfuscator, msg.content);
-			const details = obfuscateDetails(obfuscator, msg.details);
+			const content = msg.isError
+				? obfuscateAdvisorToolResultErrorContent(obfuscator, msg.content, sharedRegexSecretValues)
+				: msg.content;
+			let details = msg.details;
+			if (typeof details?.diff === "string") {
+				const diff = obfuscator.obfuscate(details.diff, sharedRegexSecretValues);
+				if (diff !== details.diff) details = { ...details, diff };
+			}
 			if (content === msg.content && details === msg.details) return message;
 			return { ...(message as object), content, details } as AgentMessage;
 		}
 		case "assistant":
-			return obfuscateAssistantMessage(obfuscator, message as AssistantMessage) as AgentMessage;
+			return obfuscateAssistantMessage(
+				obfuscator,
+				message as AssistantMessage,
+				sharedRegexSecretValues,
+			) as AgentMessage;
 		case "custom":
 		case "hookMessage": {
+			if (!formatSessionHistoryMarkdown([message], { expandPrimaryContext: true }).trim()) return message;
 			const msg = message as AgentMessage & {
 				content: TextualContent;
 				details?: Record<string, unknown>;
 			};
-			const content = obfuscateTextualContent(obfuscator, msg.content);
-			const details = obfuscateDetails(obfuscator, msg.details);
+			const content = obfuscateTextualContent(obfuscator, msg.content, sharedRegexSecretValues);
+			const details = obfuscateDetails(obfuscator, msg.details, sharedRegexSecretValues);
 			if (content === msg.content && details === msg.details) return message;
 			return { ...(message as object), content, details } as AgentMessage;
 		}
 		case "bashExecution": {
-			const msg = message as AgentMessage & { command: string; output: string };
-			const command = obfuscator.obfuscate(msg.command);
-			const output = obfuscator.obfuscate(msg.output);
-			return command === msg.command && output === msg.output
-				? message
-				: ({ ...(message as object), command, output } as AgentMessage);
+			const msg = message as AgentMessage & { command: string };
+			const command = obfuscator.obfuscate(formatExecutionSourcePreview(msg.command), sharedRegexSecretValues);
+			return command === msg.command ? message : ({ ...(message as object), command } as AgentMessage);
 		}
 		case "pythonExecution": {
-			const msg = message as AgentMessage & { code: string; output: string };
-			const code = obfuscator.obfuscate(msg.code);
-			const output = obfuscator.obfuscate(msg.output);
-			return code === msg.code && output === msg.output
-				? message
-				: ({ ...(message as object), code, output } as AgentMessage);
+			const msg = message as AgentMessage & { code: string };
+			const code = obfuscator.obfuscate(formatExecutionSourcePreview(msg.code), sharedRegexSecretValues);
+			return code === msg.code ? message : ({ ...(message as object), code } as AgentMessage);
 		}
 		case "branchSummary": {
 			const msg = message as AgentMessage & { summary: string };
-			const summary = obfuscator.obfuscate(msg.summary);
+			const summary = obfuscator.obfuscate(msg.summary, sharedRegexSecretValues);
 			return summary === msg.summary ? message : ({ ...(message as object), summary } as AgentMessage);
 		}
 		case "compactionSummary": {
 			const msg = message as AgentMessage & { summary: string };
-			const summary = obfuscator.obfuscate(msg.summary);
+			const summary = obfuscator.obfuscate(msg.summary, sharedRegexSecretValues);
 			return summary === msg.summary ? message : ({ ...(message as object), summary } as AgentMessage);
 		}
 		case "fileMention": {
@@ -1093,11 +1333,10 @@ function obfuscateAdvisorMessage(obfuscator: SecretObfuscator, message: AgentMes
 			};
 			let changed = false;
 			const files = msg.files.map(file => {
-				const path = obfuscator.obfuscate(file.path);
-				const content = obfuscator.obfuscate(file.content);
-				if (path === file.path && content === file.content) return file;
+				const path = obfuscator.obfuscate(file.path, sharedRegexSecretValues);
+				if (path === file.path) return file;
 				changed = true;
-				return { ...file, path, content };
+				return { ...file, path };
 			});
 			return changed ? ({ ...(message as object), files } as AgentMessage) : message;
 		}
@@ -1106,12 +1345,14 @@ function obfuscateAdvisorMessage(obfuscator: SecretObfuscator, message: AgentMes
 	}
 }
 
-function obfuscateAdvisorDelta(obfuscator: SecretObfuscator, messages: AgentMessage[]): AgentMessage[] {
-	let changed = false;
-	const result = messages.map(message => {
-		const next = obfuscateAdvisorMessage(obfuscator, message);
-		if (next !== message) changed = true;
-		return next;
-	});
-	return changed ? result : messages;
+function scrubAdvisorHistory(
+	obfuscator: SecretObfuscator,
+	messages: AgentMessage[],
+	sharedRegexSecretValues: ReadonlySet<string>,
+): void {
+	for (let index = 0; index < messages.length; index++) {
+		const message = messages[index]!;
+		const next = obfuscateAdvisorMessage(obfuscator, message, sharedRegexSecretValues);
+		if (next !== message) messages[index] = next;
+	}
 }

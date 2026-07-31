@@ -19,31 +19,12 @@ import {
 	TERMINAL,
 } from "./terminal-capabilities";
 import { isInsideTmux, wrapTmuxPassthrough } from "./tmux";
-import { type HangulCompatibilityJamoWidth, setHangulCompatibilityJamoWidth } from "./utils";
+import { setHangulCompatibilityJamoWidth } from "./utils";
 
 const TERMINAL_PROGRESS_KEEPALIVE_MS = 1000;
 const TERMINAL_PROGRESS_ACTIVE_SEQUENCE = "\x1b]9;4;3\x07";
 const TERMINAL_PROGRESS_CLEAR_SEQUENCE = "\x1b]9;4;0;\x07";
 const WINDOWS_TERMINAL_OSC11_POLL_MS = 30_000;
-// Hangul Compatibility Jamo (U+3131..=U+318E) render width is terminal-dependent:
-// Ghostty follows UAX#11 (2 cells); Terminal.app and iTerm2 render narrow (1),
-// matching the macOS platform default. Override only for terminals known to
-// disagree — the rest keep the platform default (macOS narrow, otherwise UAX#11),
-// so this is a no-op everywhere except Ghostty. A runtime DSR/CPR probe that
-// auto-detects the width on unknown terminals is tracked separately.
-export function resolveHangulCompatibilityJamoWidthFromTerminalIdentity(
-	env: NodeJS.ProcessEnv = Bun.env,
-): HangulCompatibilityJamoWidth {
-	if (
-		env.GHOSTTY_RESOURCES_DIR ||
-		env.TERM_PROGRAM?.toLowerCase() === "ghostty" ||
-		env.TERM?.toLowerCase().includes("ghostty")
-	) {
-		return 2;
-	}
-	return "platform";
-}
-
 function shouldEnableModifyOtherKeysFallback(env: NodeJS.ProcessEnv = Bun.env): boolean {
 	if (!env.SSH_CONNECTION && !env.SSH_TTY && !env.SSH_CLIENT) return true;
 	return TERMINAL.id !== "base" && TERMINAL.id !== "trueColor";
@@ -157,6 +138,66 @@ export function chunkForConPTY(data: string, maxChunkBytes: number = MAX_CONPTY_
 		}
 	}
 	return chunks;
+}
+
+/**
+ * Hard cap on bytes queued to a stalled stdout before its consumer is declared
+ * gone. A live terminal drains within milliseconds, so a backlog this large —
+ * far above any legitimate paint (a full session resume is a few MiB) — means
+ * the PTY reader has stopped consuming entirely. Without the cap, `#safeWrite`
+ * keeps handing cosmetic frames (the `hub wait` spinner, 500 ms progress
+ * snapshots) to a writable buffer that never drains, growing RSS without bound
+ * until the host runs out of memory. See #6854.
+ */
+const MAX_STDOUT_BACKLOG_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Turns an unbounded, never-draining stdout writable buffer into a bounded
+ * disconnect signal.
+ *
+ * `process.stdout.write()` returns `false` once its buffer exceeds the stream
+ * high-water mark; the bytes stay queued and are only freed when the consumer
+ * drains (the `drain` event). While the consumer keeps up, writes are accepted
+ * and nothing accumulates. When it stalls, every subsequent write piles onto
+ * the buffer — a stalled-but-alive PTY reader never throws, so the write path
+ * has no other signal that output is going nowhere. This guard sums the bytes
+ * queued since backpressure began and reports when that backlog crosses the
+ * cap, at which point the caller treats the terminal as disconnected.
+ *
+ * Exported for unit testing; `ProcessTerminal` is the sole production user.
+ */
+export class OutputBacklogGuard {
+	#bytes = 0;
+	#tracking = false;
+
+	constructor(private readonly capBytes: number = MAX_STDOUT_BACKLOG_BYTES) {}
+
+	/** True once a refused write started a backlog that has not yet drained. */
+	get tracking(): boolean {
+		return this.#tracking;
+	}
+
+	/**
+	 * Record one `stdout.write()`: `accepted` is that call's return value and
+	 * `bytes` its encoded size. Returns true when the pending backlog now
+	 * exceeds the cap and the terminal should be treated as disconnected.
+	 */
+	record(accepted: boolean, bytes: number): boolean {
+		if (!this.#tracking) {
+			// Consumer is keeping up; nothing is queued.
+			if (accepted) return false;
+			// First refused write: backpressure has begun.
+			this.#tracking = true;
+		}
+		this.#bytes += bytes;
+		return this.#bytes > this.capBytes;
+	}
+
+	/** Called on the stdout `drain` event: the buffer emptied, backlog cleared. */
+	reset(): void {
+		this.#bytes = 0;
+		this.#tracking = false;
+	}
 }
 
 /**
@@ -294,24 +335,23 @@ export function emergencyTerminalRestore(): void {
 		restoreTerminalStderr();
 		const terminal = activeTerminal;
 		if (terminal) {
-			terminal.stop();
-			// stop() never touches the alternate screen — the TUI owns that
-			// state and exits it on the normal shutdown path. Only crash paths
-			// with a fullscreen overlay still hold the alt buffer here. The
-			// leave sequence is gated on the tracked state because it is NOT a
-			// universally safe no-op: Windows' VT dispatcher homes the cursor
-			// on DECRST 1049 even when the alt buffer is inactive.
+			// Keyboard enhancement state is screen-local: pop the alt-screen
+			// frame before leaving it, then let stop() pop omp's main-screen frame.
 			if (altScreenActive) {
-				terminal.write("\x1b[?1049l");
+				const keyboardExit =
+					terminal.keyboardEnhancementExitSequence ?? (terminal.kittyEnableSequence ? "\x1b[<u" : "");
+				terminal.write(`${keyboardExit}\x1b[?1049l`);
 				altScreenActive = false;
 			}
-			terminal.showCursor();
+			terminal.stop();
+			terminal.showCursor(true);
 		} else if (terminalEverStarted && !isTerminalHeadless()) {
 			// Blind restore only if we know a terminal was started but lost track of it
 			// This avoids writing escape sequences for non-TUI commands (grep, commit, etc.)
 			process.stdout.write(
 				"\x1b[?2026l" + // End synchronized output
 					"\x1b[?7h" + // Restore autowrap
+					"\x1b[?1l\x1b>" + // Restore normal cursor-key + keypad mode (rmkx, #6374)
 					"\x1b[?2004l" + // Disable bracketed paste
 					"\x1b[?2031l" + // Disable Mode 2031 appearance notifications
 					"\x1b[?2048l" + // Disable in-band resize notifications
@@ -323,7 +363,7 @@ export function emergencyTerminalRestore(): void {
 					// actually holds it — on Windows, DECRST 1049 on the main
 					// buffer homes the cursor (unconditional CursorRestoreState
 					// with no prior save), corrupting the shell handoff on exit.
-					(altScreenActive ? "\x1b[?1049l" : "") +
+					(altScreenActive ? "\x1b[?1049l\x1b[?1l\x1b>\x1b[<u" : "") + // Leave alt; reset main keyboard
 					"\x1b[?25h", // Show cursor
 			);
 			altScreenActive = false;
@@ -380,9 +420,11 @@ export interface Terminal {
 	// Cursor positioning (relative to current position)
 	moveBy(lines: number): void; // Move cursor up (negative) or down (positive) by N lines
 
-	// Cursor visibility
-	hideCursor(): void; // Hide the cursor
-	showCursor(): void; // Show the cursor
+	// Cursor visibility. Same-state calls are deduped against the visibility
+	// last written to the terminal; pass force=true to write unconditionally
+	// (crash/exit restore paths).
+	hideCursor(force?: boolean): void; // Hide the cursor
+	showCursor(force?: boolean): void; // Show the cursor
 
 	// Clear operations
 	clearLine(): void; // Clear current line
@@ -403,6 +445,13 @@ export interface Terminal {
 	 * already-detected appearance so late subscribers never miss it.
 	 */
 	onAppearanceChange(callback: (appearance: TerminalAppearance) => void): void;
+	/**
+	 * Register a callback fired for every valid OSC 11 appearance report,
+	 * including reports whose classification matches the current appearance.
+	 * Unlike onAppearanceChange, this does not replay an earlier report.
+	 * Optional so custom Terminals built against older pi-tui versions keep working.
+	 */
+	onAppearanceReport?(callback: (appearance: TerminalAppearance) => void): (() => void) | void;
 	/**
 	 * Issue a single OSC 11 background-color re-query, driving the appearance
 	 * callbacks through the same parse/dedup pipeline used at startup and on Mode
@@ -496,6 +545,13 @@ export class ProcessTerminal implements Terminal {
 		this.#markTerminalDisconnected("stdin failed", err);
 	};
 	#dead = false;
+	#active = false;
+	// Last cursor visibility written to the terminal, sniffed from every
+	// outgoing sequence (frame buffers embed their own ?25h/?25l), so
+	// hideCursor()/showCursor() can skip same-state writes. `undefined` =
+	// unknown (fresh start, resize, or an alt-screen switch newer than the
+	// last cursor sequence — some hosts keep DECTCEM per buffer).
+	#cursorVisible: boolean | undefined;
 	// Captured at construction and re-read at start(): when true, every real
 	// terminal side effect (writes, probes, raw mode, SIGWINCH, timers) is
 	// suppressed. Defaults on under `bun test` — see isTerminalHeadless().
@@ -505,10 +561,21 @@ export class ProcessTerminal implements Terminal {
 	#stdoutErrorHandler = (err: Error) => {
 		this.#markTerminalDisconnected("stdout failed", err);
 	};
+	// Bounds the stdout writable buffer against a stalled PTY consumer: a
+	// stalled-but-alive reader never throws, so #safeWrite has no error to catch
+	// and the writable buffer grows without bound as cosmetic frames pile up.
+	// See OutputBacklogGuard and #6854.
+	#stdoutBacklog = new OutputBacklogGuard();
+	#stdoutDrainArmed = false;
+	#stdoutDrainHandler = () => {
+		this.#stdoutDrainArmed = false;
+		this.#stdoutBacklog.reset();
+	};
 
 	#windowsVTInputRestore?: () => void;
 	#xtermScrollToBottomRestoreModes = new Set<number>();
 	#appearanceCallbacks: Array<(appearance: TerminalAppearance) => void> = [];
+	#appearanceReportCallbacks: Array<(appearance: TerminalAppearance) => void> = [];
 	#appearance: TerminalAppearance | undefined;
 	#osc11Pending = false;
 	#osc11QueuedRoute?: Osc11QueryRoute;
@@ -572,16 +639,28 @@ export class ProcessTerminal implements Terminal {
 		}
 	}
 
+	onAppearanceReport(callback: (appearance: TerminalAppearance) => void): () => void {
+		this.#appearanceReportCallbacks.push(callback);
+		let subscribed = true;
+		return () => {
+			if (!subscribed) return;
+			subscribed = false;
+			const index = this.#appearanceReportCallbacks.indexOf(callback);
+			if (index !== -1) this.#appearanceReportCallbacks.splice(index, 1);
+		};
+	}
+
 	/**
 	 * Re-query the terminal background via a single OSC 11 probe. Reuses the
 	 * startup DA1-sentinel FIFO, pending/queued gating, parsing, dedup, and
 	 * appearance callbacks. Inside tmux, only this explicit path wraps the query
 	 * and sentinel together for passthrough to the outer terminal; startup and
 	 * Mode 2031 probes remain direct. Bounded to one probe per call; no timers are
-	 * armed. Suppressed while headless or after the terminal is torn down.
+	 * armed. Suppressed while inactive, headless, or after the terminal is torn
+	 * down.
 	 */
 	refreshAppearance(): void {
-		if (this.#headless || this.#dead) return;
+		if (!this.#active || this.#headless || this.#dead) return;
 		this.#queryBackgroundColor(isInsideTmux() ? "tmux" : "direct");
 	}
 
@@ -593,6 +672,8 @@ export class ProcessTerminal implements Terminal {
 		this.#inputHandler = onInput;
 		this.#resizeHandler = onResize;
 		this.#disconnectHandler = onDisconnect;
+		// The host terminal's cursor visibility is unknown until we write it.
+		this.#cursorVisible = undefined;
 
 		// Headless (tests): suppress every real-terminal side effect. Skip raw
 		// mode, stdin listeners, capability probes, SIGWINCH, and emergency-restore
@@ -625,10 +706,22 @@ export class ProcessTerminal implements Terminal {
 		// Enable bracketed paste mode - terminal will wrap pastes in \x1b[200~ ... \x1b[201~
 		this.#safeWrite("\x1b[?2004h");
 
+		// Force normal cursor-key (DECCKM) and numeric-keypad mode (terminfo
+		// `rmkx` = "\x1b[?1l\x1b>"). omp decodes both CSI ("\x1b[A") and SS3
+		// ("\x1bOA") arrow encodings, so it never enables application mode
+		// itself — but a prior program that left the TTY in application-cursor-
+		// keys mode makes arrows arrive as SS3. Normalizing on entry keeps input
+		// in the predictable default state; stop() restores the same on exit.
+		// See #6374.
+		this.#safeWrite("\x1b[?1l\x1b>");
+
 		// Set up resize handler immediately. The OS refreshes process.stdout
 		// dimensions before firing `resize`, so it is authoritative for geometry:
 		// reconcile any stale cached DEC 2048 report before notifying the renderer.
 		this.#stdoutResizeListener = () => {
+			// Conservative: some hosts reset modes across a resize/reattach, so
+			// re-establish cursor visibility on the next explicit call.
+			this.#cursorVisible = undefined;
 			this.#reconcileInBandGeometryOnResize();
 			this.#resizeHandler?.();
 		};
@@ -649,7 +742,10 @@ export class ProcessTerminal implements Terminal {
 		// The query handler intercepts input temporarily, then installs the user's handler
 		// See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
 		this.#queryAndEnableKittyProtocol();
-		setHangulCompatibilityJamoWidth(resolveHangulCompatibilityJamoWidthFromTerminalIdentity());
+		// Explicit probes are safe only after their response parser and stdin
+		// data handler are installed. Keep this false throughout temporary stops.
+		this.#active = true;
+		setHangulCompatibilityJamoWidth(TERMINAL.hangulJamoWidth);
 
 		// Query terminal background color via OSC 11 for dark/light detection.
 		// Uses DA1 (Primary Device Attributes) as a sentinel: terminals process
@@ -1150,8 +1246,16 @@ export class ProcessTerminal implements Terminal {
 		};
 		const luminance = 0.299 * normalize(rHex) + 0.587 * normalize(gHex) + 0.114 * normalize(bHex);
 		const mode: TerminalAppearance = luminance < 0.5 ? "dark" : "light";
-		if (mode === this.#appearance) return;
+		const changed = mode !== this.#appearance;
 		this.#appearance = mode;
+		for (const cb of [...this.#appearanceReportCallbacks]) {
+			try {
+				cb(mode);
+			} catch {
+				/* ignore callback errors */
+			}
+		}
+		if (!changed) return;
 		for (const cb of this.#appearanceCallbacks) {
 			try {
 				cb(mode);
@@ -1357,6 +1461,8 @@ export class ProcessTerminal implements Terminal {
 	}
 
 	stop(): void {
+		// Suppress observer/timer callbacks before any teardown can yield or throw.
+		this.#active = false;
 		if (this.#headless) return;
 		// Unregister from emergency cleanup
 		if (activeTerminal === this) {
@@ -1375,6 +1481,13 @@ export class ProcessTerminal implements Terminal {
 		// Leave paint-time terminal modes even if the process exits between the
 		// begin/end halves of a frame. Safe no-ops on terminals that ignored them.
 		this.#safeWrite("\x1b[?2026l\x1b[?7h");
+
+		// Restore normal cursor-key (DECCKM) and numeric-keypad mode (terminfo
+		// `rmkx`). Symmetric with the normalize in start(): a TTY-sharing child
+		// can leave the terminal in application-cursor-keys mode, and without
+		// this reset the parent shell inherits SS3 arrows so Up/Down history
+		// navigation stays broken after omp exits (#6374).
+		this.#safeWrite("\x1b[?1l\x1b>");
 
 		// Disable bracketed paste mode
 		this.#safeWrite("\x1b[?2004l");
@@ -1457,6 +1570,11 @@ export class ProcessTerminal implements Terminal {
 			process.stdout.removeListener("resize", this.#stdoutResizeListener);
 			this.#stdoutResizeListener = undefined;
 		}
+		if (this.#stdoutDrainArmed) {
+			process.stdout.removeListener("drain", this.#stdoutDrainHandler);
+			this.#stdoutDrainArmed = false;
+		}
+		this.#stdoutBacklog.reset();
 		this.#resizeHandler = undefined;
 
 		// Pause stdin to prevent any buffered input (e.g., Ctrl+D) from being
@@ -1464,12 +1582,21 @@ export class ProcessTerminal implements Terminal {
 		// where Ctrl+D could close the parent shell over SSH.
 		process.stdin.pause();
 
-		// Restore raw mode state
-		if (process.stdin.setRawMode) {
-			process.stdin.setRawMode(this.#wasRaw);
+		// Restore raw mode state. On a disconnected terminal (pane recycled, ssh
+		// dropped) the fd is no longer a tty and Bun's node:tty shim throws; there
+		// is nothing left to restore, and throwing would abort the caller. On a
+		// live terminal the failure still surfaces - swallowing it would silently
+		// leave stdin in raw mode.
+		try {
+			process.stdin.setRawMode?.(this.#wasRaw);
+		} catch (err) {
+			if (!this.#dead) throw err;
 		}
 		this.#stdoutErrorCleanup?.();
 		this.#stdoutErrorCleanup = undefined;
+		// After stop() the terminal is shared with other writers; visibility
+		// tracking is only meaningful while this instance owns the TTY.
+		this.#cursorVisible = undefined;
 	}
 
 	#ensureStdoutErrorHandler(): void {
@@ -1484,10 +1611,17 @@ export class ProcessTerminal implements Terminal {
 		const disconnectHandler = this.#disconnectHandler;
 		this.#disconnectHandler = undefined;
 		if (!disconnectHandler) return;
-		disconnectHandler();
+		// The handler tears the TUI down against a terminal that is already gone,
+		// so any step in it can fail. Swallow that: the exit below is the whole
+		// point of this method and must not be preempted by teardown noise.
+		try {
+			disconnectHandler();
+		} catch (handlerErr) {
+			logger.error("Terminal disconnect handler failed; exiting anyway", { err: handlerErr });
+		}
 
 		if (process.platform === "win32") {
-			void postmortem.quit(129);
+			void postmortem.quit(129, { drainStdout: false });
 			return;
 		}
 		try {
@@ -1516,6 +1650,7 @@ export class ProcessTerminal implements Terminal {
 		// files). They serve no purpose there and would surface as visible noise.
 		if (!process.stdout.isTTY) return;
 		this.#ensureStdoutErrorHandler();
+		this.#trackCursorVisibility(data);
 		// A console-sharing child process may have flipped the console codepage
 		// away from UTF-8; repair it before any bytes hit WriteFile so no frame
 		// is ever translated through an OEM codepage. See ensureWindowsConsoleUtf8.
@@ -1533,13 +1668,26 @@ export class ProcessTerminal implements Terminal {
 			// `process.stdout.write(string)` UTF-8-encodes before `WriteFile`,
 			// and a code-unit cap would let CJK transcript rows expand past the
 			// threshold. See #2034 and #2095.
-			if (isConPTYHosted() && Buffer.byteLength(data, "utf8") > MAX_CONPTY_WRITE_CHUNK_BYTES) {
+			const bytes = Buffer.byteLength(data, "utf8");
+			let accepted: boolean;
+			if (isConPTYHosted() && bytes > MAX_CONPTY_WRITE_CHUNK_BYTES) {
+				accepted = true;
 				for (const chunk of chunkForConPTY(data, MAX_CONPTY_WRITE_CHUNK_BYTES)) {
 					if (this.#dead) break;
-					process.stdout.write(chunk);
+					accepted = process.stdout.write(chunk);
 				}
 			} else {
-				process.stdout.write(data);
+				accepted = process.stdout.write(data);
+			}
+			// A stalled-but-alive PTY consumer never throws: write() just returns
+			// false and queues the bytes. Bound that never-draining backlog by
+			// declaring the terminal disconnected once it crosses the cap — the
+			// same clean-exit path a dead terminal takes (#6854).
+			if (this.#stdoutBacklog.record(accepted, bytes)) {
+				this.#markTerminalDisconnected("stdout backlog exceeded cap; PTY consumer stalled");
+			} else if (this.#stdoutBacklog.tracking && !this.#stdoutDrainArmed) {
+				this.#stdoutDrainArmed = true;
+				process.stdout.once("drain", this.#stdoutDrainHandler);
 			}
 		} catch (err) {
 			this.#markTerminalDisconnected("stdout failed", err);
@@ -1567,12 +1715,35 @@ export class ProcessTerminal implements Terminal {
 		// lines === 0: no movement
 	}
 
-	hideCursor(): void {
+	hideCursor(force = false): void {
+		if (!force && this.#cursorVisible === false) return;
 		this.#safeWrite("\x1b[?25l");
 	}
 
-	showCursor(): void {
+	showCursor(force = false): void {
+		if (!force && this.#cursorVisible === true) return;
 		this.#safeWrite("\x1b[?25h");
+	}
+
+	/**
+	 * Sniff outgoing data for the last cursor-visibility change so the tracked
+	 * state stays correct for sequences embedded in frame buffers
+	 * (TUI#cursorControlSequence appends ?25h/?25l inside the paint write). An
+	 * alt-screen switch (DECSET/DECRST 1049) newer than the last cursor
+	 * sequence resets tracking to unknown: some hosts keep DECTCEM per buffer.
+	 */
+	#trackCursorVisibility(data: string): void {
+		let idx = data.lastIndexOf("\x1b[?25");
+		while (idx !== -1) {
+			const final = data.charCodeAt(idx + 5);
+			if (final === 0x68 /* h */ || final === 0x6c /* l */) break;
+			idx = idx === 0 ? -1 : data.lastIndexOf("\x1b[?25", idx - 1);
+		}
+		if (data.lastIndexOf("\x1b[?1049") > idx) {
+			this.#cursorVisible = undefined;
+			return;
+		}
+		if (idx !== -1) this.#cursorVisible = data.charCodeAt(idx + 5) === 0x68;
 	}
 
 	clearLine(): void {

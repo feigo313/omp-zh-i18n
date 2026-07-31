@@ -38,6 +38,7 @@ import type { MCPToolDetails } from "./tool-bridge";
 import { DeferredMCPTool, MCPTool } from "./tool-bridge";
 import type { MCPToolCache } from "./tool-cache";
 import type {
+	MCPAuthChallenge,
 	MCPGetPromptResult,
 	MCPPrompt,
 	MCPRequestOptions,
@@ -92,6 +93,14 @@ const STARTUP_TIMEOUT_MS = 250;
  */
 const RECONNECT_BURST_WINDOW_MS = 30_000;
 const RECONNECT_BURST_LIMIT = 5;
+
+/**
+ * Bounded buffer for notifications received before any listener attaches.
+ * Mirrors {@link IrcBus}'s `MAILBOX_CAP` — drop-oldest on overflow. Drained
+ * into the first {@link MCPManager.addNotificationListener} subscriber, then
+ * cleared; subsequent frames deliver directly to attached listeners.
+ */
+const NOTIFICATION_BUFFER_CAP = 100;
 
 function trackPromise<T>(promise: Promise<T>): TrackedPromise<T> {
 	const tracked: TrackedPromise<T> = { promise, status: "pending" };
@@ -160,6 +169,9 @@ export interface MCPDiscoverOptions {
 	onStatus?: (event: McpConnectionStatusEvent) => void;
 }
 
+/** Handles an MCP `WWW-Authenticate` challenge and returns refreshed config. */
+export type MCPAuthHandler = (serverName: string, challenge: MCPAuthChallenge) => Promise<MCPServerConfig | undefined>;
+
 /**
  * MCP Server Manager.
  *
@@ -189,8 +201,15 @@ export class MCPManager {
 	#pendingToolLoads = new Map<string, Promise<ToolLoadResult>>();
 	#sources = new Map<string, SourceMeta>();
 	#authStorage: AuthStorage | null = null;
-	#onNotification?: (serverName: string, method: string, params: unknown) => void;
-	#onToolsChanged?: (tools: CustomTool<TSchema, MCPToolDetails>[]) => void;
+	#authHandler?: MCPAuthHandler;
+	#notificationListeners = new Set<(serverName: string, method: string, params: unknown) => void>();
+	/**
+	 * Notifications received before any listener attached, to be drained on
+	 * the first {@link addNotificationListener} call. Bounded by
+	 * {@link NOTIFICATION_BUFFER_CAP}, drop-oldest on overflow.
+	 */
+	#pendingNotifications: Array<{ server: string; method: string; params: unknown }> = [];
+	#onToolsChanged?: (tools: CustomTool<TSchema, MCPToolDetails>[]) => void | Promise<void>;
 	#onResourcesChanged?: (serverName: string, uri: string) => void;
 	#onPromptsChanged?: (serverName: string) => void;
 	#notificationsEnabled = false;
@@ -201,7 +220,7 @@ export class MCPManager {
 	/** Preserved configs for reconnection after connection loss. */
 	#serverConfigs = new Map<string, MCPServerConfig>();
 	/**
-	 * Timestamps of recent `reconnectServer` invocations per server, used by the
+	 * Timestamps of recent reconnectServer invocations per server, used by the
 	 * crash-storm circuit breaker (see {@link RECONNECT_BURST_LIMIT}).
 	 */
 	#reconnectHistory = new Map<string, number[]>();
@@ -214,16 +233,66 @@ export class MCPManager {
 	) {}
 
 	/**
-	 * Set a callback to receive all server notifications.
+	 * Register a listener for server-initiated MCP notifications.
+	 *
+	 * The listener is called for every JSON-RPC notification received from any
+	 * connected server, AFTER the manager's own handling of known methods
+	 * (`notifications/tools/list_changed`, `notifications/resources/list_changed`,
+	 * `notifications/resources/updated`, `notifications/prompts/list_changed`).
+	 * For list-change methods the internal refresh promise is awaited before
+	 * fanout, so listeners observe up-to-date manager and tool state. Unknown
+	 * or server-custom methods are also delivered, letting consumers bridge
+	 * server-initiated events into session-level behavior (e.g. an extension
+	 * injecting a steer via `pi.sendMessage`).
+	 *
+	 * Notifications received before any listener attached are buffered
+	 * (bounded FIFO, cap {@link NOTIFICATION_BUFFER_CAP}, drop-oldest) and
+	 * drained into the first subscriber — matches {@link setOnPromptsChanged}'s
+	 * replay-on-attach and {@link IrcBus}'s mailbox semantics.
+	 *
+	 * Returns an unsubscribe function; call it to remove the listener.
+	 *
+	 * Multiple listeners are allowed; each is invoked with independent error
+	 * isolation — a listener that throws does not prevent other listeners from
+	 * firing.
 	 */
-	setOnNotification(handler: (serverName: string, method: string, params: unknown) => void): void {
-		this.#onNotification = handler;
+	addNotificationListener(listener: (serverName: string, method: string, params: unknown) => void): () => void {
+		const wasEmpty = this.#notificationListeners.size === 0;
+		this.#notificationListeners.add(listener);
+
+		// Drain startup-buffered notifications into the first attaching listener.
+		if (wasEmpty && this.#pendingNotifications.length > 0) {
+			const pending = this.#pendingNotifications.splice(0);
+			for (const frame of pending) {
+				try {
+					listener(frame.server, frame.method, frame.params);
+				} catch (error) {
+					logger.debug("MCP notification listener threw during buffered drain", {
+						path: `mcp:${frame.server}`,
+						method: frame.method,
+						error,
+					});
+				}
+			}
+		}
+
+		return () => {
+			this.#notificationListeners.delete(listener);
+		};
 	}
 
 	/**
 	 * Set a callback to fire when any server's tools change.
+	 *
+	 * May return a Promise; if so, {@link refreshServerTools} awaits it so that
+	 * downstream consumers (e.g. `mcp_notification` listeners for
+	 * `notifications/tools/list_changed`) observe not just the manager's
+	 * refreshed tool set but also any session-level rebind driven by the
+	 * handler (`session.refreshMCPTools`). Other callsites (initial connect,
+	 * disconnect, reconnect) invoke the handler synchronously — their downstream
+	 * chains don't need to serialize on the rebind.
 	 */
-	setOnToolsChanged(handler: (tools: CustomTool<TSchema, MCPToolDetails>[]) => void): void {
+	setOnToolsChanged(handler: (tools: CustomTool<TSchema, MCPToolDetails>[]) => void | Promise<void>): void {
 		this.#onToolsChanged = handler;
 	}
 
@@ -310,6 +379,11 @@ export class MCPManager {
 	 */
 	setAuthStorage(authStorage: AuthStorage): void {
 		this.#authStorage = authStorage;
+	}
+
+	/** Set the callback used to complete OAuth after a tool-level auth challenge. */
+	setAuthHandler(handler: MCPAuthHandler | undefined): void {
+		this.#authHandler = handler;
 	}
 
 	/**
@@ -474,10 +548,11 @@ export class MCPManager {
 				.then(async ({ connection, serverTools }) => {
 					if (this.#pendingToolLoads.get(name) !== toolsPromise) return;
 					this.#pendingToolLoads.delete(name);
-					const reconnect = () => this.reconnectServer(name);
+					const reconnect = (options?: { authChallenge?: MCPAuthChallenge }) =>
+						this.reconnectServer(name, options);
 					const customTools = MCPTool.fromTools(connection, serverTools, reconnect);
 					this.#replaceServerTools(name, customTools);
-					this.#onToolsChanged?.(this.#tools);
+					void this.#onToolsChanged?.(this.#tools);
 					void this.toolCache?.set(name, config, serverTools);
 
 					onStatus?.({ type: "connected", serverName: name });
@@ -586,7 +661,7 @@ export class MCPManager {
 		sortMCPToolsByName(this.#tools);
 	}
 
-	#triggerNotificationRefresh(serverName: string, kind: "tools" | "resources" | "prompts"): void {
+	#triggerNotificationRefresh(serverName: string, kind: "tools" | "resources" | "prompts"): Promise<void> {
 		const refresh = (() => {
 			switch (kind) {
 				case "tools":
@@ -597,22 +672,33 @@ export class MCPManager {
 					return this.refreshServerPrompts(serverName);
 			}
 		})();
-		void refresh.catch(error => {
+		return refresh.catch(error => {
 			logger.debug("Failed MCP notification refresh", { path: `mcp:${serverName}`, kind, error });
 		});
 	}
-	#handleServerNotification(serverName: string, method: string, params: unknown): void {
+	async #handleServerNotification(serverName: string, method: string, params: unknown): Promise<void> {
 		logger.debug("MCP notification received", { path: `mcp:${serverName}`, method });
 
+		// Only trigger refresh if the connection is already stored — during the
+		// initial connect handshake, notifications may arrive before
+		// `#connections.set()` completes, and `refreshServer*` would no-op
+		// anyway. Skipping the await in that case preserves arrival order
+		// across concurrently-dispatched notifications (an awaited refresh,
+		// even a no-op, yields a microtask that lets later frames overtake).
+		const connectionKnown = this.#connections.has(serverName);
+		let refreshPromise: Promise<void> | undefined;
 		switch (method) {
 			case MCPNotificationMethods.TOOLS_LIST_CHANGED:
-				this.#triggerNotificationRefresh(serverName, "tools");
+				if (connectionKnown) refreshPromise = this.#triggerNotificationRefresh(serverName, "tools");
 				break;
 			case MCPNotificationMethods.RESOURCES_LIST_CHANGED:
-				this.#triggerNotificationRefresh(serverName, "resources");
+				if (connectionKnown) refreshPromise = this.#triggerNotificationRefresh(serverName, "resources");
 				break;
 			case MCPNotificationMethods.RESOURCES_UPDATED: {
-				const uri = (params as { uri?: string })?.uri;
+				const uri =
+					params && typeof params === "object" && "uri" in params && typeof params.uri === "string"
+						? params.uri
+						: undefined;
 				const subscribed = this.#subscribedResources.get(serverName);
 				if (uri && subscribed?.has(uri)) {
 					this.#onResourcesChanged?.(serverName, uri);
@@ -620,13 +706,40 @@ export class MCPManager {
 				break;
 			}
 			case MCPNotificationMethods.PROMPTS_LIST_CHANGED:
-				this.#triggerNotificationRefresh(serverName, "prompts");
+				if (connectionKnown) refreshPromise = this.#triggerNotificationRefresh(serverName, "prompts");
 				break;
 			default:
 				break;
 		}
 
-		this.#onNotification?.(serverName, method, params);
+		// Await internal refresh so listeners see the manager's post-refresh
+		// state (satisfies the documented "AFTER the manager's own handling"
+		// contract on `addNotificationListener` — otherwise an extension acting
+		// on `tools/list_changed` could hit stale `getTools()`).
+		if (refreshPromise) {
+			await refreshPromise;
+		}
+
+		// Buffer for late-attaching subscribers when no listener exists yet.
+		if (this.#notificationListeners.size === 0) {
+			this.#pendingNotifications.push({ server: serverName, method, params });
+			if (this.#pendingNotifications.length > NOTIFICATION_BUFFER_CAP) {
+				this.#pendingNotifications.shift();
+			}
+			return;
+		}
+
+		for (const listener of this.#notificationListeners) {
+			try {
+				listener(serverName, method, params);
+			} catch (error) {
+				logger.debug("MCP notification listener threw", {
+					path: `mcp:${serverName}`,
+					method,
+					error,
+				});
+			}
+		}
 	}
 
 	/** Handle server-to-client JSON-RPC requests (e.g. ping, roots/list). */
@@ -770,7 +883,7 @@ export class MCPManager {
 		// Remove tools from this server and notify consumers
 		const hadTools = this.#tools.some(t => t.mcpServerName === name);
 		this.#tools = this.#tools.filter(t => t.mcpServerName !== name);
-		if (hadTools) this.#onToolsChanged?.(this.#tools);
+		if (hadTools) void this.#onToolsChanged?.(this.#tools);
 
 		// Notify prompt consumers so stale commands are cleared
 		if (connection?.prompts?.length) this.#onPromptsChanged?.(name);
@@ -810,13 +923,15 @@ export class MCPManager {
 	 * the same server share one reconnection attempt. Returns the new
 	 * connection, or `null` if reconnection failed or the per-server crash
 	 * burst limit (see {@link RECONNECT_BURST_LIMIT}) is exceeded.
-	 *
 	 * @param options.manual - When `true`, resets the crash-burst window so a
 	 *   user-driven retry (e.g. `/mcp reconnect`) is never blocked by an
 	 *   earlier storm. Defaults to `false`; the transport `onClose` callback
 	 *   and the per-tool-call retry path in `tool-bridge` MUST NOT set it.
 	 */
-	async reconnectServer(name: string, options?: { manual?: boolean }): Promise<MCPServerConnection | null> {
+	async reconnectServer(
+		name: string,
+		options?: { manual?: boolean; authChallenge?: MCPAuthChallenge },
+	): Promise<MCPServerConnection | null> {
 		if (options?.manual) {
 			this.#reconnectHistory.delete(name);
 		}
@@ -828,7 +943,7 @@ export class MCPManager {
 			return null;
 		}
 
-		const attempt = this.#doReconnect(name);
+		const attempt = this.#doReconnect(name, options?.authChallenge);
 		this.#pendingReconnections.set(name, attempt);
 		return attempt.finally(() => this.#pendingReconnections.delete(name));
 	}
@@ -873,11 +988,29 @@ export class MCPManager {
 		return false;
 	}
 
-	async #doReconnect(name: string): Promise<MCPServerConnection | null> {
+	async #doReconnect(name: string, authChallenge?: MCPAuthChallenge): Promise<MCPServerConnection | null> {
 		const oldConnection = this.#connections.get(name);
-		const config = oldConnection?.config ?? this.#serverConfigs.get(name);
+		let config = oldConnection?.config ?? this.#serverConfigs.get(name);
 		const source = this.#sources.get(name) ?? oldConnection?._source;
 		if (!config) return null;
+
+		if (authChallenge) {
+			if (!this.#authHandler) {
+				logger.error("MCP auth challenge cannot be handled; no auth handler is configured", {
+					path: `mcp:${name}`,
+				});
+				return null;
+			}
+			try {
+				const refreshedConfig = await this.#authHandler(name, authChallenge);
+				if (!refreshedConfig) return null;
+				config = refreshedConfig;
+				this.#serverConfigs.set(name, config);
+			} catch (error) {
+				logger.error("MCP auth challenge handling failed", { path: `mcp:${name}`, error });
+				return null;
+			}
+		}
 
 		logger.debug("MCP reconnecting", { path: `mcp:${name}` });
 
@@ -987,11 +1120,11 @@ export class MCPManager {
 		};
 		try {
 			const serverTools = await listTools(connection);
-			const reconnect = () => this.reconnectServer(name);
+			const reconnect = (options?: { authChallenge?: MCPAuthChallenge }) => this.reconnectServer(name, options);
 			const customTools = MCPTool.fromTools(connection, serverTools, reconnect);
 			void this.toolCache?.set(name, config, serverTools);
 			this.#replaceServerTools(name, customTools);
-			this.#onToolsChanged?.(this.#tools);
+			void this.#onToolsChanged?.(this.#tools);
 			void this.#loadServerResourcesAndPrompts(name, connection);
 			return connection;
 		} catch (error) {
@@ -1010,13 +1143,7 @@ export class MCPManager {
 	async #loadServerResourcesAndPrompts(name: string, connection: MCPServerConnection): Promise<void> {
 		if (serverSupportsResources(connection.capabilities)) {
 			try {
-				const [resources] = await Promise.all([listResources(connection), listResourceTemplates(connection)]);
-
-				if (this.#notificationsEnabled && connection.capabilities.resources?.subscribe) {
-					const uris = resources.map(r => r.uri);
-					const notificationEpoch = this.#notificationsEpoch;
-					this.#subscribeAndTrack(name, connection, uris, notificationEpoch);
-				}
+				await this.refreshServerResources(name);
 			} catch (error) {
 				logger.debug("Failed to load MCP resources", { path: `mcp:${name}`, error });
 			}
@@ -1050,7 +1177,7 @@ export class MCPManager {
 
 		// Replace tools from this server
 		this.#replaceServerTools(name, customTools);
-		this.#onToolsChanged?.(this.#tools);
+		await this.#onToolsChanged?.(this.#tools);
 	}
 
 	/**
@@ -1076,8 +1203,20 @@ export class MCPManager {
 			connection.resources = undefined;
 			connection.resourceTemplates = undefined;
 
-			// Reload
-			const [resources] = await Promise.all([listResources(connection), listResourceTemplates(connection)]);
+			// Reload. Template listing failures must not discard a successful
+			// resources/list — let both settle, then continue without templates.
+			const [resourcesResult, templatesResult] = await Promise.allSettled([
+				listResources(connection),
+				listResourceTemplates(connection),
+			]);
+			if (templatesResult.status === "rejected") {
+				logger.debug("Failed to list MCP resource templates", {
+					path: `mcp:${name}`,
+					error: templatesResult.reason,
+				});
+			}
+			if (resourcesResult.status === "rejected") throw resourcesResult.reason;
+			const resources = resourcesResult.value;
 			if (this.#notificationsEnabled && connection.capabilities.resources?.subscribe) {
 				const newUris = new Set(resources.map(r => r.uri));
 				const oldUris = this.#subscribedResources.get(name);
@@ -1128,6 +1267,17 @@ export class MCPManager {
 		});
 		this.#pendingResourceRefresh.set(name, { connection, promise });
 		return promise;
+	}
+
+	/**
+	 * Wait until a connected server's resource catalog has been loaded.
+	 * Coalesces with initial loading and notification-driven refreshes.
+	 */
+	async ensureServerResources(name: string): Promise<void> {
+		const connection = this.#connections.get(name);
+		if (!connection || !serverSupportsResources(connection.capabilities)) return;
+		if (connection.resources !== undefined && connection.resourceTemplates !== undefined) return;
+		await this.refreshServerResources(name);
 	}
 
 	/**

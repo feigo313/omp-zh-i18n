@@ -6,7 +6,7 @@
  */
 
 import type { SettingTab, SubmenuOption } from "../config/settings-schema";
-import type { SettingDef, SubmenuSettingDef } from "../modes/components/settings-defs";
+import type { SettingDef } from "../modes/components/settings-defs";
 import { i18n } from "./index";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -33,10 +33,9 @@ function translateDef(def: SettingDef): SettingDef {
 		description: i18n.t(`settings.${def.path}.description`, def.description),
 	};
 	// Translate submenu options (label + optional description)
-	if (translated.type === "submenu") {
-		(translated as SubmenuSettingDef).options = (def as SubmenuSettingDef).options.map(o =>
-			translateOption(def.path, o),
-		);
+	if (translated.type === "submenu" || translated.type === "multiselect") {
+		const options = def.type === "submenu" || def.type === "multiselect" ? def.options : [];
+		translated.options = options.map(o => translateOption(def.path, o));
 	}
 	return translated;
 }
@@ -201,7 +200,7 @@ export function interceptSlashCommand(input: SlashCommandTranslationInput): Slas
 	if (input.subcommands) {
 		result.subcommands = input.subcommands.map(sub => ({
 			...sub,
-			description: i18n.t(`commands.${input.name}.subcommands.${sub.name}`, sub.description),
+			description: i18n.t(`commands.${input.name}.subcommands.${sub.name}.description`, sub.description),
 		}));
 	}
 	return result;

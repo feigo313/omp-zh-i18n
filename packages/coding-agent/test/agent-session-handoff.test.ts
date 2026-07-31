@@ -163,6 +163,20 @@ describe("AgentSession handoff", () => {
 		expect(sessionManager.getEntries().filter(entry => entry.type === "compaction")).toHaveLength(0);
 	});
 
+	it("clears staged preview state when handoff creates the replacement session", async () => {
+		vi.spyOn(compactionModule, "generateHandoffFromContext").mockResolvedValue("## Goal\nContinue from here");
+		session.toolChoiceQueue.registerPendingInvoker("old-session-preview", "ast_edit", async () => ({
+			content: [{ type: "text", text: "applied old preview" }],
+		}));
+		expect(session.peekPendingInvoker()).toBeDefined();
+		expect(session.nextToolChoiceDirective()).toBeDefined();
+
+		await session.handoff();
+
+		expect(session.peekPendingInvoker()).toBeUndefined();
+		expect(session.nextToolChoiceDirective()).toBeUndefined();
+	});
+
 	it("emits handoff lifecycle hooks on the outgoing and replacement sessions", async () => {
 		const extensionsResult = await loadExtensions([], tempDir.path());
 		const extensionRunner = new ExtensionRunner(
@@ -831,6 +845,31 @@ describe("AgentSession handoff", () => {
 		).toHaveLength(1);
 		expect(fallbackCandidateKey).toBeDefined();
 		expect(promptSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not switch providers after provider-native auto-compaction fails", async () => {
+		session.settings.set("compaction.strategy", "context-full");
+		session.settings.set("compaction.thresholdTokens", 50);
+		session.settings.set("compaction.keepRecentTokens", 1);
+		session.settings.set("contextPromotion.enabled", false);
+
+		const attemptedCandidates: string[] = [];
+		vi.spyOn(compactionModule, "compact").mockImplementation(async (_preparation, candidate) => {
+			attemptedCandidates.push(`${candidate.provider}/${candidate.id}`);
+			throw new compactionModule.NativeCompactionError(new Error("native compaction transport failed"));
+		});
+
+		await session.prompt("pending prompt ".repeat(120));
+		await waitFor(() =>
+			events.some(
+				event =>
+					event.type === "auto_compaction_end" &&
+					event.errorMessage?.includes("native compaction transport failed") === true,
+			),
+		);
+
+		expect(attemptedCandidates.length).toBeGreaterThan(0);
+		expect(new Set(attemptedCandidates.map(candidate => candidate.split("/", 1)[0]))).toHaveLength(1);
 	});
 	it("keeps pre-prompt context-full checks aligned with provider-anchored usage", async () => {
 		await session.dispose();

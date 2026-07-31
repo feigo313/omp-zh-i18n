@@ -623,6 +623,7 @@ async fn create_session_for_run(
 		shell.register_builtin("cat", crate::coreutils::cat_builtin());
 		shell.register_builtin("uniq", crate::coreutils::uniq_builtin());
 		shell.register_builtin("base64", crate::coreutils::base64_builtin());
+		shell.register_builtin("cmp", crate::coreutils::cmp_builtin());
 		shell.register_builtin("md5sum", crate::coreutils::md5sum_builtin());
 		shell.register_builtin("sha1sum", crate::coreutils::sha1sum_builtin());
 		shell.register_builtin("sha224sum", crate::coreutils::sha224sum_builtin());
@@ -657,6 +658,14 @@ async fn create_session_for_run(
 		shell.register_builtin("sed", crate::coreutils::sed_builtin());
 		shell.register_builtin("xargs", crate::coreutils::xargs_builtin());
 		shell.register_builtin("jq", crate::coreutils::jq_builtin());
+		// moreutils-inspired in-process builtins (see crate::moreutils).
+		shell.register_builtin("ts", crate::coreutils::ts_builtin());
+		shell.register_builtin("sponge", crate::coreutils::sponge_builtin());
+		shell.register_builtin("ifne", crate::coreutils::ifne_builtin());
+		shell.register_builtin("isutf8", crate::coreutils::isutf8_builtin());
+		shell.register_builtin("combine", crate::coreutils::combine_builtin());
+		#[cfg(unix)]
+		shell.register_builtin("errno", crate::coreutils::errno_builtin());
 		if !uutils_env_disabled(config, "PI_DISABLE_UUTILS_DESTRUCTIVE") {
 			if !uutils_env_disabled(config, "PI_DISABLE_RM_BUILTIN") {
 				shell.register_builtin("rm", crate::coreutils::rm_builtin());
@@ -2165,7 +2174,394 @@ fn uutils_env_disabled(config: &ShellConfig, key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+	#[cfg(unix)]
+	use std::os::unix::process::ExitStatusExt as _;
+
+	#[cfg(unix)]
+	use tokio::process::Command;
+
 	use super::*;
+
+	#[cfg(unix)]
+	async fn kill_test_context() -> (ShellSessionCore, ExecutionParameters) {
+		let config = ShellConfig { session_env: None, snapshot_path: None, minimizer: None };
+		let session = create_session(&config).await.expect("create_session");
+		let mut params = session.shell.default_exec_params();
+		params.set_fd(OpenFiles::STDIN_FD, null_file().expect("null stdin"));
+		params.set_fd(OpenFiles::STDOUT_FD, null_file().expect("null stdout"));
+		params.set_fd(OpenFiles::STDERR_FD, null_file().expect("null stderr"));
+		(session, params)
+	}
+
+	/// The kill builtin accepts a numeric signal and applies it to every process
+	/// operand.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn kill_builtin_accepts_numeric_signal_for_multiple_processes() {
+		let mut first = Command::new("sleep")
+			.arg("30")
+			.spawn()
+			.expect("first sleep");
+		let mut second = Command::new("sleep")
+			.arg("30")
+			.spawn()
+			.expect("second sleep");
+		let first_pid = first.id().expect("first pid");
+		let second_pid = second.id().expect("second pid");
+		let (mut session, params) = kill_test_context().await;
+		let source_info = SourceInfo::from("pi-natives:test");
+
+		let result = session
+			.shell
+			.run_string(format!("kill -9 {first_pid} {second_pid}"), &source_info, &params)
+			.await
+			.expect("kill command");
+		let code = exit_code(&result);
+		if code != 0 {
+			let _ = first.kill().await;
+			let _ = second.kill().await;
+			let _ = first.wait().await;
+			let _ = second.wait().await;
+			assert_eq!(code, 0, "numeric multi-process kill should succeed");
+		}
+
+		let statuses =
+			time::timeout(Duration::from_secs(5), async { tokio::join!(first.wait(), second.wait()) })
+				.await;
+		if statuses.is_err() {
+			let _ = first.kill().await;
+			let _ = second.kill().await;
+			let _ = first.wait().await;
+			let _ = second.wait().await;
+			panic!("kill must signal every process operand");
+		}
+		let (first_status, second_status) = statuses.expect("checked timeout");
+		assert_eq!(first_status.expect("first wait").signal(), Some(libc::SIGKILL));
+		assert_eq!(second_status.expect("second wait").signal(), Some(libc::SIGKILL));
+	}
+
+	/// The kill builtin defaults to SIGTERM so processes can shut down
+	/// gracefully.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn kill_builtin_defaults_to_sigterm() {
+		let dir = tempfile::tempdir().expect("temp dir");
+		let ready = dir.path().join("ready");
+		let mut child = Command::new("sh")
+			.args([
+				"-c",
+				"trap 'exit 42' TERM; : > \"$1\"; while :; do :; done",
+				"sh",
+				ready.to_str().expect("utf8 path"),
+			])
+			.spawn()
+			.expect("trapping child");
+		let pid = child.id().expect("child pid");
+		let ready_result = time::timeout(Duration::from_secs(5), async {
+			while !ready.exists() {
+				time::sleep(Duration::from_millis(10)).await;
+			}
+		})
+		.await;
+		if ready_result.is_err() {
+			let _ = child.kill().await;
+			let _ = child.wait().await;
+			panic!("child did not install its SIGTERM trap");
+		}
+
+		let (mut session, params) = kill_test_context().await;
+		let source_info = SourceInfo::from("pi-natives:test");
+		let result = session
+			.shell
+			.run_string(format!("kill {pid}"), &source_info, &params)
+			.await
+			.expect("kill command");
+		let code = exit_code(&result);
+
+		let status = time::timeout(Duration::from_secs(5), child.wait()).await;
+		if status.is_err() {
+			let _ = child.kill().await;
+			let _ = child.wait().await;
+			panic!("default kill signal did not terminate the child");
+		}
+		assert_eq!(code, 0, "default kill should succeed");
+		assert_eq!(status.expect("checked timeout").expect("child wait").code(), Some(42));
+	}
+
+	/// A negative PID after `--` targets a process group per `kill(2)` instead
+	/// of being parsed as a numeric signal, and a plain PID in the same command
+	/// is still signaled.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn kill_builtin_preserves_negative_pid_process_group_operands() {
+		let dir = tempfile::tempdir().expect("temp dir");
+		let group_ready = dir.path().join("group-ready");
+		let plain_ready = dir.path().join("plain-ready");
+		let spawn_trapping = |ready: &std::path::Path, own_group: bool| {
+			let mut cmd = Command::new("sh");
+			cmd.args([
+				"-c",
+				"trap 'exit 42' TERM; : > \"$1\"; while :; do sleep 0.05; done",
+				"sh",
+				ready.to_str().expect("utf8 path"),
+			]);
+			if own_group {
+				// pgid becomes this child's own pid, so `-pid` addresses the group.
+				cmd.process_group(0);
+			}
+			cmd.spawn().expect("trapping child")
+		};
+
+		let mut group_child = spawn_trapping(&group_ready, true);
+		let mut plain_child = spawn_trapping(&plain_ready, false);
+		let group_pid = group_child.id().expect("group pid");
+		let plain_pid = plain_child.id().expect("plain pid");
+
+		let ready_result = time::timeout(Duration::from_secs(5), async {
+			while !group_ready.exists() || !plain_ready.exists() {
+				time::sleep(Duration::from_millis(10)).await;
+			}
+		})
+		.await;
+		if ready_result.is_err() {
+			let _ = group_child.start_kill();
+			let _ = plain_child.start_kill();
+			let _ = group_child.wait().await;
+			let _ = plain_child.wait().await;
+			panic!("children did not install their SIGTERM traps");
+		}
+
+		let (mut session, params) = kill_test_context().await;
+		let source_info = SourceInfo::from("pi-natives:test");
+		let result = session
+			.shell
+			.run_string(format!("kill -TERM -- -{group_pid} {plain_pid}"), &source_info, &params)
+			.await
+			.expect("kill command");
+		let code = exit_code(&result);
+
+		let statuses = time::timeout(Duration::from_secs(5), async {
+			tokio::join!(group_child.wait(), plain_child.wait())
+		})
+		.await;
+		if statuses.is_err() {
+			let _ = group_child.start_kill();
+			let _ = plain_child.start_kill();
+			let _ = group_child.wait().await;
+			let _ = plain_child.wait().await;
+			panic!("negative-PID kill must signal the process group and the plain PID");
+		}
+		let (group_status, plain_status) = statuses.expect("checked timeout");
+		assert_eq!(code, 0, "negative-PID kill should succeed");
+		assert_eq!(group_status.expect("group wait").code(), Some(42));
+		assert_eq!(plain_status.expect("plain wait").code(), Some(42));
+	}
+
+	/// When clap consumes the `--` marker before `execute` (the default-signal
+	/// and `-s SIG` forms), a following negative PID is still an operand, not a
+	/// signal: `kill -- -<pgid>` defaults to SIGTERM for the group, and
+	/// `kill -s TERM -- -<pgid>` sends the named signal to the group.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn kill_builtin_signals_group_when_marker_precedes_negative_pid() {
+		let dir = tempfile::tempdir().expect("temp dir");
+		let default_ready = dir.path().join("default-ready");
+		let named_ready = dir.path().join("named-ready");
+		let spawn_group_leader = |ready: &std::path::Path| {
+			Command::new("sh")
+				.args([
+					"-c",
+					"trap 'exit 42' TERM; : > \"$1\"; while :; do sleep 0.05; done",
+					"sh",
+					ready.to_str().expect("utf8 path"),
+				])
+				.process_group(0)
+				.spawn()
+				.expect("group leader")
+		};
+
+		let mut default_child = spawn_group_leader(&default_ready);
+		let mut named_child = spawn_group_leader(&named_ready);
+		let default_pid = default_child.id().expect("default pid");
+		let named_pid = named_child.id().expect("named pid");
+
+		let ready_result = time::timeout(Duration::from_secs(5), async {
+			while !default_ready.exists() || !named_ready.exists() {
+				time::sleep(Duration::from_millis(10)).await;
+			}
+		})
+		.await;
+		if ready_result.is_err() {
+			let _ = default_child.start_kill();
+			let _ = named_child.start_kill();
+			let _ = default_child.wait().await;
+			let _ = named_child.wait().await;
+			panic!("group leaders did not install their SIGTERM traps");
+		}
+
+		let (mut session, params) = kill_test_context().await;
+		let source_info = SourceInfo::from("pi-natives:test");
+		// Default signal (SIGTERM) with the marker consumed by clap.
+		let default_result = session
+			.shell
+			.run_string(format!("kill -- -{default_pid}"), &source_info, &params)
+			.await
+			.expect("default kill command");
+		// Named signal via -s, marker consumed by clap.
+		let named_result = session
+			.shell
+			.run_string(format!("kill -s TERM -- -{named_pid}"), &source_info, &params)
+			.await
+			.expect("named kill command");
+
+		let statuses = time::timeout(Duration::from_secs(5), async {
+			tokio::join!(default_child.wait(), named_child.wait())
+		})
+		.await;
+		if statuses.is_err() {
+			let _ = default_child.start_kill();
+			let _ = named_child.start_kill();
+			let _ = default_child.wait().await;
+			let _ = named_child.wait().await;
+			panic!("marker-preceded negative PID must signal the process group");
+		}
+		let (default_status, named_status) = statuses.expect("checked timeout");
+		assert_eq!(exit_code(&default_result), 0, "`kill -- -<pgid>` should succeed");
+		assert_eq!(exit_code(&named_result), 0, "`kill -s TERM -- -<pgid>` should succeed");
+		assert_eq!(default_status.expect("default wait").code(), Some(42));
+		assert_eq!(named_status.expect("named wait").code(), Some(42));
+	}
+
+	/// A failed target makes `kill` return non-zero without preventing later
+	/// process operands from receiving the selected signal.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn kill_builtin_continues_after_target_failure() {
+		let mut first = Command::new("sleep")
+			.arg("30")
+			.spawn()
+			.expect("first sleep");
+		let mut second = Command::new("sleep")
+			.arg("30")
+			.spawn()
+			.expect("second sleep");
+		let mut stale = Command::new("true").spawn().expect("stale process");
+		let first_pid = first.id().expect("first pid");
+		let second_pid = second.id().expect("second pid");
+		let stale_pid = stale.id().expect("stale pid");
+		stale.wait().await.expect("stale wait");
+
+		let (mut session, params) = kill_test_context().await;
+		let source_info = SourceInfo::from("pi-natives:test");
+		let result = session
+			.shell
+			.run_string(
+				format!("kill -KILL {first_pid} {stale_pid} {second_pid}"),
+				&source_info,
+				&params,
+			)
+			.await
+			.expect("kill command");
+		let code = exit_code(&result);
+
+		let statuses =
+			time::timeout(Duration::from_secs(5), async { tokio::join!(first.wait(), second.wait()) })
+				.await;
+		if statuses.is_err() {
+			let _ = first.start_kill();
+			let _ = second.start_kill();
+			let _ = first.wait().await;
+			let _ = second.wait().await;
+			panic!("kill must continue signaling after an intermediate target fails");
+		}
+		let (first_status, second_status) = statuses.expect("checked timeout");
+		assert_ne!(code, 0, "a failed target should make kill return non-zero");
+		assert_eq!(first_status.expect("first wait").signal(), Some(libc::SIGKILL));
+		assert_eq!(second_status.expect("second wait").signal(), Some(libc::SIGKILL));
+	}
+
+	/// `cmp` remains available with no executable search path, proving the shell
+	/// dispatches the in-process builtin rather than a platform binary.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn cmp_is_registered_as_an_in_process_builtin() {
+		let dir = tempfile::tempdir().expect("temp dir");
+		let root = std::fs::canonicalize(dir.path()).expect("canonical temp dir");
+		std::fs::write(root.join("a"), b"same").expect("write a");
+		std::fs::write(root.join("b"), b"same").expect("write b");
+		std::fs::write(root.join("c"), b"different").expect("write c");
+
+		let config = ShellConfig { session_env: None, snapshot_path: None, minimizer: None };
+		let mut session = create_session(&config).await.expect("create_session");
+		session
+			.shell
+			.set_working_dir(root.to_str().expect("utf8 temp path"))
+			.expect("set cwd");
+		let mut params = session.shell.default_exec_params();
+		params.set_fd(OpenFiles::STDIN_FD, null_file().expect("null stdin"));
+		params.set_fd(OpenFiles::STDOUT_FD, null_file().expect("null stdout"));
+		params.set_fd(OpenFiles::STDERR_FD, null_file().expect("null stderr"));
+		let source_info = SourceInfo::from("pi-natives:test");
+
+		let equal = session
+			.shell
+			.run_string("PATH=/definitely-missing cmp -s a b", &source_info, &params)
+			.await
+			.expect("equal cmp");
+		assert_eq!(exit_code(&equal), 0);
+
+		let different = session
+			.shell
+			.run_string("PATH=/definitely-missing cmp -s a c", &source_info, &params)
+			.await
+			.expect("different cmp");
+		assert_eq!(exit_code(&different), 1);
+	}
+
+	/// The moreutils-style builtins (`ts`, `sponge`, `isutf8`, `combine`,
+	/// `ifne`, `errno`) dispatch in-process: the script runs with no usable
+	/// executable search path, and the `ts | sponge` pipeline must land its
+	/// output in the shell's working directory.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn moreutils_builtins_are_registered_in_process() {
+		let dir = tempfile::tempdir().expect("temp dir");
+		let root = std::fs::canonicalize(dir.path()).expect("canonical temp dir");
+
+		let config = ShellConfig { session_env: None, snapshot_path: None, minimizer: None };
+		let mut session = create_session(&config).await.expect("create_session");
+		session
+			.shell
+			.set_working_dir(root.to_str().expect("utf8 temp path"))
+			.expect("set cwd");
+		let mut params = session.shell.default_exec_params();
+		params.set_fd(OpenFiles::STDIN_FD, null_file().expect("null stdin"));
+		params.set_fd(OpenFiles::STDOUT_FD, null_file().expect("null stdout"));
+		params.set_fd(OpenFiles::STDERR_FD, null_file().expect("null stderr"));
+		let source_info = SourceInfo::from("pi-natives:test");
+
+		let script = "PATH=/definitely-missing\necho x | ts -s '%H:%M:%S' | sponge out || exit \
+		              10\nisutf8 out || exit 11\necho x | combine - and out || exit 12\nifne \
+		              /definitely-missing/tool || exit 13";
+		let result = session
+			.shell
+			.run_string(script, &source_info, &params)
+			.await
+			.expect("moreutils script");
+		assert_eq!(exit_code(&result), 0);
+
+		// `ts -s` stamps the first line with zero elapsed time: `HH:MM:SS x`.
+		let out = std::fs::read_to_string(root.join("out")).expect("sponge output");
+		assert!(out.len() == 11 && out.ends_with(" x\n"), "unexpected ts+sponge output: {out:?}");
+
+		#[cfg(unix)]
+		{
+			let errno = session
+				.shell
+				.run_string("errno ENOENT", &source_info, &params)
+				.await
+				.expect("errno lookup");
+			assert_eq!(exit_code(&errno), 0);
+		}
+	}
 
 	/// The uutils-backed `mkdir` builtin must (1) create directories under the
 	/// shell's working directory rather than the host process cwd, (2) route
@@ -2929,6 +3325,25 @@ mod tests {
 			read("ex.txt"),
 			"./keep.log",
 			"-exec {{}} should be operand-relative and run in the shell cwd"
+		);
+
+		// -exec children must write through the scope streams — an inherited
+		// process stdout would bypass the shell redirect and spam the host
+		// TUI's terminal — and must see the shell's exported environment.
+		session
+			.shell
+			.run_string(
+				"export PI_EXEC_ENV=zed; find . -name keep.log -exec sh -c 'echo \"$PI_EXEC_ENV $1\"' \
+				 sh {} ';' > cap.txt",
+				&si,
+				&params,
+			)
+			.await
+			.expect("exec capture");
+		assert_eq!(
+			read("cap.txt"),
+			"zed ./keep.log\n",
+			"-exec child stdout must flow through the shell redirect with the shell's exported env"
 		);
 
 		let _ = std::fs::remove_dir_all(&tmp);

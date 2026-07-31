@@ -93,7 +93,7 @@ describe("hashline parser — range-anchor contracts", () => {
 		expect(section.applyTo("aaa\nbbb\nccc").text).toBe("aaa\nbbb\ntail\nccc");
 	});
 
-	it("applies replace/delete/insert operations against concrete anchors", () => {
+	it("applies replace/cut/insert operations against concrete anchors", () => {
 		const diff = [
 			`INS.PRE ${tag(2)}:`,
 			repl("before b"),
@@ -105,8 +105,8 @@ describe("hashline parser — range-anchor contracts", () => {
 			repl("tail"),
 		].join("\n");
 		expect(applyDiff(content, diff)).toBe("top\naaa\nbefore b\nbbb\nafter b\nccc\ntail");
-		expect(applyDiff(content, `DEL ${tag(2)}`)).toBe("aaa\nccc");
-		expect(applyDiff(content, `DEL ${tag(2)}..${tag(3)}`)).toBe("aaa");
+		expect(applyDiff(content, `CUT ${tag(2)}`)).toBe("aaa\nccc");
+		expect(applyDiff(content, `CUT ${tag(2)}..${tag(3)}`)).toBe("aaa");
 		expect(applyDiff(content, `${sameLineRange(tag(2))}\n${repl("BBB")}`)).toBe("aaa\nBBB\nccc");
 	});
 
@@ -283,10 +283,10 @@ describe("hashline abort sentinel", () => {
 	});
 });
 
-describe("hashline parser — delete and blank payload semantics", () => {
-	it("applies inline delete and empty replace operations", () => {
-		expect(applyDiff("line1\nline2\nline3\n", splitHashlineInput("[a.ts]\nDEL 2\n").diff)).toBe("line1\nline3\n");
-		expect(applyDiff("line1\nline2\nline3\nline4\n", splitHashlineInput("[a.ts]\nDEL 2.=3\n").diff)).toBe(
+describe("hashline parser — cut and blank payload semantics", () => {
+	it("applies inline cut and empty replace operations", () => {
+		expect(applyDiff("line1\nline2\nline3\n", splitHashlineInput("[a.ts]\nCUT 2\n").diff)).toBe("line1\nline3\n");
+		expect(applyDiff("line1\nline2\nline3\nline4\n", splitHashlineInput("[a.ts]\nCUT 2.=3\n").diff)).toBe(
 			"line1\nline4\n",
 		);
 		expect(applyDiff("line1\nline2\nline3\n", splitHashlineInput("[a.ts]\nSWAP 2.=2:\n").diff)).toBe(

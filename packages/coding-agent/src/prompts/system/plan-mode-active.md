@@ -30,10 +30,10 @@ Use `{{editToolName}}` for incremental edits and `{{writeToolName}}` only to cre
 {{#if isHashlineEditMode}}
 Structure the plan as `##`/`###` markdown sections so you can revise it section-by-section: with `{{editToolName}}`, a heading anchors its WHOLE section (through every nested deeper heading, up to the next same-or-higher heading). Rely on the block ops to grow the plan without rewriting the file:
 - `SWAP.BLK N:` on a heading line — rewrite that entire section in place.
-- `DEL.BLK N` on a heading line — drop the whole section.
+- `CUT.BLK N` on a heading line — drop the whole section.
 - `INS.BLK.POST N:` on a heading line — add a new section AFTER that one (end the inserted body with a blank line so the next heading stays separated).
 
-Write each section together with its body — block ops need a multi-line section; a bare heading with no body falls back to plain `INS.POST`/`DEL`/`SWAP`.
+Write each section together with its body — block ops need a multi-line section; a bare heading with no body falls back to plain `INS.POST`/`CUT`/`SWAP`.
 {{/if}}
 
 ## Ground every claim

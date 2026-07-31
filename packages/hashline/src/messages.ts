@@ -1,6 +1,7 @@
 /** Centralized error/warning text for the hashline parser, applier, and patcher. */
 
 import { formatNumberedLine, HL_FILE_HASH_SEP, HL_FILE_PREFIX, HL_FILE_SUFFIX, HL_RANGE_SEP } from "./format";
+import type { BlockSpan } from "./types";
 
 /** Lines of context shown either side of a hash mismatch. */
 export const MISMATCH_CONTEXT = 2;
@@ -29,6 +30,50 @@ export function formatAnchoredContext(anchorLines: readonly number[], fileLines:
 	}
 	return rows;
 }
+/** Concrete range operation rejected because its absolute end precedes its start. */
+export type AbsoluteRangeOp = "replace" | "cut";
+
+/** Header forms per concrete-range op, used to compose retry suggestions. */
+const RANGE_OP_FORMS: Record<AbsoluteRangeOp, { keyword: string; colon: string; blockKeyword: string }> = {
+	replace: { keyword: "SWAP", colon: ":", blockKeyword: "SWAP.BLK" },
+	cut: { keyword: "CUT", colon: "", blockKeyword: "CUT.BLK" },
+};
+
+/** `OP.BLK N`-style header for a concrete-range op (`SWAP.BLK 5:` / `CUT.BLK 5`). */
+function blockFormAt(op: AbsoluteRangeOp, line: number): string {
+	const forms = RANGE_OP_FORMS[op];
+	return `${forms.blockKeyword} ${line}${forms.colon}`;
+}
+
+/** Explain absolute range endpoints and provide safe, non-applying retry forms. */
+export function invalidAbsoluteRangeMessage(
+	patchLine: number,
+	start: number,
+	end: number,
+	op: AbsoluteRangeOp,
+	block?: BlockSpan,
+): string {
+	const forms = RANGE_OP_FORMS[op];
+	const single = op === "replace" ? `SWAP ${start}${HL_RANGE_SEP}${start}:` : `${forms.keyword} ${start}`;
+	const countedEnd = start + end - 1;
+	const counted =
+		Number.isSafeInteger(countedEnd) && countedEnd >= start
+			? `${forms.keyword} ${start}${HL_RANGE_SEP}${countedEnd}${forms.colon}`
+			: null;
+	const blockForm = blockFormAt(op, start);
+	let message =
+		`line ${patchLine}: Invalid absolute range: start ${start}, end ${end}. ` +
+		`The value after \`${HL_RANGE_SEP}\` is an absolute source line, not a line count or replacement length. ` +
+		`For one line use \`${single}\`.`;
+	if (counted !== null) {
+		message += ` For ${end} lines starting at ${start}, use \`${counted}\`.`;
+	}
+	if (block?.start === start && block.end > start) {
+		message +=
+			` The syntactic block beginning at ${start} ends at ${block.end}, ` + `so \`${blockForm}\` is also valid.`;
+	}
+	return message;
+}
 
 /** Optional patch envelope start marker; silently consumed. */
 export const BEGIN_PATCH_MARKER = "*** Begin Patch";
@@ -52,34 +97,67 @@ export const REPLACE_PAIR_COALESCED_WARNING = `Two hunks targeted the same range
 export const BARE_BODY_AUTO_PIPED_WARNING =
 	"Auto-prefixed bare body row(s) with `+`. Body rows must be `+TEXT` literal lines.";
 
+/**
+ * Bare `-` body rows accepted as literal Markdown bullets. Only emitted when
+ * the hunk is unambiguously a bullet list: every `-` row is bullet-shaped
+ * (`- item`) and the body has no unified-diff `+new` counterpart rows.
+ */
+export const MINUS_BULLET_AUTO_PIPED_WARNING =
+	"Auto-prefixed bare `- ` bullet row(s) as literal content. `-` rows never remove lines — the range does that; always prefix literal body rows with `+`: `+- item`.";
+
 /** Unified-diff-style `-` row in a hunk body. */
 export const MINUS_ROW_REJECTED =
 	"`-` rows are not valid; the range already names the lines being changed. For Markdown bullets or other literal `-` lines, prefix the literal row with `+`: `+- item`.";
 
 /** Replace hunk with no body. */
-export const EMPTY_REPLACE = `\`SWAP N${HL_RANGE_SEP}M:\` needs at least one \`+TEXT\` body row. To delete lines, use \`DEL N${HL_RANGE_SEP}M\`.`;
+export const EMPTY_REPLACE = `\`SWAP N${HL_RANGE_SEP}M:\` needs at least one \`+TEXT\` body row. To delete lines, use \`CUT N${HL_RANGE_SEP}M\`.`;
 
-/** `replace_block N:` hunk with no body. */
-export const EMPTY_BLOCK = "`SWAP.BLK N:` needs at least one `+TEXT` body row. To delete a block, use `DEL.BLK N`.";
+/** `SWAP.BLK N:` hunk with no body. */
+export const EMPTY_BLOCK = "`SWAP.BLK N:` needs at least one `+TEXT` body row. To delete a block, use `CUT.BLK N`.";
+
+/** Optional source-aware suggestions appended to block-anchor diagnostics. */
+export interface BlockDiagnosticSuggestions {
+	/** Closest following multi-line block that begins after the authored anchor. */
+	nextBlock?: BlockSpan;
+	/** Closest preceding multi-line block whose span contains the authored anchor. */
+	enclosingBlock?: BlockSpan;
+}
 
 /**
- * Block-anchored replace/delete could not resolve to a syntactic block
- * (unsupported language, blank/out-of-range line, no node beginning on N, or
- * parse error). Appends a {@link formatAnchoredContext} preview when
- * `fileLines` is given. `insert_after_block N:` never reaches this — it is
- * lowered to plain `insert after N:` instead (see
- * {@link insertAfterBlockUnresolvedLoweredWarning}).
+ * A block-anchored replace/cut could not resolve to a syntactic block.
+ * Appends a {@link formatAnchoredContext} preview when `fileLines` is given.
+ * `INS.BLK.POST N:` never reaches this path; it lowers to `INS.POST N:`.
  */
 export function blockUnresolvedMessage(
 	line: number,
-	op: "replace" | "delete" = "replace",
+	op: AbsoluteRangeOp = "replace",
 	fileLines?: readonly string[],
+	suggestions: BlockDiagnosticSuggestions = {},
 ): string {
-	const phrase = op === "delete" ? `DEL.BLK ${line}` : `SWAP.BLK ${line}:`;
-	const fallback = op === "delete" ? `DEL ${line}${HL_RANGE_SEP}M` : `SWAP ${line}${HL_RANGE_SEP}M:`;
-	let message =
-		`\`${phrase}\` could not resolve a syntactic block beginning on line ${line} ` +
-		`(unsupported language, blank/closer line, or parse error). Use \`${fallback}\` with explicit lines.`;
+	const forms = RANGE_OP_FORMS[op];
+	const phrase = blockFormAt(op, line);
+	const fallback = `${forms.keyword} ${line}${HL_RANGE_SEP}M${forms.colon}`;
+	const anchorText = fileLines?.[line - 1];
+	const nextBlock = suggestions.nextBlock;
+	let message: string;
+	if (anchorText !== undefined && anchorText.trim().length === 0 && nextBlock) {
+		const retry = blockFormAt(op, nextBlock.start);
+		message =
+			`Line ${line} is blank; no syntactic block can begin there. ` +
+			`The next multi-line block begins at line ${nextBlock.start} and ends at line ${nextBlock.end}. ` +
+			`Retry \`${retry}\`.`;
+	} else {
+		message =
+			`\`${phrase}\` could not resolve a syntactic block beginning on line ${line} ` +
+			`(unsupported language, blank/closer line, or parse error). Use \`${fallback}\` with explicit lines.`;
+	}
+	const enclosingBlock = suggestions.enclosingBlock;
+	if (enclosingBlock) {
+		const retry = blockFormAt(op, enclosingBlock.start);
+		message +=
+			` The nearest enclosing multi-line block begins at line ${enclosingBlock.start} ` +
+			`and ends at line ${enclosingBlock.end}; use \`${retry}\` to target it.`;
+	}
 	if (fileLines) {
 		const context = formatAnchoredContext([line], fileLines);
 		if (context.length > 0) message += `\n\n${context.join("\n")}`;
@@ -87,26 +165,46 @@ export function blockUnresolvedMessage(
 	return message;
 }
 
-/** Block-anchored edit reached a path with no {@link BlockResolver} wired in — a host-configuration bug. */
+/** Block-anchored edit reached a path with no {@link BlockResolver} wired in. */
 export const BLOCK_RESOLVER_UNAVAILABLE =
-	"`SWAP.BLK`/`DEL.BLK`/`INS.BLK.POST` are not available here (no block resolver configured). Use a concrete line range.";
+	"Block ops (`SWAP.BLK`, `INS.BLK.POST`, `CUT.BLK`, `PASTE.BLK.POST`) are not available here (no block resolver configured). Use a concrete line range.";
 
 /**
- * `insert_after_block N:` anchored on a closing-delimiter line, lowered to
- * plain `insert after N:` — the closer ends a block, and inserting after it
- * is exactly what the plain form does.
+ * An after-block op anchored on a closing-delimiter line, lowered to its
+ * plain after-line form — the closer ends a block, and inserting after it is
+ * exactly what the plain form does.
  */
-export function insertAfterBlockCloserLoweredWarning(line: number): string {
-	return `\`INS.BLK.POST ${line}:\` anchors on a closing delimiter, so it was applied as plain \`INS.POST ${line}:\`. Anchor on the line that OPENS the construct.`;
+function closerLoweredWarning(blockForm: string, plainForm: string): string {
+	return `\`${blockForm}\` anchors on a closing delimiter, so it was applied as plain \`${plainForm}\`. Anchor on the line that OPENS the construct.`;
 }
 
 /**
- * `insert_after_block N:` anchor unresolvable (unsupported language, blank
- * line, parse error, or no resolver), lowered to plain `insert after N:` —
- * applying with a warning beats failing the patch.
+ * An after-block op whose anchor was unresolvable (unsupported language,
+ * blank line, parse error, or no resolver), lowered to its plain after-line
+ * form — applying with a warning beats failing the patch.
  */
+function unresolvedLoweredWarning(blockForm: string, line: number, plainForm: string): string {
+	return `\`${blockForm}\` could not resolve a syntactic block on line ${line}, so it was applied as plain \`${plainForm}\`. Verify the landing line; anchor on a line that OPENS a construct.`;
+}
+
+/** `INS.BLK.POST N:` anchored on a closing-delimiter line; applied as `INS.POST N:`. */
+export function insertAfterBlockCloserLoweredWarning(line: number): string {
+	return closerLoweredWarning(`INS.BLK.POST ${line}:`, `INS.POST ${line}:`);
+}
+
+/** `INS.BLK.POST N:` anchor unresolvable; applied as `INS.POST N:`. */
 export function insertAfterBlockUnresolvedLoweredWarning(line: number): string {
-	return `\`INS.BLK.POST ${line}:\` could not resolve a syntactic block on line ${line}, so it was applied as plain \`INS.POST ${line}:\`. Verify the landing line; anchor on a line that OPENS a construct.`;
+	return unresolvedLoweredWarning(`INS.BLK.POST ${line}:`, line, `INS.POST ${line}:`);
+}
+
+/** `PASTE.BLK.POST N` anchored on a closing-delimiter line; applied as `PASTE.POST N`. */
+export function pasteAfterBlockCloserLoweredWarning(line: number): string {
+	return closerLoweredWarning(`PASTE.BLK.POST ${line}`, `PASTE.POST ${line}`);
+}
+
+/** `PASTE.BLK.POST N` anchor unresolvable; applied as `PASTE.POST N`. */
+export function pasteAfterBlockUnresolvedLoweredWarning(line: number): string {
+	return unresolvedLoweredWarning(`PASTE.BLK.POST ${line}`, line, `PASTE.POST ${line}`);
 }
 /**
  * A one-sided boundary echo whose payload is too short to be the widened
@@ -159,14 +257,11 @@ export function ambiguousCloserSpareMessage(
 }
 
 /**
- * Internal invariant: `applyEdits` received an unresolved `replace_block N:`
- * edit; `resolveBlockEdits` must run first. Wiring bug, not authored input.
+ * Internal invariant: `applyEdits` received an unresolved block edit;
+ * `resolveBlockEdits` must run first.
  */
 export const UNRESOLVED_BLOCK_INTERNAL =
-	"internal error: unresolved `SWAP.BLK` edit reached the applier (resolveBlockEdits was not run).";
-
-/** Delete hunk received a body row. */
-export const DELETE_TAKES_NO_BODY = `\`DEL N${HL_RANGE_SEP}M\` does not take body rows. Remove the body, or use \`SWAP N${HL_RANGE_SEP}M:\`.`;
+	"internal error: unresolved block edit reached the applier (resolveBlockEdits was not run).";
 
 /** `REM` received a body row or coexists with line edits. */
 export const REM_TAKES_NO_BODY =
@@ -176,8 +271,23 @@ export const REM_TAKES_NO_BODY =
 export const MOVE_TAKES_NO_BODY =
 	"`MV DEST` does not take body rows. Put line edits above the `MV` row; the destination path follows `MV` on the same line.";
 
-/** `delete_block N` hunk received a body row. */
-export const DELETE_BLOCK_TAKES_NO_BODY = "`DEL.BLK N` does not take body rows. Remove the body, or use `SWAP.BLK N:`.";
+/** `CUT N.=M` hunk received a body row. */
+export const CUT_TAKES_NO_BODY = `\`CUT N${HL_RANGE_SEP}M\` captures + deletes lines and takes no body rows. To replace lines with new content, use \`SWAP N${HL_RANGE_SEP}M:\`.`;
+
+/** `PASTE` hunk received a body row. */
+export const PASTE_TAKES_NO_BODY =
+	"`PASTE` inserts the clipboard content and takes no `+` body rows. To insert literal text, use `INS`.";
+
+/** `PASTE` ran with an empty clipboard register. */
+export const EMPTY_PASTE = `\`PASTE\` found nothing in the clipboard. Ops run top-to-bottom across the whole patch (sections included): put \`CUT N${HL_RANGE_SEP}M\` or \`CUT.BLK N\` above the \`PASTE\`.`;
+
+/**
+ * Clipboard ops inside a same-path section that was merged across another
+ * file's section. Same-path sections coalesce into their first occurrence, so
+ * an interleaved layout would silently reorder the register sequence.
+ */
+export const CLIPBOARD_INTERLEAVED_SECTIONS =
+	"`CUT`/`PASTE` cannot be used in a file whose sections are interleaved with another file's: same-path sections merge into the first occurrence, which would reorder the clipboard sequence. Keep each file's ops under ONE `[path#TAG]` header.";
 
 /** Insert hunk with no body. */
 export const EMPTY_INSERT = "`INS` needs at least one `+TEXT` body row.";
@@ -219,6 +329,23 @@ export const RECOVERY_LINE_REMAP_WARNING =
  */
 export const HEADTAIL_DRIFT_WARNING =
 	"Applied the `INS.HEAD:`/`INS.TAIL:` edit despite a stale snapshot tag (file changed since your read) — head/tail position is content-independent. Re-read if the drift was unexpected.";
+
+/**
+ * The `Filesystem` reported that what actually landed on disk differs from
+ * what was written (see `WriteResult.text`) — most commonly an ACP-connected
+ * editor reformatting the buffer on save (e.g. `format_on_save` with tab/space
+ * settings that don't match the file). The recorded snapshot is re-keyed on
+ * the real, post-write content so the next edit's tag validation matches
+ * reality instead of silently drifting.
+ */
+export function writeDriftWarning(path: string): string {
+	return (
+		`${path}: the file on disk after this write differs from what was sent — the client ` +
+		"(editor/IDE) likely reformatted it on save (e.g. format-on-save, tab/space settings). " +
+		"The returned snapshot reflects the actual file; re-read before further edits if the " +
+		"extra changes were unexpected."
+	);
+}
 
 /**
  * Section omitted the mandatory snapshot tag. Shared by the apply
@@ -327,26 +454,32 @@ export function unseenLinesMessage(
 }
 
 /** Op kind of a deferred block edit, for {@link blockSingleLineMessage}. */
-export type BlockOp = "replace" | "delete" | "insert_after";
+export type BlockOp = "replace" | "insert_after" | "cut" | "paste_after";
+
+/** Display forms per deferred-block op: block keyword, trailing colon, and single-line plain form. */
+const BLOCK_OP_FORMS: Record<BlockOp, { keyword: string; colon: string; plain: (line: number) => string }> = {
+	replace: { keyword: "SWAP.BLK", colon: ":", plain: line => `SWAP ${line}${HL_RANGE_SEP}${line}:` },
+	insert_after: { keyword: "INS.BLK.POST", colon: ":", plain: line => `INS.POST ${line}:` },
+	cut: { keyword: "CUT.BLK", colon: "", plain: line => `CUT ${line}` },
+	paste_after: { keyword: "PASTE.BLK.POST", colon: "", plain: line => `PASTE.POST ${line}` },
+};
 
 /**
- * A `replace_block`/`delete_block`/`insert_after_block` anchor resolved to a
- * single line — almost always a bare statement the model mis-anchored, not a
- * multi-line construct. The plain op is unambiguous for one line; the block
- * form only earns its keep when it spares counting a closing line you cannot
- * see. Reject and point at both fixes.
+ * A block-op anchor resolved to a single line: line N is a bare statement,
+ * not the opening line of a multi-line construct. The plain op is exact for
+ * one line, so reject and point at it.
  */
-export function blockSingleLineMessage(line: number, op: BlockOp): string {
-	const blockForm = op === "insert_after" ? "INS.BLK.POST" : op === "delete" ? "DEL.BLK" : "SWAP.BLK";
-	const plainForm =
-		op === "insert_after"
-			? `INS.POST ${line}:`
-			: op === "delete"
-				? `DEL ${line}`
-				: `SWAP ${line}${HL_RANGE_SEP}${line}:`;
-	return (
-		`\`${blockForm} ${line}\` resolved a single-line block — line ${line} is a bare statement, not the opening line ` +
-		`of a multi-line construct. For that one line use \`${plainForm}\`; to act on an enclosing construct, anchor ${blockForm} ` +
-		`on the line that OPENS it (e.g. its \`function\`/\`if\`/\`case\` header), never a statement inside it.`
-	);
+export function blockSingleLineMessage(line: number, op: BlockOp, enclosingBlock?: BlockSpan): string {
+	const forms = BLOCK_OP_FORMS[op];
+	const plainForm = forms.plain(line);
+	let message =
+		`\`${forms.keyword} ${line}\` resolved a single-line block — line ${line} is a bare statement, not the opening line ` +
+		`of a multi-line construct. For only this statement use \`${plainForm}\`.`;
+	if (enclosingBlock) {
+		const enclosingForm = `${forms.keyword} ${enclosingBlock.start}${forms.colon}`;
+		message +=
+			` The nearest enclosing multi-line block begins at line ${enclosingBlock.start} ` +
+			`and ends at line ${enclosingBlock.end}; use \`${enclosingForm}\` to target it.`;
+	}
+	return message;
 }

@@ -305,12 +305,12 @@ describe("apply_patch streaming preview (trailing partial line)", () => {
 
 describe("matcherDigest", () => {
 	test("hashline: digests stripped `+` body rows only, never headers or op lines", () => {
-		const input = ["[a.ts#AB12]", "SWAP 1.=2:", "+const x = 1;", "+const y = 2;", "DEL 5", ""].join("\n");
+		const input = ["[a.ts#AB12]", "SWAP 1.=2:", "+const x = 1;", "+const y = 2;", "CUT 5", ""].join("\n");
 		expect(EDIT_MODE_STRATEGIES.hashline.matcherDigest({ input })).toBe("const x = 1;\nconst y = 2;");
 	});
 
 	test("hashline: grammar-only payload digests to empty, missing input to undefined", () => {
-		expect(EDIT_MODE_STRATEGIES.hashline.matcherDigest({ input: "[a.ts#AB12]\nDEL 3\n" })).toBe("");
+		expect(EDIT_MODE_STRATEGIES.hashline.matcherDigest({ input: "[a.ts#AB12]\nCUT 3\n" })).toBe("");
 		expect(EDIT_MODE_STRATEGIES.hashline.matcherDigest({})).toBeUndefined();
 	});
 
@@ -334,6 +334,11 @@ describe("matcherDigest", () => {
 				edits: [{ diff: " ctx\n-removed line\n+added line\n" }],
 			}),
 		).toBe("added line");
+		expect(
+			EDIT_MODE_STRATEGIES.patch.matcherDigest({
+				edits: [{ op: "delete", diff: " ctx\n-removed line\n" }],
+			}),
+		).toBe("");
 		const createContent = "full file content\nwith no diff markers\n";
 		expect(
 			EDIT_MODE_STRATEGIES.patch.matcherDigest({

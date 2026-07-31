@@ -5,35 +5,91 @@
  */
 import { HL_PAYLOAD_REPLACE, HL_RANGE_SEP } from "./format";
 import {
+	type AbsoluteRangeOp,
 	BARE_BODY_AUTO_PIPED_WARNING,
-	DELETE_BLOCK_TAKES_NO_BODY,
-	DELETE_TAKES_NO_BODY,
+	CUT_TAKES_NO_BODY,
 	EMPTY_BLOCK,
 	EMPTY_INSERT,
+	invalidAbsoluteRangeMessage,
+	MINUS_BULLET_AUTO_PIPED_WARNING,
 	MINUS_ROW_REJECTED,
 	MOVE_TAKES_NO_BODY,
+	PASTE_TAKES_NO_BODY,
 	REM_TAKES_NO_BODY,
 } from "./messages";
 import { stripOneLeadingHashlinePrefix } from "./prefixes";
 import { type BlockTarget, cloneCursor, type ParsedRange, type Token, Tokenizer } from "./tokenizer";
-import type { Anchor, Cursor, Edit, FileOp } from "./types";
+import type { Anchor, BlockSpan, Cursor, Edit, FileOp } from "./types";
 
-function validateRangeOrder(range: ParsedRange, lineNum: number): void {
-	if (range.end.line < range.start.line) {
+/** Bounds parser amplification before the target file's line count is available. */
+const MAX_EXPANDED_RANGE_LINES = 100_000;
+/** Parser error carrying enough range metadata for source-aware diagnostic enrichment. */
+export class InvalidAbsoluteRangeError extends Error {
+	/** Patch-language line containing the invalid range header. */
+	readonly patchLine: number;
+	/** Absolute first source line authored in the range. */
+	readonly startLine: number;
+	/** Invalid absolute last source line authored in the range. */
+	readonly endLine: number;
+	/** Operation whose range was invalid. */
+	readonly op: AbsoluteRangeOp;
+
+	constructor(patchLine: number, startLine: number, endLine: number, op: AbsoluteRangeOp, block?: BlockSpan) {
+		super(invalidAbsoluteRangeMessage(patchLine, startLine, endLine, op, block));
+		this.name = "InvalidAbsoluteRangeError";
+		this.patchLine = patchLine;
+		this.startLine = startLine;
+		this.endLine = endLine;
+		this.op = op;
+	}
+
+	/** Rebuild this error with a proven syntactic-block endpoint suggestion. */
+	withBlock(block: BlockSpan): InvalidAbsoluteRangeError {
+		return new InvalidAbsoluteRangeError(this.patchLine, this.startLine, this.endLine, this.op, block);
+	}
+}
+
+function validateRange(range: ParsedRange, lineNum: number, op: AbsoluteRangeOp): void {
+	if (
+		!Number.isSafeInteger(range.start.line) ||
+		range.start.line < 1 ||
+		!Number.isSafeInteger(range.end.line) ||
+		range.end.line < 1
+	) {
 		throw new Error(
-			`line ${lineNum}: range ${range.start.line}${HL_RANGE_SEP}${range.end.line} ends before it starts.`,
+			`line ${lineNum}: ${op} range endpoints must be positive safe integers; got ${range.start.line} and ${range.end.line}.`,
+		);
+	}
+	if (range.end.line < range.start.line) {
+		throw new InvalidAbsoluteRangeError(lineNum, range.start.line, range.end.line, op);
+	}
+	const span = range.end.line - range.start.line + 1;
+	if (span > MAX_EXPANDED_RANGE_LINES) {
+		throw new Error(
+			`line ${lineNum}: ${op} range spans ${span} lines; the maximum is ${MAX_EXPANDED_RANGE_LINES}. Split it into smaller hunks.`,
 		);
 	}
 }
 
-function expandRange(range: ParsedRange): Anchor[] {
-	const anchors: Anchor[] = [];
-	for (let line = range.start.line; line <= range.end.line; line++) anchors.push({ line });
-	return anchors;
-}
-
 function isSkippableCommentLine(line: string): boolean {
 	return line.trimStart().startsWith("#");
+}
+
+/**
+ * Body-row rejection message for targets that take no `+TEXT` rows, or `null`
+ * for targets whose header is followed by a body.
+ */
+function bodylessTargetMessage(target: BlockTarget): string | null {
+	switch (target.kind) {
+		case "cut":
+		case "cut_block":
+			return CUT_TAKES_NO_BODY;
+		case "paste":
+		case "paste_after_block":
+			return PASTE_TAKES_NO_BODY;
+		default:
+			return null;
+	}
 }
 
 /**
@@ -42,6 +98,13 @@ function isSkippableCommentLine(line: string): boolean {
  * dict/YAML body rather than read-output paste.
  */
 const BARE_LITERAL_VALUE_RE = /^\s*(?:"[^"]*"|'[^']*'|[-+]?\d+(?:\.\d+)?)\s*,?\s*$/;
+
+/**
+ * Markdown-bullet shape: optional indent, `-`, exactly one space, then
+ * content. Unified-diff `-` rows almost never match — code lines get the `-`
+ * glued on (`-old()`) and indented deletions carry multiple spaces (`-    x`).
+ */
+const MD_BULLET_ROW_RE = /^\s*- \S/;
 
 function detectApplyPatchContamination(text: string, _hasPending: boolean): string | null {
 	const trimmed = text.trimStart();
@@ -56,13 +119,13 @@ function detectApplyPatchContamination(text: string, _hasPending: boolean): stri
 		return (
 			`apply_patch sentinel ${JSON.stringify(preview)} is not valid in hashline. ` +
 			"File sections start with `[path#HASH]` (no `Update File:` / `Add File:` keyword). " +
-			`Use \`SWAP N${HL_RANGE_SEP}M:\`, \`DEL N${HL_RANGE_SEP}M\`, or \`INS.PRE|POST|HEAD|TAIL:\` ops.`
+			`Use \`SWAP N${HL_RANGE_SEP}M:\`, \`CUT N${HL_RANGE_SEP}M\`, or \`INS.PRE|POST|HEAD|TAIL:\` ops.`
 		);
 	}
 	if (/^@@\s+[-+]?\d+,\d+\s+[-+]?\d+,\d+\s+@@/.test(trimmed)) {
 		return (
 			"unified-diff hunk header (`@@ -N,M +N,M @@`) is not valid in hashline. " +
-			`Use \`SWAP N${HL_RANGE_SEP}M:\`, \`DEL N${HL_RANGE_SEP}M\`, or \`INS.PRE|POST|HEAD|TAIL:\` ops.`
+			`Use \`SWAP N${HL_RANGE_SEP}M:\`, \`CUT N${HL_RANGE_SEP}M\`, or \`INS.PRE|POST|HEAD|TAIL:\` ops.`
 		);
 	}
 	if (trimmed.startsWith("@@")) {
@@ -72,17 +135,20 @@ function detectApplyPatchContamination(text: string, _hasPending: boolean): stri
 			`Drop the \`@@ ... @@\` brackets and write a verb header such as \`SWAP N${HL_RANGE_SEP}M:\`.`
 		);
 	}
-	if (/^DEL\s+[1-9]\d*(?:\s*(?:\.\.|\.=|-|…|\s)\s*[1-9]\d*)?\s*:/.test(trimmed)) {
-		return `\`DEL N${HL_RANGE_SEP}M\` has no colon and no body. Remove the colon and body rows.`;
+	// Bare `PASTE` (optionally `PASTE 5` / `PASTE:`) — the op requires an
+	// explicit position suffix; a bare form would otherwise surface as a
+	// confusing body-row rejection under the preceding hunk.
+	if (/^PASTE(?:\s+[1-9]\d*)?\s*:?\s*$/.test(trimmed)) {
+		return "`PASTE` needs a position: use `PASTE.PRE N` / `PASTE.POST N` / `PASTE.HEAD` / `PASTE.TAIL` / `PASTE.BLK.POST N`.";
 	}
 	if (/^[1-9]\d*\s*$/.test(trimmed)) {
-		return `hunk headers need a verb. Use \`SWAP ${trimmed}${HL_RANGE_SEP}${trimmed}:\` to replace, or \`DEL ${trimmed}\` to delete.`;
+		return `hunk headers need a verb. Use \`SWAP ${trimmed}${HL_RANGE_SEP}${trimmed}:\` to replace, or \`CUT ${trimmed}\` to delete.`;
 	}
 	const bareRange = /^([1-9]\d*)\s*[-. …=]+\s*([1-9]\d*)\s*:?$/.exec(trimmed);
 	if (bareRange !== null) {
 		return (
 			`bare range hunk header ${JSON.stringify(trimmed)} is not valid. ` +
-			`Hunk headers need a verb: write \`SWAP ${bareRange[1]}${HL_RANGE_SEP}${bareRange[2]}:\` or \`DEL ${bareRange[1]}${HL_RANGE_SEP}${bareRange[2]}\`.`
+			`Hunk headers need a verb: write \`SWAP ${bareRange[1]}${HL_RANGE_SEP}${bareRange[2]}:\` or \`CUT ${bareRange[1]}${HL_RANGE_SEP}${bareRange[2]}\`.`
 		);
 	}
 	return null;
@@ -93,7 +159,7 @@ interface PendingComment {
 	text: string;
 }
 
-type PayloadRow = { kind: "literal"; text: string; lineNum: number; bare?: boolean };
+type PayloadRow = { kind: "literal"; text: string; lineNum: number; bare?: boolean; minus?: boolean };
 
 interface Pending {
 	target: BlockTarget;
@@ -161,8 +227,11 @@ export class Executor {
 				return;
 			case "op-block":
 				this.#discardPendingSkippableComments();
-				if (token.target.kind === "replace" || token.target.kind === "delete") {
-					validateRangeOrder(token.target.range, token.lineNum);
+				if (token.target.kind === "replace") {
+					validateRange(token.target.range, token.lineNum, "replace");
+				}
+				if (token.target.kind === "cut") {
+					validateRange(token.target.range, token.lineNum, "cut");
 				}
 				if (token.target.kind === "rem") {
 					this.#flushPending();
@@ -195,8 +264,7 @@ export class Executor {
 	endStreaming(): { edits: Edit[]; fileOp?: FileOp; warnings: string[] } {
 		this.#consumePendingSkippableComments();
 		if (this.#pending && this.#pending.payloads.length > 0) this.#flushPending();
-		else if (this.#pending?.target.kind === "delete" || this.#pending?.target.kind === "delete_block")
-			this.#flushPending();
+		else if (this.#pending && bodylessTargetMessage(this.#pending.target) !== null) this.#flushPending();
 		else this.#pending = undefined;
 		this.#validateFileOp();
 		this.#validateNoOverlappingDeletes();
@@ -266,8 +334,8 @@ export class Executor {
 					`Got ${JSON.stringify(`${HL_PAYLOAD_REPLACE}${text}`)}.`,
 			);
 		}
-		if (pending.target.kind === "delete") throw new Error(`line ${lineNum}: ${DELETE_TAKES_NO_BODY}`);
-		if (pending.target.kind === "delete_block") throw new Error(`line ${lineNum}: ${DELETE_BLOCK_TAKES_NO_BODY}`);
+		const noBodyOnLiteral = bodylessTargetMessage(pending.target);
+		if (noBodyOnLiteral !== null) throw new Error(`line ${lineNum}: ${noBodyOnLiteral}`);
 		this.#commitDeferredBlanks(pending);
 		pending.payloads.push({ kind: "literal", text, lineNum });
 	}
@@ -281,11 +349,14 @@ export class Executor {
 				this.#handleBlank(text, lineNum);
 				return;
 			}
-			if (this.#pending.target.kind === "delete") throw new Error(`line ${lineNum}: ${DELETE_TAKES_NO_BODY}`);
-			if (this.#pending.target.kind === "delete_block")
-				throw new Error(`line ${lineNum}: ${DELETE_BLOCK_TAKES_NO_BODY}`);
-			if (text.trimStart().charCodeAt(0) === 45 /* - */) throw new Error(`line ${lineNum}: ${MINUS_ROW_REJECTED}`);
-			if (!this.#warnings.includes(BARE_BODY_AUTO_PIPED_WARNING)) this.#warnings.push(BARE_BODY_AUTO_PIPED_WARNING);
+			const noBodyOnRaw = bodylessTargetMessage(this.#pending.target);
+			if (noBodyOnRaw !== null) throw new Error(`line ${lineNum}: ${noBodyOnRaw}`);
+			const row: PayloadRow = { kind: "literal", text, lineNum, bare: true };
+			// `-` rows are held and judged at flush time by #resolveMinusRows,
+			// once the whole body is visible.
+			if (text.trimStart().charCodeAt(0) === 45 /* - */) row.minus = true;
+			else if (!this.#warnings.includes(BARE_BODY_AUTO_PIPED_WARNING))
+				this.#warnings.push(BARE_BODY_AUTO_PIPED_WARNING);
 			this.#commitDeferredBlanks(this.#pending);
 			// Defer read-output line-number stripping to #flushPending: a bare
 			// "N:text" row is only a copy-paste artifact from snapshot output
@@ -294,13 +365,13 @@ export class Executor {
 			// with "digits:" (YAML ports "42:hello", timestamps "12:30") when it
 			// sits next to an unprefixed sibling. Rows with an explicit "+" go
 			// through #handleLiteralPayload and are never bare, never stripped.
-			this.#pending.payloads.push({ kind: "literal", text, lineNum, bare: true });
+			this.#pending.payloads.push(row);
 			return;
 		}
 		if (text.trim().length === 0) return;
 		throw new Error(
 			`line ${lineNum}: payload line has no preceding hunk header. ` +
-				`Use \`SWAP N${HL_RANGE_SEP}M:\`, \`DEL N${HL_RANGE_SEP}M\`, or \`INS.PRE|POST|HEAD|TAIL:\` above the body. Got ${JSON.stringify(text)}.`,
+				`Use \`SWAP N${HL_RANGE_SEP}M:\`, \`CUT N${HL_RANGE_SEP}M\`, or \`INS.PRE|POST|HEAD|TAIL:\` above the body. Got ${JSON.stringify(text)}.`,
 		);
 	}
 
@@ -314,7 +385,7 @@ export class Executor {
 	#handleBlank(text: string, lineNum: number): void {
 		const pending = this.#pending;
 		if (!pending) return;
-		if (pending.target.kind === "delete" || pending.target.kind === "delete_block") return;
+		if (bodylessTargetMessage(pending.target) !== null) return;
 		if (pending.payloads.length === 0) return;
 		pending.deferredBlanks.push({ kind: "literal", text, lineNum, bare: true });
 	}
@@ -324,6 +395,38 @@ export class Executor {
 		if (!this.#warnings.includes(BARE_BODY_AUTO_PIPED_WARNING)) this.#warnings.push(BARE_BODY_AUTO_PIPED_WARNING);
 		pending.payloads.push(...pending.deferredBlanks);
 		pending.deferredBlanks = [];
+	}
+
+	/**
+	 * Judge bare `-` body rows once the whole hunk body is known. They are
+	 * usually unified-diff contamination (`-old` next to `+new`) and inserting
+	 * them would corrupt the file, so they are rejected — EXCEPT when the body
+	 * is unambiguously a Markdown bullet list: every `-` row is bullet-shaped
+	 * (`- item`) and the body is either fully bare or already contains an
+	 * explicit `+- item` sibling. Those rows are kept as literal content with a
+	 * warning instead of failing the patch.
+	 */
+	#resolveMinusRows(payloads: readonly PayloadRow[]): void {
+		let firstMinus: PayloadRow | undefined;
+		let allBulletShaped = true;
+		let hasExplicit = false;
+		let hasExplicitBullet = false;
+		for (const row of payloads) {
+			if (row.minus) {
+				firstMinus ??= row;
+				allBulletShaped &&= MD_BULLET_ROW_RE.test(row.text);
+			} else if (!row.bare) {
+				hasExplicit = true;
+				hasExplicitBullet ||= MD_BULLET_ROW_RE.test(row.text);
+			}
+		}
+		if (firstMinus === undefined) return;
+		if (allBulletShaped && (!hasExplicit || hasExplicitBullet)) {
+			if (!this.#warnings.includes(MINUS_BULLET_AUTO_PIPED_WARNING))
+				this.#warnings.push(MINUS_BULLET_AUTO_PIPED_WARNING);
+			return;
+		}
+		throw new Error(`line ${firstMinus.lineNum}: ${MINUS_ROW_REJECTED}`);
 	}
 
 	/**
@@ -369,7 +472,28 @@ export class Executor {
 		this.#edits.push({ kind: "delete", anchor: { ...anchor }, lineNum, index: this.#editIndex++ });
 	}
 
-	#pushBlock(anchor: Anchor, payloads: readonly PayloadRow[], lineNum: number, mode?: "insert_after"): void {
+	#pushDeleteRange(range: ParsedRange, lineNum: number): void {
+		for (let line = range.start.line; line <= range.end.line; line++) this.#pushDelete({ line }, lineNum);
+	}
+
+	#pushCut(range: ParsedRange, lineNum: number): void {
+		this.#edits.push({
+			kind: "cut",
+			range: { start: { ...range.start }, end: { ...range.end } },
+			lineNum,
+			index: this.#editIndex++,
+		});
+		// Capture before ordinary per-line deletes are applied. Keeping deletion
+		// as low-level edits preserves overlap validation and recovery remapping.
+		this.#pushDeleteRange(range, lineNum);
+	}
+
+	#pushBlock(
+		anchor: Anchor,
+		payloads: readonly PayloadRow[],
+		lineNum: number,
+		mode?: "insert_after" | "cut" | "paste_after",
+	): void {
 		this.#edits.push({
 			kind: "block",
 			anchor: { ...anchor },
@@ -388,15 +512,23 @@ export class Executor {
 		const pending = this.#pending;
 		if (!pending) return;
 		const { target, lineNum, payloads } = pending;
+		this.#resolveMinusRows(payloads);
 		this.#stripBarePrefixesIfUniform(payloads);
 		this.#pending = undefined;
-		if (target.kind === "delete") {
-			for (const anchor of expandRange(target.range)) this.#pushDelete(anchor, lineNum);
+		if (target.kind === "cut") {
+			this.#pushCut(target.range, lineNum);
 			return;
 		}
-		if (target.kind === "delete_block") {
-			// A block edit with no payloads resolves to a pure block deletion.
-			this.#pushBlock(target.anchor, [], lineNum);
+		if (target.kind === "cut_block") {
+			this.#pushBlock(target.anchor, [], lineNum, "cut");
+			return;
+		}
+		if (target.kind === "paste") {
+			this.#edits.push({ kind: "paste", cursor: cloneCursor(target.cursor), lineNum, index: this.#editIndex++ });
+			return;
+		}
+		if (target.kind === "paste_after_block") {
+			this.#pushBlock(target.anchor, [], lineNum, "paste_after");
 			return;
 		}
 		if (target.kind === "block") {
@@ -411,7 +543,7 @@ export class Executor {
 		}
 		if (payloads.length === 0) {
 			if (target.kind === "replace") {
-				for (const anchor of expandRange(target.range)) this.#pushDelete(anchor, lineNum);
+				this.#pushDeleteRange(target.range, lineNum);
 				return;
 			}
 			throw new Error(`line ${lineNum}: ${EMPTY_INSERT}`);
@@ -419,7 +551,7 @@ export class Executor {
 		if (target.kind === "replace") {
 			const cursor: Cursor = { kind: "before_anchor", anchor: { ...target.range.start } };
 			this.#emitPayloadRows(cursor, payloads, lineNum, "replacement");
-			for (const anchor of expandRange(target.range)) this.#pushDelete(anchor, lineNum);
+			this.#pushDeleteRange(target.range, lineNum);
 			return;
 		}
 		if (target.kind === "insert_before") {

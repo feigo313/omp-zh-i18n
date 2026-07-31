@@ -12,7 +12,7 @@ import { sanitizeText } from "@oh-my-pi/pi-utils";
 import type { RenderResultOptions } from "../../extensibility/custom-tools/types";
 import { daemonClientForProject } from "../../launch/client";
 import type { DaemonOperation, DaemonRpcResult, DaemonSnapshot, DaemonSpec, DaemonState } from "../../launch/protocol";
-import { renderTerminalOutput } from "../../launch/terminal-output";
+import { renderTerminalOutputIsolated } from "../../launch/terminal-output-worker-client";
 import type { Theme, ThemeColor } from "../../modes/theme/theme";
 import { framedBlock, outputBlockContentWidth, renderStatusLine } from "../../tui";
 import type { ToolSession } from "..";
@@ -161,6 +161,7 @@ function operationFor(params: LaunchParams, session: ToolSession): DaemonOperati
 				grep: params.grep,
 				follow: params.follow ?? false,
 				cursor: params.cursor,
+				renderTerminalRows: true,
 				timeoutMs: timeoutMs(params.timeout, 30),
 			};
 		case "wait":
@@ -270,28 +271,33 @@ function toolContent(result: DaemonRpcResult, params: LaunchParams): string {
 	}
 }
 
+/** Resolve display rows while keeping legacy raw replay outside the client process. */
+export async function renderLaunchLogTerminalRows(
+	result: Extract<DaemonRpcResult, { op: "logs" }>,
+	params: Pick<LaunchParams, "head" | "lines">,
+): Promise<string[] | undefined> {
+	if (result.terminalRows !== undefined) return result.terminalRows;
+	if (result.terminalText === undefined) return undefined;
+	return renderTerminalOutputIsolated(result.terminalText, {
+		head: params.head ?? false,
+		maxRows: Math.min(1_000, Math.floor(params.lines ?? 100)),
+	});
+}
+
 async function toolDetails(result: DaemonRpcResult, params: LaunchParams): Promise<LaunchToolDetails> {
 	switch (result.op) {
 		case "start":
 			return { op: "start", daemon: result.daemon, timedOut: result.readyTimedOut };
 		case "list":
 			return { op: "list", daemons: result.daemons };
-		case "logs": {
-			const terminalRows =
-				result.terminalText === undefined
-					? undefined
-					: await renderTerminalOutput(result.terminalText, {
-							head: params.head ?? false,
-							maxRows: Math.min(1_000, Math.floor(params.lines ?? 100)),
-						});
+		case "logs":
 			return {
 				op: "logs",
 				cursor: result.cursor,
 				timedOut: result.timedOut,
 				state: result.state,
-				terminalRows,
+				terminalRows: await renderLaunchLogTerminalRows(result, params).catch(() => undefined),
 			};
-		}
 		case "wait":
 			return { op: "wait", daemon: result.daemon, timedOut: result.timedOut, matched: result.matched };
 		case "send":

@@ -735,6 +735,12 @@ export interface SerializeOptions {
 	/** Print tool-result text in dim gray ink so archived conversation reads
 	 *  louder than archived tool noise. Defaults to `true`. */
 	dimToolResults?: boolean;
+	/** Serialize assistant reasoning as `¶think:` sections. Defaults to `true`.
+	 *  Callers archiving for a Claude/Anthropic-dialect model set this `false`:
+	 *  the archive frames are replayed as text into every later request, and
+	 *  reasoning rendered back to Claude trips its `reasoning_extraction`
+	 *  classifier (issue #6093). */
+	includeThinking?: boolean;
 }
 
 /** Keep the head and tail of `text`, eliding the middle beyond `maxChars`. */
@@ -773,6 +779,7 @@ export function serializeConversation(messages: Message[], options?: SerializeOp
 	const toolCallMaxChars = options?.toolCallMaxChars ?? TOOL_CALL_MAX_CHARS;
 	const headRatio = options?.truncateHeadRatio ?? TRUNCATE_HEAD_RATIO;
 	const dimToolResults = options?.dimToolResults !== false;
+	const includeThinking = options?.includeThinking !== false;
 	const parts: string[] = [];
 	let lastPrefix: string | null = null;
 
@@ -845,6 +852,7 @@ export function serializeConversation(messages: Message[], options?: SerializeOp
 					const text = stripDimMarkers(block.text);
 					if (text.trim()) pendingText.push(text);
 				} else if (block.type === "thinking") {
+					if (!includeThinking) continue;
 					const thinking = stripDimMarkers(block.thinking);
 					if (thinking.trim()) pendingThinking.push(thinking);
 				} else if (block.type === "toolCall") {
@@ -1834,6 +1842,29 @@ function planArchive(text: string, high: Shape, low: Shape, maxFrames: number): 
 }
 
 /**
+ * Drop `¶think:` sections from serialized archive source text.
+ *
+ * Archives written before {@link SerializeOptions.includeThinking} existed bake
+ * reasoning into their kept source; replaying it to Claude trips the
+ * `reasoning_extraction` classifier (issue #6093). Re-compaction re-renders the
+ * whole unfolded source, so scrubbing the prior text heals a poisoned session
+ * at its next compaction. Conservative by construction: only sections that
+ * start with `¶think:` at a section boundary are dropped.
+ */
+function stripThinkingSections(text: string): string {
+	return text
+		.split(NEWLINE_GLYPH)
+		.map(segment =>
+			segment
+				.split(/\n\n(?=¶(?:user|think|ai|call):)/)
+				.filter(section => !section.startsWith("¶think:"))
+				.join("\n\n"),
+		)
+		.filter(segment => segment.length > 0)
+		.join(NEWLINE_GLYPH);
+}
+
+/**
  * Run a snapcompact compaction over prepared messages. Fully local: serializes
  * the discarded history, appends it to the accumulated archive source text, and
  * re-renders that source into an ordered history layout: plain text at the
@@ -1858,11 +1889,18 @@ export async function compact<TMessage = Message>(
 	const llmMessages = (options?.convertToLlm ?? defaultConvertToLlm)(messages);
 	const serialized = serializeConversation(llmMessages, options);
 	const previousArchive = getPreservedArchive(previousPreserveData);
-	const previousText =
+	const previousTextRaw =
 		previousArchive?.text ??
 		[previousArchive?.textHead, previousArchive?.textTail]
 			.filter((part): part is string => typeof part === "string" && part.length > 0)
 			.join(NEWLINE_GLYPH);
+	// Legacy archives may carry `¶think:` sections from before includeThinking
+	// existed; scrub them when this compaction excludes thinking so the
+	// re-rendered archive stops replaying reasoning (issue #6093).
+	const previousText =
+		options?.includeThinking === false && previousTextRaw.length > 0
+			? stripThinkingSections(previousTextRaw)
+			: previousTextRaw;
 	const hasPreviousText = previousText.length > 0;
 	const includedPreviousSummary = !hasPreviousText && !!previousSummary;
 	const shapeProbeText = renderabilityProbeText(serialized, previousPreserveData, previousSummary);
@@ -1925,6 +1963,11 @@ export async function compact<TMessage = Message>(
 
 	const frames = await Promise.all(newFrames);
 	const totalChars = frames.reduce((sum, frame) => sum + frame.chars, 0) + textChars;
+	const frameCols: number[] = [];
+	for (const frame of frames) {
+		if (!frameCols.includes(frame.cols)) frameCols.push(frame.cols);
+	}
+	const summaryCols = frameCols.length > 0 ? frameCols.join(" or ") : geo.cols;
 
 	const { readFiles, modifiedFiles } = computeFileLists(fileOps);
 	const files = formatFileList(readFiles, modifiedFiles, fileOps.read);
@@ -1937,7 +1980,7 @@ export async function compact<TMessage = Message>(
 			frameCount: frames.length,
 			multipleFrames: frames.length > 1,
 			docColumns: high.columns === 2,
-			cols: geo.cols,
+			cols: summaryCols,
 			rows: geo.rows,
 			sentenceInk: high.variant === "sent",
 			stopwordDimmed: high.stopwordDim === true,

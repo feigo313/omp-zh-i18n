@@ -7,7 +7,12 @@
 /// <reference types="./bun-imports.d.ts" />
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { formatHashlineHeader, InMemorySnapshotStore } from "@oh-my-pi/hashline";
+import {
+	type BlockTarget as HashlineBlockTarget,
+	formatHashlineHeader,
+	InMemorySnapshotStore,
+	Tokenizer as HashlineTokenizer,
+} from "@oh-my-pi/hashline";
 import type { AgentMessage, ResolvedThinkingLevel, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model, ToolExample } from "@oh-my-pi/pi-ai";
 import { formatSessionDumpText, RpcClient } from "@oh-my-pi/pi-coding-agent";
@@ -262,7 +267,6 @@ function countEditFailureCategories(runs: TaskRunResult[]): Record<EditFailureCa
 	return counts;
 }
 
-const HL_SUBTYPES = ["set", "set_range", "insert"] as const;
 const BENCHMARK_TOOL_NAMES = ["read", "edit", "write", "apply_patch"] as const;
 const EDIT_TOOL_NAMES = ["edit", "apply_patch"] as const;
 
@@ -274,21 +278,66 @@ function isMutationTool(toolName: unknown): boolean {
 	return isEditTool(toolName) || toolName === "write";
 }
 
-function countHashlineEditSubtypes(args: unknown): Record<string, number> {
-	const counts: Record<string, number> = Object.fromEntries(HL_SUBTYPES.map(k => [k, 0]));
-	if (!args || typeof args !== "object") return counts;
-	const edits = (args as { edits?: unknown[] }).edits;
-	if (!Array.isArray(edits)) return counts;
-	for (const edit of edits) {
-		if (!edit || typeof edit !== "object") continue;
-		for (const key of HL_SUBTYPES) {
-			if (key in edit) {
-				counts[key]++;
-				break;
+// Pure classification — single shared tokenizer is safe.
+const HASHLINE_OP_TOKENIZER = new HashlineTokenizer();
+
+/** Display label for a hashline op header, e.g. `SWAP.BLK` or `PASTE.POST`. */
+function hashlineOpLabel(target: HashlineBlockTarget): string {
+	switch (target.kind) {
+		case "replace":
+			return "SWAP";
+		case "block":
+			return "SWAP.BLK";
+		case "insert_before":
+			return "INS.PRE";
+		case "insert_after":
+			return "INS.POST";
+		case "bof":
+			return "INS.HEAD";
+		case "eof":
+			return "INS.TAIL";
+		case "insert_after_block":
+			return "INS.BLK.POST";
+		case "cut":
+			return "CUT";
+		case "cut_block":
+			return "CUT.BLK";
+		case "paste":
+			switch (target.cursor.kind) {
+				case "before_anchor":
+					return "PASTE.PRE";
+				case "after_anchor":
+					return "PASTE.POST";
+				case "bof":
+					return "PASTE.HEAD";
+				case "eof":
+					return "PASTE.TAIL";
 			}
-		}
+		case "paste_after_block":
+			return "PASTE.BLK.POST";
+		case "rem":
+			return "REM";
+		case "move":
+			return "MV";
 	}
-	return counts;
+}
+
+/**
+ * Count hashline op headers (`SWAP`, `CUT.BLK`, `PASTE.POST`, …) in an
+ * edit call's patch input. Returns `null` when the args carry no hashline
+ * patch — non-hashline edit variants and malformed calls contribute nothing.
+ */
+function countHashlineOps(args: unknown): Record<string, number> | null {
+	if (!args || typeof args !== "object" || !("input" in args)) return null;
+	const input = args.input;
+	if (typeof input !== "string" || input.length === 0) return null;
+	const counts: Record<string, number> = {};
+	for (const token of HASHLINE_OP_TOKENIZER.tokenizeAll(input)) {
+		if (token.kind !== "op-block") continue;
+		const label = hashlineOpLabel(token.target);
+		counts[label] = (counts[label] ?? 0) + 1;
+	}
+	return Object.keys(counts).length > 0 ? counts : null;
 }
 
 async function collectOriginalFileContents(cwd: string, files: string[]): Promise<Map<string, string>> {
@@ -829,7 +878,7 @@ export interface TaskRunResult {
 	editFailures: EditFailure[];
 	editWarnings: string[];
 	editAutocorrectCount: number;
-	/** Hashline edit subtype counts (replaceLine, replaceLines, etc.) — only when editVariant is hashline */
+	/** Hashline op counts (`SWAP`, `CUT.BLK`, `PASTE.POST`, …) — present when edit calls carried hashline patches. */
 	hashlineEditSubtypes?: Record<string, number>;
 	mutationIntentMatched?: boolean;
 	mutationIntentReason?: string;
@@ -945,7 +994,7 @@ export interface BenchmarkSummary {
 	mutationIntentMatchRate?: number;
 	/** Edit failure categories across all runs. */
 	editFailureCategories: Record<EditFailureCategory, number>;
-	/** Hashline edit subtype totals across all runs — only when editVariant is hashline. */
+	/** Hashline op totals across all runs — present when any run's edit calls carried hashline patches. */
 	hashlineEditSubtypes?: Record<string, number>;
 }
 
@@ -1037,7 +1086,7 @@ async function runSingleTask(
 		editAutocorrects: 0,
 		totalInputChars: 0,
 	};
-	const hashlineSubtypes: Record<string, number> = Object.fromEntries(HL_SUBTYPES.map(k => [k, 0]));
+	const hashlineSubtypes: Record<string, number> = {};
 
 	const logFile = path.join(TMP, `run-${task.id}-${runIndex}.jsonl`);
 	const logEvent = async (event: unknown) => {
@@ -1271,10 +1320,10 @@ async function runSingleTask(
 							const pendingEdit = pendingEdits.get(e.toolCallId) ?? { args: null };
 							const args = pendingEdit.args;
 							pendingEdits.delete(e.toolCallId);
-							if (config.editVariant === "hashline" && args) {
-								const counts = countHashlineEditSubtypes(args);
-								for (const key of HL_SUBTYPES) {
-									hashlineSubtypes[key] += counts[key];
+							const hashlineOpCounts = countHashlineOps(args);
+							if (hashlineOpCounts) {
+								for (const key in hashlineOpCounts) {
+									hashlineSubtypes[key] = (hashlineSubtypes[key] ?? 0) + hashlineOpCounts[key];
 								}
 							}
 							if (e.isError) {
@@ -1422,7 +1471,7 @@ async function runSingleTask(
 		editFailures,
 		editWarnings,
 		editAutocorrectCount,
-		hashlineEditSubtypes: config.editVariant === "hashline" ? hashlineSubtypes : undefined,
+		hashlineEditSubtypes: Object.keys(hashlineSubtypes).length > 0 ? hashlineSubtypes : undefined,
 		mutationIntentMatched: mutationIntentValidation?.matched,
 		mutationIntentReason: mutationIntentValidation?.reason,
 		timeoutTelemetry,
@@ -1936,12 +1985,20 @@ export function buildBenchmarkResult(params: {
 		0,
 	);
 	const editFailureCategories = countEditFailureCategories(nonGhostRuns);
+	// Op counts aggregate every attempted edit call across ALL runs (retries and
+	// failed calls included) — deliberately: the mix shows what the model reaches
+	// for, not just what landed. Best-run-only would hide exactly the flailing
+	// (failed SWAPs before a successful retry) this table exists to expose.
+	const hashlineEditSubtypeTotals: Record<string, number> = {};
+	for (const run of allRuns) {
+		const runOps = run.hashlineEditSubtypes;
+		if (!runOps) continue;
+		for (const key in runOps) {
+			hashlineEditSubtypeTotals[key] = (hashlineEditSubtypeTotals[key] ?? 0) + runOps[key];
+		}
+	}
 	const hashlineEditSubtypes: Record<string, number> | undefined =
-		params.config.editVariant === "hashline"
-			? Object.fromEntries(
-					HL_SUBTYPES.map(key => [key, allRuns.reduce((sum, r) => sum + (r.hashlineEditSubtypes?.[key] ?? 0), 0)]),
-				)
-			: undefined;
+		Object.keys(hashlineEditSubtypeTotals).length > 0 ? hashlineEditSubtypeTotals : undefined;
 
 	// Primary aggregates run over the *best* run of each completed task.
 	const bestRuns: TaskRunResult[] = [];

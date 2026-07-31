@@ -12,8 +12,18 @@ type CapturedRequest = {
 
 const originalCodexSearchModel = process.env.PI_CODEX_WEB_SEARCH_MODEL;
 
+// A completed hosted web_search tool call. Real Codex searches always stream a
+// `response.web_search_call.*` event; the provider now requires that evidence
+// (#6988), so every success fixture must include it.
+const WEB_SEARCH_CALL_EVENT = `data: ${JSON.stringify({
+	type: "response.web_search_call.completed",
+	item_id: "ws_test",
+})}`;
+
 function makeSseResponse(model: string): string {
 	return [
+		WEB_SEARCH_CALL_EVENT,
+		"",
 		`data: ${JSON.stringify({
 			type: "response.output_item.done",
 			item: {
@@ -46,6 +56,8 @@ function makeSseResponse(model: string): string {
 
 function makeImagePlaceholderSseResponse(model: string): string {
 	return [
+		WEB_SEARCH_CALL_EVENT,
+		"",
 		`data: ${JSON.stringify({
 			type: "response.output_text.delta",
 			delta: "OpenAI Responses API defaults `store` to false unless you opt in.",
@@ -80,6 +92,8 @@ function makeImagePlaceholderSseResponse(model: string): string {
 
 function makeMarkdownLinkSseResponse(model: string): string {
 	return [
+		WEB_SEARCH_CALL_EVENT,
+		"",
 		`data: ${JSON.stringify({
 			type: "response.output_item.done",
 			item: {
@@ -104,6 +118,8 @@ function makeMarkdownLinkSseResponse(model: string): string {
 
 function makePlainUrlSseResponse(model: string): string {
 	return [
+		WEB_SEARCH_CALL_EVENT,
+		"",
 		`data: ${JSON.stringify({
 			type: "response.output_item.done",
 			item: {
@@ -128,6 +144,8 @@ function makePlainUrlSseResponse(model: string): string {
 
 function makeMarkdownParenthesesSseResponse(model: string): string {
 	return [
+		WEB_SEARCH_CALL_EVENT,
+		"",
 		`data: ${JSON.stringify({
 			type: "response.output_item.done",
 			item: {
@@ -152,6 +170,8 @@ function makeMarkdownParenthesesSseResponse(model: string): string {
 
 function makePlainUrlPunctuationSseResponse(model: string): string {
 	return [
+		WEB_SEARCH_CALL_EVENT,
+		"",
 		`data: ${JSON.stringify({
 			type: "response.output_item.done",
 			item: {
@@ -273,6 +293,39 @@ describe("searchCodex model selection", () => {
 		expect(capturedRequest?.body?.model).toBe("gpt-5.6-luna");
 		expect(result.model).toBe("gpt-5.6-luna");
 		expect(result.sources).toEqual([{ title: "Example Article", url: "https://example.com/article" }]);
+	});
+
+	function sentUserText(): string | undefined {
+		const input = capturedRequest?.body?.input as Array<Record<string, unknown>> | undefined;
+		const userItem = input?.find(item => item.role === "user");
+		const content = userItem?.content as Array<Record<string, unknown>> | undefined;
+		return content?.[0]?.text as string | undefined;
+	}
+
+	it("re-emits directive queries with normalized Google-style operators", async () => {
+		delete process.env.PI_CODEX_WEB_SEARCH_MODEL;
+		await searchCodex(
+			makeSearchParams(
+				'bun runtime site:bun.sh -site:reddit.com after:2024-01-01 "exact phrase"',
+				mockCodexFetch("gpt-5.6-luna"),
+			),
+		);
+
+		expect(capturedRequest).not.toBeNull();
+		expect(sentUserText()).toBe('bun runtime "exact phrase" site:bun.sh -site:reddit.com after:2024-01-01');
+		// Tool config stays untouched: the ChatGPT backend's filter support is
+		// unverified, so no `filters` field is added to the web_search tool.
+		const input = capturedRequest?.body?.input as Array<Record<string, unknown>>;
+		const additionalTools = input.find(item => item.type === "additional_tools");
+		expect(additionalTools?.tools).toEqual([{ type: "web_search", search_context_size: "high" }]);
+	});
+
+	it("sends directive-free queries byte-identical", async () => {
+		delete process.env.PI_CODEX_WEB_SEARCH_MODEL;
+		const query = "how does the bun runtime schedule timers?";
+		await searchCodex(makeSearchParams(query, mockCodexFetch("gpt-5.6-luna")));
+
+		expect(sentUserText()).toBe(query);
 	});
 
 	it("uses configured Codex endpoint, API key, and headers without OAuth", async () => {
@@ -568,6 +621,8 @@ describe("searchCodex model selection", () => {
 
 	it("throws to advance the chain when both streamed and final answers are image placeholders without sources", async () => {
 		const sse = [
+			WEB_SEARCH_CALL_EVENT,
+			"",
 			`data: ${JSON.stringify({
 				type: "response.output_text.delta",
 				delta: "[Attached image]",
@@ -596,6 +651,8 @@ describe("searchCodex model selection", () => {
 
 	it("drops placeholder prose from the answer but keeps annotation sources when both are placeholders", async () => {
 		const sse = [
+			WEB_SEARCH_CALL_EVENT,
+			"",
 			`data: ${JSON.stringify({
 				type: "response.output_text.delta",
 				delta: "(see attached image)",
@@ -628,5 +685,71 @@ describe("searchCodex model selection", () => {
 		const result = await searchCodex(makeSearchParams("image with sources", fetchMock));
 		expect(result.answer).toBeUndefined();
 		expect(result.sources).toEqual([{ title: "Docs", url: "https://example.com/docs" }]);
+	});
+
+	it("fails a configured Responses-Lite model that answers without running web search (#6988)", async () => {
+		process.env.PI_CODEX_WEB_SEARCH_MODEL = "gpt-5.6-terra";
+		const sse = [
+			`data: ${JSON.stringify({
+				type: "response.output_item.done",
+				item: {
+					type: "message",
+					content: [
+						{
+							type: "output_text",
+							text: "July 28, 2026 is still in the future, so OpenAI has not announced anything yet.",
+						},
+					],
+				},
+			})}`,
+			"",
+			`data: ${JSON.stringify({
+				type: "response.completed",
+				response: { id: "resp_no_search", model: "gpt-5.6-terra" },
+			})}`,
+			"",
+		].join("\n");
+		const fetchMock: FetchImpl = () =>
+			Promise.resolve(new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } }));
+
+		await expect(searchCodex(makeSearchParams("no search performed", fetchMock))).rejects.toThrow(
+			/without running web search/,
+		);
+	});
+
+	it("advances to the next default candidate when a lite model skips web search (#6988)", async () => {
+		delete process.env.PI_CODEX_WEB_SEARCH_MODEL;
+		let calls = 0;
+		const noSearchSse = [
+			`data: ${JSON.stringify({
+				type: "response.output_item.done",
+				item: { type: "message", content: [{ type: "output_text", text: "stale answer, no search" }] },
+			})}`,
+			"",
+			`data: ${JSON.stringify({ type: "response.completed", response: { id: "resp_skip", model: "gpt-5.6-luna" } })}`,
+			"",
+		].join("\n");
+		const fetchMock: FetchImpl = (_url, init) => {
+			calls += 1;
+			const body = init?.body ? (JSON.parse(init.body as string) as Record<string, unknown>) : null;
+			if (calls === 1) {
+				expect(body?.model).toBe("gpt-5.6-luna");
+				return Promise.resolve(
+					new Response(noSearchSse, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+				);
+			}
+			expect(body?.model).toBe("gpt-5.6-terra");
+			return Promise.resolve(
+				new Response(makeSseResponse("gpt-5.6-terra"), {
+					status: 200,
+					headers: { "Content-Type": "text/event-stream" },
+				}),
+			);
+		};
+
+		const result = await searchCodex(makeSearchParams("advance past skipped search", fetchMock));
+		expect(calls).toBe(2);
+		expect(result.model).toBe("gpt-5.6-terra");
+		expect(result.sources).toEqual([{ title: "Example Article", url: "https://example.com/article" }]);
 	});
 });

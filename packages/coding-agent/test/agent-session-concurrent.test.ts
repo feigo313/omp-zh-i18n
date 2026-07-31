@@ -347,6 +347,7 @@ describe("AgentSession concurrent prompt guard", () => {
 			convertToLlm,
 		});
 		const stopEvents: Array<{
+			messages: AgentMessage[];
 			stop_hook_active: boolean;
 			session_id: string;
 			turn_id: number;
@@ -402,6 +403,14 @@ describe("AgentSession concurrent prompt guard", () => {
 		expect(stopEvents.map(event => event.turn_id)).toEqual([0, 0]);
 		expect(stopEvents[0]?.session_id).toBe(session.sessionId);
 		expect(stopEvents[0]?.last_assistant_message?.role).toBe("assistant");
+		expect(
+			stopEvents[1]?.messages.some(
+				message =>
+					message.role === "user" &&
+					Array.isArray(message.content) &&
+					message.content.some(block => block.type === "text" && block.text === "First message"),
+			),
+		).toBe(true);
 	});
 
 	it("uses non-empty session_stop reason when additional context is empty", async () => {
@@ -501,7 +510,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		expect(emitSessionStop).not.toHaveBeenCalled();
 	});
 
-	it("does not continue session_stop feedback after aborting a slow hook", async () => {
+	it("cancels an active session_stop pass without applying stale continuation feedback", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
 		const mock = createMockModel({
 			handler: () => ({ content: ["Done"] }),
@@ -512,32 +521,62 @@ describe("AgentSession concurrent prompt guard", () => {
 			streamFn: mock.stream,
 			convertToLlm,
 		});
+		const stopStarted = Promise.withResolvers<void>();
 		const stopHook = Promise.withResolvers<{ continue: true; additionalContext: string }>();
-		const emitSessionStop = vi.fn(() => (emitSessionStop.mock.calls.length === 1 ? stopHook.promise : undefined));
-		const extensionRunner = {
-			emit: vi.fn().mockResolvedValue(undefined),
-			emitBeforeAgentStart: vi.fn().mockResolvedValue(undefined),
-			hasHandlers: vi.fn((eventType: string) => eventType === "session_stop"),
-			emitSessionStop,
-		} as unknown as ExtensionRunner;
+		let firstStopSignal: AbortSignal | undefined;
+		let stopCount = 0;
+		const extensionRuntime = new ExtensionRuntime();
+		const extension = await loadExtensionFromFactory(
+			pi => {
+				pi.on("session_stop", event => {
+					stopCount++;
+					if (stopCount !== 1) return;
+					firstStopSignal = event.signal;
+					stopStarted.resolve();
+					return stopHook.promise;
+				});
+			},
+			tempDir,
+			new EventBus(),
+			extensionRuntime,
+			"slow-session-stop",
+		);
 		const sessionManager = SessionManager.inMemory();
 		const settings = Settings.isolated();
 		const authStorage = await AuthStorage.create(path.join(tempDir, "testauth.db"));
 		authStorages.push(authStorage);
 		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"));
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		const extensionRunner = new ExtensionRunner(
+			[extension],
+			extensionRuntime,
+			tempDir,
+			sessionManager,
+			modelRegistry,
+		);
+		const extensionErrors: string[] = [];
+		extensionRunner.onError(error => extensionErrors.push(error.error));
 
 		session = new AgentSession({ agent, sessionManager, settings, modelRegistry, extensionRunner });
 
 		const promptPromise = session.prompt("First message");
-		await waitFor(() => emitSessionStop.mock.calls.length === 1);
-		const abortPromise = session.abort();
+		await stopStarted.promise;
+		let abortSettled = false;
+		const abortPromise = session.abort().then(() => {
+			abortSettled = true;
+		});
+		await scheduler.yield();
+		const abortSettledBeforeHandler = abortSettled;
+		const signalWasCancelled = firstStopSignal?.aborted;
 		stopHook.resolve({ continue: true, additionalContext: "Should not run after abort." });
 
 		await abortPromise;
 		await promptPromise;
 		await session.waitForIdle();
 
+		expect(abortSettledBeforeHandler).toBe(true);
+		expect(signalWasCancelled).toBe(true);
+		expect(extensionErrors).toEqual([]);
 		expect(mock.calls).toHaveLength(1);
 		expect(session.queuedMessageCount).toBe(0);
 
@@ -869,6 +908,43 @@ describe("AgentSession concurrent prompt guard", () => {
 		expect(reentrantPromptResults).toEqual(["resolved"]);
 	});
 
+	it("does not let extension notifications block public agent_end", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [] },
+			streamFn: mock.stream,
+		});
+		const { promise: extensionGate, resolve: releaseExtension } = Promise.withResolvers<void>();
+		const extensionRunner = {
+			emit: vi.fn((event: { type: string }) =>
+				event.type === "agent_end" ? extensionGate : Promise.resolve(undefined),
+			),
+			emitBeforeAgentStart: vi.fn().mockResolvedValue(undefined),
+			hasHandlers: vi.fn().mockReturnValue(false),
+		} as unknown as ExtensionRunner;
+		const sessionManager = SessionManager.inMemory();
+		const settings = Settings.isolated();
+		const authStorage = await AuthStorage.create(path.join(tempDir, "testauth.db"));
+		authStorages.push(authStorage);
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"));
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		session = new AgentSession({ agent, sessionManager, settings, modelRegistry, extensionRunner });
+
+		const { promise: publicAgentEnd, resolve: onPublicAgentEnd } = Promise.withResolvers<void>();
+		session.subscribe(event => {
+			if (event.type === "agent_end") onPublicAgentEnd();
+		});
+
+		await session.prompt("First message");
+		await publicAgentEnd;
+		expect(extensionRunner.emit).toHaveBeenCalledWith({ type: "agent_end", messages: expect.any(Array) });
+
+		releaseExtension();
+		await session.waitForIdle();
+	});
+
 	it("queues idle ACP client-triggered custom messages instead of starting an ownerless turn", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
@@ -962,19 +1038,6 @@ describe("AgentSession concurrent prompt guard", () => {
 		const asyncJobManager = new AsyncJobManager({
 			maxRunningJobs: 2,
 			retentionMs: 1_000,
-			onJobComplete: async () => {
-				deliveryStarted = true;
-				await deliveryGate.promise;
-				await session.sendCustomMessage(
-					{
-						customType: "async-result",
-						content: "Background result",
-						display: true,
-						attribution: "agent",
-					},
-					{ deliverAs: "followUp", triggerTurn: true },
-				);
-			},
 		});
 		AsyncJobManager.setInstance(asyncJobManager);
 
@@ -989,6 +1052,21 @@ describe("AgentSession concurrent prompt guard", () => {
 		session.setClientBridge({
 			capabilities: {},
 			deferAgentInitiatedTurns: true,
+		});
+		// Override the session's self-registered sink: the test gates delivery
+		// and reproduces the ACP follow-up injection explicitly.
+		asyncJobManager.registerDeliverySink(ownerId, async () => {
+			deliveryStarted = true;
+			await deliveryGate.promise;
+			await session.sendCustomMessage(
+				{
+					customType: "async-result",
+					content: "Background result",
+					display: true,
+					attribution: "agent",
+				},
+				{ deliverAs: "followUp", triggerTurn: true },
+			);
 		});
 
 		await session.prompt("First message");
@@ -1039,13 +1117,6 @@ describe("AgentSession concurrent prompt guard", () => {
 		const asyncJobManager = new AsyncJobManager({
 			maxRunningJobs: 3,
 			retentionMs: 1_000,
-			onJobComplete: async jobId => {
-				started.add(jobId);
-				if (jobId === "job-a") {
-					await deliveryGate.promise;
-				}
-				delivered.push(jobId);
-			},
 		});
 		AsyncJobManager.setInstance(asyncJobManager);
 
@@ -1074,6 +1145,19 @@ describe("AgentSession concurrent prompt guard", () => {
 			modelRegistry,
 			agentId: "acp-session-a",
 			ownedAsyncJobManager: asyncJobManager,
+		});
+		// Override both sessions' self-registered sinks so the test controls
+		// delivery timing and records routing order.
+		asyncJobManager.registerDeliverySink("acp-session-a", async jobId => {
+			started.add(jobId);
+			if (jobId === "job-a") {
+				await deliveryGate.promise;
+			}
+			delivered.push(jobId);
+		});
+		asyncJobManager.registerDeliverySink("acp-session-b", async jobId => {
+			started.add(jobId);
+			delivered.push(jobId);
 		});
 
 		try {

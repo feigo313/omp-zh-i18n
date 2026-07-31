@@ -157,6 +157,54 @@ describe("Loader component", () => {
 		loader.stop();
 	});
 
+	it("reuses the wrapped layout across static spinner frames without re-measuring", () => {
+		vi.useFakeTimers();
+		const ui = { synchronizedOutput: true, requestDirectWrite: vi.fn(), requestComponentRender: vi.fn() };
+		const loader = new Loader(
+			ui as unknown as TUI,
+			s => s,
+			m => m,
+			"Checking",
+			["⠋", "⠙", "⠹"],
+		);
+		const stringWidth = spyOn(Bun, "stringWidth");
+
+		const initial = loader.render(40);
+		stringWidth.mockClear();
+		vi.advanceTimersByTime(80);
+		const advanced = loader.render(40);
+
+		// Advancing the spinner glyph must not re-run the wrap/width pipeline:
+		// only the leading 1-cell glyph changed, so the cached layout stands.
+		expect(stringWidth).not.toHaveBeenCalled();
+		expect(advanced[1]).not.toBe(initial[1]);
+		expect(advanced[1]).toContain("⠙ Checking");
+		expect(visibleWidth(initial[1])).toBe(visibleWidth(advanced[1]));
+		loader.stop();
+	});
+
+	it("rewraps custom spinner frames when their display widths differ", () => {
+		vi.useFakeTimers();
+		const ui = { synchronizedOutput: true, requestDirectWrite: vi.fn(), requestComponentRender: vi.fn() };
+		const loader = new Loader(
+			ui as unknown as TUI,
+			s => s,
+			m => m,
+			"Load",
+			["*", ">>>>"],
+		);
+
+		loader.render(8);
+		vi.advanceTimersByTime(80);
+		const widerFrame = loader.render(8);
+
+		expect(widerFrame.join("\n")).toContain(">>>>");
+		for (const line of widerFrame) {
+			expect(visibleWidth(line)).toBeLessThanOrEqual(8);
+		}
+		loader.stop();
+	});
+
 	it("holds animated message-only frames when synchronized output is unavailable", () => {
 		vi.useFakeTimers();
 		setSystemTime(new Date(1_000));

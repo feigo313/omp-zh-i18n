@@ -234,6 +234,17 @@ describe("GuestClient frame apply", () => {
 		expect(notices[0]).toMatchObject({ level: "error", message: "boom" });
 	});
 
+	it("auto_retry_end failure surfaces an error notice", () => {
+		const client = liveClient();
+		client.applyFrameForTest({
+			t: "event",
+			event: { type: "auto_retry_end", success: false, attempt: 3, finalError: "x" },
+		});
+		const notices = client.getSnapshot().notices;
+		expect(notices).toHaveLength(1);
+		expect(notices[0]).toMatchObject({ level: "error", message: "x" });
+	});
+
 	it("a pre-welcome error (hello rejection, e.g. protocol mismatch) ends the session with the host's reason", () => {
 		const client = new GuestClient(LINK, "tester");
 		client.applyFrameForTest({

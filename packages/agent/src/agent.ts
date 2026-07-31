@@ -39,6 +39,7 @@ import {
 import type { AppendOnlyContextManager } from "./append-only-context";
 import { isProviderRefusalMessage } from "./replay-policy";
 import type {
+	AgentBeforeModelCall,
 	AgentContext,
 	AgentEvent,
 	AgentLoopConfig,
@@ -71,6 +72,9 @@ function refreshToolChoiceForActiveTools(
 ): ToolChoice | undefined {
 	if (!toolChoice || typeof toolChoice === "string") {
 		return toolChoice;
+	}
+	if (toolChoice.type === "computer") {
+		return tools.some(tool => tool.native?.type === "computer") ? toolChoice : undefined;
 	}
 
 	const toolName =
@@ -238,6 +242,13 @@ export interface AgentOptions {
 	 */
 	transformToolCallArguments?: (args: Record<string, unknown>, toolName: string) => Record<string, unknown>;
 
+	/**
+	 * Resolve a tool call whose name matched no advertised tool. Lets hosts
+	 * route calls to tools exposed through side transports (e.g. `xd://`
+	 * device mounts) instead of failing with "Tool not found".
+	 */
+	resolveFallbackTool?: (name: string) => AgentTool<any> | undefined;
+
 	/** Enable intent tracing schema injection/stripping in the harness. */
 	intentTracing?: boolean;
 	/**
@@ -257,6 +268,8 @@ export interface AgentOptions {
 	abortOnFabricatedToolResult?: boolean;
 	/** Dynamic tool-choice directive (hard {@link ToolChoice} or {@link SoftToolRequirement}), resolved once per turn. */
 	getToolChoice?: () => ToolChoiceDirective | undefined;
+	/** Reject a deferred hard choice when its named tool is no longer active. */
+	onToolChoiceUnavailable?: () => void;
 
 	/**
 	 * Cursor exec handlers for local tool execution.
@@ -266,7 +279,16 @@ export interface AgentOptions {
 	getCursorTools?: () => AgentTool[];
 
 	/**
-	 * Cursor tool result callback for exec tool responses.
+	 * Optional rewrite of Cursor exec-channel tool results. May return a Promise.
+	 *
+	 * The Agent reserves the original result in its Cursor result buffer first,
+	 * then awaits this hook and patches the reserved entry in place. That keeps
+	 * the call paired even if `message_end` arrives while the Promise is still
+	 * pending, and `#emitCursorSplitAssistantMessage` waits for any transformer
+	 * still in flight before persisting, so a late rewrite is not lost. A
+	 * rejecting transformer is swallowed and the reserved payload stands in.
+	 * Hosts that only pass `cursorExecHandlers` (the coding-agent path) never
+	 * hit this hook.
 	 */
 	cursorOnToolResult?: CursorToolResultHandler;
 
@@ -320,6 +342,13 @@ export interface AgentPromptOptions {
 /** Buffered Cursor exec-channel tool result waiting to be emitted after the assistant message. */
 interface CursorToolResultEntry {
 	toolResult: ToolResultMessage;
+	/**
+	 * Set while an async `cursorOnToolResult` transformer is still running for
+	 * this entry, and cleared once it settles. The drain awaits it so a
+	 * transformer that rewrites the payload is not silently discarded when
+	 * `message_end` lands in the same chunk as the tool result.
+	 */
+	pending?: Promise<void>;
 }
 
 export class Agent {
@@ -343,6 +372,8 @@ export class Agent {
 	#transformProviderContext?: (context: Context, model: Model) => Context | Promise<Context>;
 	#steeringQueue: AgentMessage[] = [];
 	#followUpQueue: AgentMessage[] = [];
+	#steeringWaiters = new Set<() => void>();
+
 	#steeringMode: "all" | "one-at-a-time";
 	#followUpMode: "all" | "one-at-a-time";
 	#interruptMode: "immediate" | "wait";
@@ -375,11 +406,15 @@ export class Agent {
 	#kimiApiFormat?: "openai" | "anthropic";
 	#preferWebsockets?: boolean;
 	#transformToolCallArguments?: (args: Record<string, unknown>, toolName: string) => Record<string, unknown>;
+	#resolveFallbackTool?: (name: string) => AgentTool<any> | undefined;
 	#intentTracing: boolean;
 	#pruneToolDescriptions: boolean;
 	#dialect?: Dialect;
 	#abortOnFabricatedToolResult?: boolean;
 	#getToolChoice?: () => ToolChoiceDirective | undefined;
+	#onToolChoiceUnavailable?: () => void;
+	#softToolRequirementState: NonNullable<AgentLoopConfig["softToolRequirementState"]> = { escalations: 0 };
+	#deferredToolChoice?: ToolChoice;
 	#onPayload?: SimpleStreamOptions["onPayload"];
 	#onResponse?: SimpleStreamOptions["onResponse"];
 	#onSseEvent?: SimpleStreamOptions["onSseEvent"];
@@ -387,6 +422,8 @@ export class Agent {
 	#onHarmonyLeak?: (event: HarmonyAuditEvent) => void | Promise<void>;
 	#onBeforeYield?: () => Promise<void> | void;
 	#onTurnEnd?: (messages: AgentMessage[], signal?: AbortSignal, context?: AgentTurnEndContext) => Promise<void> | void;
+	#beforeModelCall?: AgentBeforeModelCall;
+	#additionalBeforeModelCalls = new Set<AgentBeforeModelCall>();
 	#asideMessageProvider?: () => AsideMessage[] | Promise<AsideMessage[]>;
 	#telemetry?: AgentLoopConfig["telemetry"];
 	#appendOnlyContext?: AppendOnlyContextManager;
@@ -455,11 +492,13 @@ export class Agent {
 		this.#kimiApiFormat = opts.kimiApiFormat;
 		this.#preferWebsockets = opts.preferWebsockets;
 		this.#transformToolCallArguments = opts.transformToolCallArguments;
+		this.#resolveFallbackTool = opts.resolveFallbackTool;
 		this.#intentTracing = opts.intentTracing === true;
 		this.#pruneToolDescriptions = opts.pruneToolDescriptions === true;
 		this.#dialect = opts.dialect;
 		this.#abortOnFabricatedToolResult = opts.abortOnFabricatedToolResult;
 		this.#getToolChoice = opts.getToolChoice;
+		this.#onToolChoiceUnavailable = opts.onToolChoiceUnavailable;
 		this.#onAssistantMessageEvent = opts.onAssistantMessageEvent;
 		this.#onHarmonyLeak = opts.onHarmonyLeak;
 		this.beforeToolCall = opts.beforeToolCall;
@@ -774,6 +813,28 @@ export class Agent {
 	}
 
 	/**
+	 * Install or replace the host pre-model-call gate; pass `undefined` to
+	 * remove it. Gates are sampled when a run starts: installing the first
+	 * gate while a run is in flight takes effect on the next run.
+	 */
+	setBeforeModelCall(fn: AgentBeforeModelCall | undefined): void {
+		this.#beforeModelCall = fn;
+	}
+
+	/**
+	 * Add a pre-model callback without replacing callbacks owned by the host.
+	 * Returns a disposer that removes only this callback. Like
+	 * {@link setBeforeModelCall}, the first gate installed while a run is in
+	 * flight takes effect on the next run.
+	 */
+	addBeforeModelCall(fn: AgentBeforeModelCall): () => void {
+		this.#additionalBeforeModelCalls.add(fn);
+		return () => {
+			this.#additionalBeforeModelCalls.delete(fn);
+		};
+	}
+
+	/**
 	 * Provide a source of non-interrupting "aside" messages (e.g. background-job
 	 * completions, late LSP diagnostics) drained at each step boundary. Never
 	 * aborts in-flight tools. See `AgentLoopConfig.getAsideMessages`.
@@ -857,6 +918,7 @@ export class Agent {
 	replaceQueues(steering: AgentMessage[], followUp: AgentMessage[]) {
 		this.#steeringQueue = steering.slice();
 		this.#followUpQueue = followUp.slice();
+		this.#notifySteeringWaiters();
 	}
 
 	appendMessage(m: AgentMessage) {
@@ -877,6 +939,7 @@ export class Agent {
 	 */
 	steer(m: AgentMessage) {
 		this.#steeringQueue.push(m);
+		this.#notifySteeringWaiters();
 	}
 
 	/**
@@ -889,15 +952,27 @@ export class Agent {
 
 	clearSteeringQueue() {
 		this.#steeringQueue = [];
+		this.#notifySteeringWaiters();
 	}
 
 	clearFollowUpQueue() {
 		this.#followUpQueue = [];
 	}
 
+	/**
+	 * Drop tool-directive state retained across a gate-stopped run: the
+	 * deferred hard choice and the soft-requirement lifecycle.
+	 */
+	clearDeferredToolDirectives() {
+		this.#deferredToolChoice = undefined;
+		this.#softToolRequirementState = { escalations: 0 };
+	}
+
 	clearAllQueues() {
 		this.#steeringQueue = [];
 		this.#followUpQueue = [];
+		this.#notifySteeringWaiters();
+		this.clearDeferredToolDirectives();
 	}
 
 	hasQueuedMessages(): boolean {
@@ -978,6 +1053,29 @@ export class Agent {
 		return this.#runningPrompt ?? Promise.resolve();
 	}
 
+	/**
+	 * Wait for a steering message without consuming the steering queue.
+	 *
+	 * The signal releases the waiter when the prompt ends, so an in-flight
+	 * tool watcher never survives the tool batch that owns it.
+	 */
+	#waitForSteeringMessages(signal?: AbortSignal): Promise<void> {
+		if (this.#steeringQueue.length > 0 || signal?.aborted) return Promise.resolve();
+		const { promise, resolve } = Promise.withResolvers<void>();
+		const onAbort = (): void => resolve();
+		this.#steeringWaiters.add(resolve);
+		signal?.addEventListener("abort", onAbort, { once: true });
+		return promise.finally(() => {
+			this.#steeringWaiters.delete(resolve);
+			signal?.removeEventListener("abort", onAbort);
+		});
+	}
+
+	#notifySteeringWaiters(): void {
+		const waiters = [...this.#steeringWaiters];
+		for (const resolve of waiters) resolve();
+	}
+
 	reset() {
 		this.#state.messages.length = 0;
 		this.#state.isStreaming = false;
@@ -986,6 +1084,8 @@ export class Agent {
 		this.#state.error = undefined;
 		this.#steeringQueue = [];
 		this.#followUpQueue = [];
+		this.#notifySteeringWaiters();
+		this.clearDeferredToolDirectives();
 	}
 
 	/** Send a prompt with an AgentMessage */
@@ -1047,6 +1147,22 @@ export class Agent {
 
 		const messages = this.#state.messages;
 		if (messages.length === 0) {
+			// An empty transcript has nothing to resume, but a queued steer/follow-up
+			// must still be delivered as the opening turn — mirroring the assistant-tail
+			// branch below. Throwing here leaves the message undeliverable, and idle-drain
+			// callers (AgentSession#scheduleQueuedMessageDrain) re-arm continue() on every
+			// microtask because hasQueuedMessages() never clears, spinning an unbounded
+			// allocation loop until OOM (issue #6344).
+			const queuedSteering = this.#dequeueSteeringMessages();
+			if (queuedSteering.length > 0) {
+				await this.#runLoop(queuedSteering, { skipInitialSteeringPoll: true });
+				return;
+			}
+			const queuedFollowUp = this.#dequeueFollowUpMessages();
+			if (queuedFollowUp.length > 0) {
+				await this.#runLoop(queuedFollowUp);
+				return;
+			}
 			throw new Error("No messages to continue from");
 		}
 		if (messages[messages.length - 1].role === "assistant") {
@@ -1099,34 +1215,74 @@ export class Agent {
 			tools: this.#state.tools,
 		};
 
-		const cursorOnToolResult =
-			this.#cursorExecHandlers || this.#cursorOnToolResult
-				? async (message: ToolResultMessage) => {
-						let finalMessage = message;
-						if (this.#cursorOnToolResult) {
-							try {
-								const updated = await this.#cursorOnToolResult(message);
-								if (updated) {
-									finalMessage = updated;
-								}
-							} catch {}
-						}
-						// Cursor executes tools server-side during streaming. We buffer
-						// each toolResult and emit them right after the assistant message
-						// closes (see `#emitCursorSplitAssistantMessage`), so replay
-						// receives (assistant with interleaved toolCall blocks) → results.
-						this.#cursorToolResultBuffer.push({ toolResult: finalMessage });
-						return finalMessage;
-					}
-				: undefined;
+		// Installed unconditionally. Both `cursorExecHandlers` and
+		// `cursorOnToolResult` are optional, but the Cursor provider resolves
+		// native todo calls server-side and synthesizes exec blocks regardless,
+		// marking both `kCursorExecResolved` — `agent-loop.ts` then emits no
+		// placeholder result for them. The provider always offers a paired result
+		// for those blocks (its todo fallback, and every `resolveExecHandler`
+		// exit including the no-handler one), but only through this sink: without
+		// it the result is dropped on the floor, the assistant block is left
+		// unpaired, and `buildSessionContext` strips the whole interaction on
+		// replay. A non-Cursor provider never calls this, so the closure costs
+		// nothing.
+		const cursorOnToolResult = async (message: ToolResultMessage) => {
+			// Cursor executes tools server-side during streaming. We buffer each
+			// toolResult and emit them right after the assistant message closes
+			// (see `#emitCursorSplitAssistantMessage`), so replay receives
+			// (assistant with interleaved toolCall blocks) → results.
+			//
+			// The entry is reserved SYNCHRONOUSLY, before awaiting the optional
+			// transformer. The provider's data loop dispatches messages with
+			// `void handleServerMessage(...)`, so a `message_end` decoded from the
+			// same chunk can drain the buffer while a transformer is still pending
+			// — pushing afterwards would drop the result and strip its toolCall
+			// block as dangling on replay.
+			//
+			// The transformer's in-flight promise is recorded on the entry so the
+			// drain can await it (`#emitCursorSplitAssistantMessage`). Without
+			// that, a transformer resolving after the swap would patch a detached
+			// object while the persisted result kept the original payload — the
+			// rewrite silently lost.
+			const entry: CursorToolResultEntry = { toolResult: message };
+			this.#cursorToolResultBuffer.push(entry);
+			const transform = this.#cursorOnToolResult;
+			if (transform) {
+				const pending = (async () => {
+					try {
+						const updated = await transform(message);
+						if (updated) entry.toolResult = updated;
+					} catch {}
+				})();
+				entry.pending = pending;
+				await pending;
+				entry.pending = undefined;
+			}
+			return entry.toolResult;
+		};
 
+		let claimedToolChoice: ToolChoice | undefined;
 		const getToolChoice = (): ToolChoiceDirective | undefined => {
+			claimedToolChoice = undefined;
+			const deferred = this.#deferredToolChoice;
+			if (deferred !== undefined) {
+				this.#deferredToolChoice = undefined;
+				const active = refreshToolChoiceForActiveTools(deferred, this.#state.tools);
+				if (active !== undefined) {
+					claimedToolChoice = deferred;
+					return active;
+				}
+				this.#onToolChoiceUnavailable?.();
+			}
+
 			const queued = this.#getToolChoice?.();
 			if (queued !== undefined) {
 				if (isSoftToolRequirement(queued)) {
 					return (this.#state.tools ?? []).some(tool => tool.name === queued.toolName) ? queued : undefined;
 				}
-				return refreshToolChoiceForActiveTools(queued, this.#state.tools);
+				const active = refreshToolChoiceForActiveTools(queued, this.#state.tools);
+				if (active !== undefined) claimedToolChoice = queued;
+				return active;
 			}
 			return refreshToolChoiceForActiveTools(options?.toolChoice, this.#state.tools);
 		};
@@ -1169,11 +1325,24 @@ export class Agent {
 				context.systemPrompt = this.#state.systemPrompt;
 				context.tools = this.#toolsForModel(this.#state.model ?? model);
 			},
+			beforeModelCall:
+				this.#beforeModelCall || this.#additionalBeforeModelCalls.size > 0
+					? async (context, signal) => {
+							const result = (await this.#beforeModelCall?.(context, signal)) || undefined;
+							if (result?.stop) return result;
+							for (const callback of this.#additionalBeforeModelCalls) {
+								const callbackResult = (await callback(context, signal)) || undefined;
+								if (callbackResult?.stop) return callbackResult;
+							}
+							return undefined;
+						}
+					: undefined,
 			cursorExecHandlers: this.#cursorExecHandlers,
 			cursorOnToolResult,
 			cwd: this.#cwd,
 			getCwd: this.#cwdResolver,
 			transformToolCallArguments: this.#transformToolCallArguments,
+			resolveFallbackTool: this.#resolveFallbackTool,
 			intentTracing: this.#intentTracing,
 			pruneToolDescriptions: this.#pruneToolDescriptions,
 			dialect: this.#dialect,
@@ -1188,6 +1357,10 @@ export class Agent {
 			onHarmonyLeak: this.#onHarmonyLeak,
 			onTurnEnd: (messages, signal, context) => this.#onTurnEnd?.(messages, signal, context),
 			getToolChoice,
+			softToolRequirementState: this.#softToolRequirementState,
+			onToolChoiceRejected: () => {
+				if (claimedToolChoice !== undefined) this.#deferredToolChoice = claimedToolChoice;
+			},
 			getModel: () => this.#state.model ?? model,
 			getReasoning: () => this.#state.thinkingLevel,
 			getDisableReasoning: () => this.#state.disableReasoning,
@@ -1212,6 +1385,7 @@ export class Agent {
 				}
 				return { queued: true, source: "system" };
 			},
+			waitForSteeringMessages: signal => this.#waitForSteeringMessages(signal),
 			hasIrcInterrupts: this.hasIrcInterrupts,
 			getFollowUpMessages: async () => this.#dequeueFollowUpMessages(),
 			getAsideMessages: async () => (await this.#asideMessageProvider?.()) ?? [],
@@ -1221,6 +1395,7 @@ export class Agent {
 
 		let partial: AgentMessage | null = null;
 		const completedToolCallIds = new Set<string>();
+		let turnOpen = false;
 
 		try {
 			const stream = messages
@@ -1228,6 +1403,8 @@ export class Agent {
 				: agentLoopContinue(context, config, this.#abortController.signal, this.streamFn);
 
 			for await (const event of stream) {
+				if (event.type === "turn_start") turnOpen = true;
+				if (event.type === "turn_end") turnOpen = false;
 				// Update internal state based on events
 				switch (event.type) {
 					case "message_start":
@@ -1248,7 +1425,7 @@ export class Agent {
 						// Check if this is an assistant message with buffered Cursor tool results.
 						// If so, split the message to emit tool results at the correct position.
 						if (event.message.role === "assistant" && this.#cursorToolResultBuffer.length > 0) {
-							this.#emitCursorSplitAssistantMessage(event.message as AssistantMessage);
+							await this.#emitCursorSplitAssistantMessage(event.message as AssistantMessage);
 							continue; // Skip default emit - split method handles everything
 						}
 						this.#state.streamMessage = null;
@@ -1305,6 +1482,15 @@ export class Agent {
 			const shouldEmitVisibleError = !stoppedForAbort;
 			const assistantPartial = partial?.role === "assistant" ? partial : undefined;
 			const hadAssistantStart = assistantPartial !== undefined;
+			// Same contract as the normal drain in `#emitCursorSplitAssistantMessage`:
+			// a transformer still in flight must be awaited before the payload is
+			// snapshotted, or its rewrite patches an entry this catch path already
+			// detached and the original is persisted instead. A provider error is
+			// exactly when a transform is most likely to be mid-flight.
+			const pendingTransforms = this.#cursorToolResultBuffer
+				.filter(entry => entry.pending !== undefined)
+				.map(entry => entry.pending);
+			if (pendingTransforms.length > 0) await Promise.all(pendingTransforms);
 			const bufferedCursorResults = this.#cursorToolResultBuffer.map(({ toolResult }) => toolResult);
 			const retainedToolCallIds = new Set(completedToolCallIds);
 			for (const { toolCallId } of bufferedCursorResults) retainedToolCallIds.add(toolCallId);
@@ -1338,6 +1524,10 @@ export class Agent {
 						};
 
 			if (shouldEmitVisibleError) {
+				if (!turnOpen) {
+					this.#emit({ type: "turn_start" });
+					turnOpen = true;
+				}
 				if (!hadAssistantStart) {
 					this.#state.streamMessage = errorMsg;
 					this.#emit({ type: "message_start", message: errorMsg });
@@ -1379,6 +1569,7 @@ export class Agent {
 					toolResults.push(toolResult);
 				}
 				this.#emit({ type: "turn_end", message: errorMsg, toolResults });
+				turnOpen = false;
 				this.#emit({ type: "agent_end", messages: [errorMsg, ...toolResults] });
 			} else {
 				this.appendMessage(errorMsg);
@@ -1430,9 +1621,21 @@ export class Agent {
 	 * toolCall blocks; it also copied `preambleText` into every text block on
 	 * multi-text turns, producing duplicated text on replay.
 	 */
-	#emitCursorSplitAssistantMessage(assistantMessage: AssistantMessage): void {
+	async #emitCursorSplitAssistantMessage(assistantMessage: AssistantMessage): Promise<void> {
+		// Snapshot and detach immediately so a still-pending `cursorOnToolResult`
+		// cannot push into a drained buffer. Entries already reserved stay paired
+		// with their toolCall.
 		const buffer = this.#cursorToolResultBuffer;
 		this.#cursorToolResultBuffer = [];
+
+		// Await any transformer still running for a reserved entry before reading
+		// its payload. The provider dispatches with `void handleServerMessage(…)`,
+		// so a `message_end` from the same chunk can reach this point while a
+		// transformer is mid-flight; without the await its rewrite would land on
+		// the detached entry after the original was already appended and emitted.
+		// Each `pending` swallows its own rejection, so this cannot throw.
+		const pending = buffer.filter(entry => entry.pending !== undefined).map(entry => entry.pending);
+		if (pending.length > 0) await Promise.all(pending);
 
 		this.#state.streamMessage = null;
 		this.appendMessage(assistantMessage);

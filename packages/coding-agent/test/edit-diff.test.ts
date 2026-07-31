@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { formatHashlineHeader, InMemorySnapshotStore, missingSnapshotTagMessage } from "@oh-my-pi/hashline";
+import {
+	forkClipboard,
+	formatHashlineHeader,
+	InMemorySnapshotStore,
+	missingSnapshotTagMessage,
+} from "@oh-my-pi/hashline";
 import {
 	adjustIndentation,
 	computeEditDiff,
@@ -265,6 +270,68 @@ describe("computeHashlineDiff", () => {
 		expect("diff" in result).toBe(true);
 		if ("diff" in result) {
 			expect(result.diff).toContain("second");
+		}
+	});
+
+	test("previews a same-file CUT + PASTE as the moved content", async () => {
+		const sourcePath = path.join(tempDir, "source.txt");
+		const text = "l1\nl2\nl3\n";
+		await Bun.write(sourcePath, text);
+
+		const snapshotStore = new InMemorySnapshotStore();
+		const tag = snapshotStore.record(sourcePath, text);
+		const result = await computeHashlineDiff(
+			{ input: `${formatHashlineHeader(sourcePath, tag)}\nCUT 1.=1\nPASTE.TAIL` },
+			tempDir,
+			snapshotStore,
+		);
+		expect("diff" in result).toBe(true);
+		if ("diff" in result) {
+			expect(result.diff).toContain("-1|l1");
+			expect(result.diff).toContain("+3|l1");
+		}
+	});
+
+	test("previews a PASTE from a forked session register without touching the source", async () => {
+		const sourcePath = path.join(tempDir, "source.txt");
+		const text = "l1\n";
+		await Bun.write(sourcePath, text);
+
+		const snapshotStore = new InMemorySnapshotStore();
+		const tag = snapshotStore.record(sourcePath, text);
+		// Mirror the streaming-strategy contract: the session register is forked
+		// once per preview frame; sections then thread the fork in patch order.
+		const sessionRegister = { lines: ["carried"] };
+		const result = await computeHashlineDiff(
+			{ input: `${formatHashlineHeader(sourcePath, tag)}\nPASTE.TAIL` },
+			tempDir,
+			snapshotStore,
+			{ clipboard: forkClipboard(sessionRegister) },
+		);
+		expect("diff" in result).toBe(true);
+		if ("diff" in result) {
+			expect(result.diff).toContain("|carried");
+		}
+		expect(sessionRegister.lines).toEqual(["carried"]);
+	});
+
+	test("streams paste rows in the natural-order preview", async () => {
+		const sourcePath = path.join(tempDir, "source.txt");
+		const text = "l1\nl2\nl3\n";
+		await Bun.write(sourcePath, text);
+
+		const snapshotStore = new InMemorySnapshotStore();
+		const tag = snapshotStore.record(sourcePath, text);
+		const result = await computeHashlineDiff(
+			{ input: `${formatHashlineHeader(sourcePath, tag)}\nCUT 2.=2\nPASTE.HEAD` },
+			tempDir,
+			snapshotStore,
+			{ streaming: true, skipHashValidation: true },
+		);
+		expect("diff" in result).toBe(true);
+		if ("diff" in result) {
+			expect(result.diff).toContain("-2|l2");
+			expect(result.diff).toContain("+1|l2");
 		}
 	});
 

@@ -17,9 +17,9 @@ import { formatCost } from "../data/formatters";
 import { useResource } from "../data/useResource";
 import { buildCostSummary } from "../data/view-models";
 import { useTranslation } from "../i18n";
-import { useExchangeRate } from "../useExchangeRate";
 import type { CostTimeSeriesPoint, TimeRange } from "../types";
 import { AsyncBoundary, Panel, SegmentedControl } from "../ui";
+import { useExchangeRate } from "../useExchangeRate";
 import { useSystemTheme } from "../useSystemTheme";
 
 export interface CostsRouteProps {

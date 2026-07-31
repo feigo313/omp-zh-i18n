@@ -1,9 +1,0 @@
-{
-  "_provenance": {
-    "source": "zh-settings-shell.json",
-    "timestamp": "2026-07-23T11:55:24.530Z",
-    "reason": "extra-vs-en-shell"
-  },
-  "tabs.shell.groups.0": "Bash",
-  "tabs.shell.groups.1": "执行与运行时"
-}

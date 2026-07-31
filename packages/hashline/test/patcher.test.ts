@@ -12,6 +12,7 @@ import {
 	NodeFilesystem,
 	Patch,
 	Patcher,
+	type WriteResult,
 } from "@oh-my-pi/hashline";
 
 const PATH = "a.ts";
@@ -145,6 +146,56 @@ describe("Patcher snapshot tag integrity", () => {
 		const patcher = new Patcher({ fs, snapshots });
 		await patcher.apply(Patch.parse(`[${PATH}#${tag}]\nSWAP 2.=2:\n+edited live`));
 		expect(fs.get(PATH)).toBe("line one 410\nedited live\n");
+	});
+});
+
+// A write-time transform outside the patcher's control (e.g. an ACP-connected
+// editor's format-on-save rewriting indentation on every save) must never
+// poison the next section's snapshot tag with content that no longer exists
+// on disk. `DriftingFilesystem` stands in for that editor: every write is
+// persisted verbatim to the backing store (so `fs.get` sees ground truth,
+// like the file the reporter grepped with `cat`/`grep` right after the tool
+// call returned), but `writeText` echoes back a *reformatted* copy — spaces
+// turned into tabs, exactly the corruption reported against the ACP bridge.
+class DriftingFilesystem extends InMemoryFilesystem {
+	async writeText(path: string, content: string): Promise<WriteResult> {
+		const drifted = content.replace(/^ {4}/gm, "\t");
+		await super.writeText(path, drifted);
+		return { text: drifted };
+	}
+}
+
+describe("Patcher snapshot tag stays honest across a write-time content transform", () => {
+	it("keys the returned snapshot tag on what the Filesystem actually persisted, not the pre-write content", async () => {
+		const original = "function f() {\n    return 1;\n}\n";
+		const fs = new DriftingFilesystem([[PATH, original]]);
+		const snapshots = new InMemorySnapshotStore();
+		const tag = snapshots.record(PATH, original);
+		const patcher = new Patcher({ fs, snapshots });
+
+		const result = await patcher.apply(Patch.parse(`[${PATH}#${tag}]\nSWAP 2.=2:\n+    return 2;`));
+		const section = result.sections[0];
+		if (!section) throw new Error("expected one section result");
+
+		// Ground truth: the Filesystem drifted the untouched line's indentation
+		// to tabs on write, exactly like a hostile format-on-save would.
+		const onDisk = fs.get(PATH);
+		expect(onDisk).toBe("function f() {\n\treturn 2;\n}\n");
+
+		// The returned tag MUST hash the drifted (real) content, not the
+		// pre-write text the patcher computed — otherwise the very next edit's
+		// tag validation is checked against content the file no longer has.
+		expect(section.fileHash).toBe(computeFileHash(onDisk ?? ""));
+		expect(section.header).toBe(formatHashlineHeader(PATH, computeFileHash(onDisk ?? "")));
+
+		// The drift is surfaced, not swallowed: silent divergence is exactly
+		// what turned a one-line edit into unexplained whole-file corruption.
+		expect(section.warnings.some(w => w.includes(PATH) && /reformatted it on save/.test(w))).toBe(true);
+
+		// A follow-up edit anchored on the returned tag must succeed against
+		// the real (drifted) file instead of failing a stale-tag mismatch.
+		await patcher.apply(Patch.parse(`[${PATH}#${section.fileHash}]\nSWAP 1.=1:\n+function g() {`));
+		expect(fs.get(PATH)).toBe("function g() {\n\treturn 2;\n}\n");
 	});
 });
 
@@ -286,7 +337,7 @@ describe("Patcher seen-line provenance", () => {
 		const patcher = new Patcher({ fs, snapshots });
 
 		// Anchor 60 unseen lines — over the 40-line inline reveal cap.
-		const dels = Array.from({ length: 60 }, (_, i) => `DEL ${100 + i}`).join("\n");
+		const dels = Array.from({ length: 60 }, (_, i) => `CUT ${100 + i}`).join("\n");
 		let message: string | undefined;
 		try {
 			await patcher.apply(Patch.parse(`[${PATH}#${tag}]\n${dels}`));

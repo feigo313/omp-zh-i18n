@@ -16,8 +16,10 @@
 import {
 	ABORT_MARKER,
 	BEGIN_PATCH_MARKER,
+	type Clipboard,
 	containsRecognizableHashlineOperations,
 	END_PATCH_MARKER,
+	forkClipboard,
 	type PatchSection as HashlineInputSection,
 	Patch as HashlinePatch,
 	type SnapshotStore,
@@ -50,6 +52,13 @@ export interface StreamingDiffContext {
 	 * not flicker in the preview.
 	 */
 	isStreaming?: boolean;
+	/**
+	 * Session-persistent clipboard register (`CUT`/`PASTE`). Previews
+	 * fork it per frame — never mutating it — so a `PASTE` of content cut in
+	 * an earlier edit call (or an earlier section of this patch) renders the
+	 * real rows.
+	 */
+	clipboard?: Clipboard;
 }
 
 /**
@@ -411,7 +420,7 @@ const patchStrategy: EditStreamingStrategy<PatchArgs> = {
 			if (typeof edit?.diff !== "string") continue;
 			// `create` ops carry full file content in `diff` with no +/- markers;
 			// pass that content through whole.
-			const added = extractAddedLines(edit.diff, true);
+			const added = extractAddedLines(edit.diff, edit.op === "create");
 			digest = digest === undefined ? added : `${digest}\n${added}`;
 		}
 		return digest;
@@ -542,7 +551,9 @@ const hashlineStrategy: EditStreamingStrategy<HashlineArgs> = {
 			// to parse; suppress until the next chunk arrives. Once args are
 			// complete, surface the error so the model sees what went wrong.
 			if (ctx.isStreaming) return null;
-			const result = await computeHashlineDiff({ input }, ctx.cwd, ctx.snapshots);
+			const result = await computeHashlineDiff({ input }, ctx.cwd, ctx.snapshots, {
+				clipboard: forkClipboard(ctx.clipboard),
+			});
 			ctx.signal.throwIfAborted();
 			return [toPerFilePreview("", result)];
 		}
@@ -558,12 +569,16 @@ const hashlineStrategy: EditStreamingStrategy<HashlineArgs> = {
 		const trailingProcessedIndex = sectionsToProcess.length - 1;
 
 		const previews: PerFileDiffPreview[] = [];
+		// Fork the session register per preview frame: sections feed each other
+		// in patch order, but a preview must never mutate the live register.
+		const clipboard = forkClipboard(ctx.clipboard);
 		for (let i = 0; i < sectionsToProcess.length; i++) {
 			ctx.signal.throwIfAborted();
 			const section = sectionsToProcess[i];
 			const result = await computeHashlineSectionDiff(section, ctx.cwd, ctx.snapshots, {
 				streaming: ctx.isStreaming,
 				skipHashValidation: ctx.isStreaming === true,
+				clipboard,
 			});
 			ctx.signal.throwIfAborted();
 			// Ignore parse/apply errors from the trailing (actively-typed)

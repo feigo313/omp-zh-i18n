@@ -21,7 +21,9 @@ InterruptMode: TypeAlias = Literal["immediate", "wait"]
 StopReason: TypeAlias = Literal["stop", "length", "toolUse", "error", "aborted"]
 NotifyType: TypeAlias = Literal["info", "warning", "error"]
 WidgetPlacement: TypeAlias = Literal["aboveEditor", "belowEditor"]
-TodoStatus: TypeAlias = Literal["pending", "in_progress", "completed", "abandoned"]
+TodoStatus: TypeAlias = Literal[
+    "pending", "in_progress", "completed", "abandoned", "blocked"
+]
 ExtensionUiMethod: TypeAlias = Literal[
     "select",
     "confirm",
@@ -65,7 +67,7 @@ _WIDGET_PLACEMENT_VALUES: Final[frozenset[str]] = frozenset(
     {"aboveEditor", "belowEditor"}
 )
 _TODO_STATUS_VALUES: Final[frozenset[str]] = frozenset(
-    {"pending", "in_progress", "completed", "abandoned"}
+    {"pending", "in_progress", "completed", "abandoned", "blocked"}
 )
 _EXTENSION_UI_METHOD_VALUES: Final[frozenset[str]] = frozenset(
     {
@@ -181,6 +183,13 @@ def _require_str(payload: JsonObject, field: str) -> str:
     return value
 
 
+def _require_bool(payload: JsonObject, field: str) -> bool:
+    value = payload.get(field)
+    if not isinstance(value, bool):
+        raise ValueError(f"{field} must be a boolean")
+    return value
+
+
 def _optional_str(payload: JsonObject, field: str) -> str | None:
     value = payload.get(field)
     if value is None:
@@ -229,6 +238,15 @@ def _optional_int(payload: JsonObject, field: str) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{field} must be an integer")
     return value
+
+
+def _optional_float(payload: JsonObject, field: str) -> float | None:
+    value = payload.get(field)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a number")
+    return float(value)
 
 
 def _tuple_of_strings(values: object, *, field: str) -> tuple[str, ...] | None:
@@ -745,6 +763,8 @@ class TodoItem:
     status: TodoStatus
     notes: str | None = None
     details: str | None = None
+    # What a `blocked` task is waiting on; None for all other statuses.
+    blocker: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -772,6 +792,9 @@ class SessionState:
     todo_phases: tuple[TodoPhase, ...] = ()
     system_prompt: tuple[str, ...] = ()
     dump_tools: tuple[ToolDescriptor, ...] = ()
+    fast_mode_enabled: bool = False
+    fast_mode_active: bool = False
+    tokens_per_second: float | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -785,6 +808,12 @@ class BashResult:
     output_lines: int
     output_bytes: int
     artifact_id: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FastModeResult:
+    enabled: bool
+    active: bool
 
 
 @dataclass(slots=True, frozen=True)
@@ -851,7 +880,18 @@ class SessionStats:
 
 @dataclass(slots=True, frozen=True)
 class ReadyEvent:
+    protocol_version: int | None = None
+    supported_protocol_versions: tuple[int, ...] | None = None
+    max_frame_bytes: int | None = None
+    max_reassembled_frame_bytes: int | None = None
     type: Literal["ready"] = "ready"
+
+
+@dataclass(slots=True, frozen=True)
+class MessagesPage:
+    messages: tuple[AgentMessage, ...]
+    total_messages: int
+    next_cursor: str | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -1249,6 +1289,7 @@ def parse_todo_item(payload: JsonObject) -> TodoItem:
         ),
         notes=_optional_str(payload, "notes"),
         details=_optional_str(payload, "details"),
+        blocker=_optional_str(payload, "blocker"),
     )
 
 
@@ -1328,6 +1369,9 @@ def parse_session_state(payload: JsonObject) -> SessionState:
         ),
         system_prompt=_optional_str_list(payload, "systemPrompt"),
         dump_tools=dump_tools,
+        fast_mode_enabled=bool(payload.get("fastModeEnabled", False)),
+        fast_mode_active=bool(payload.get("fastModeActive", False)),
+        tokens_per_second=_optional_float(payload, "tokensPerSecond"),
     )
 
 
@@ -1342,6 +1386,13 @@ def parse_bash_result(payload: JsonObject) -> BashResult:
         output_lines=int(payload.get("outputLines", 0)),
         output_bytes=int(payload.get("outputBytes", 0)),
         artifact_id=_optional_str(payload, "artifactId"),
+    )
+
+
+def parse_fast_mode_result(payload: JsonObject) -> FastModeResult:
+    return FastModeResult(
+        enabled=_require_bool(payload, "enabled"),
+        active=_require_bool(payload, "active"),
     )
 
 
@@ -1490,7 +1541,23 @@ def parse_extension_error(payload: JsonObject) -> ExtensionError:
 def parse_notification(payload: JsonObject) -> RpcNotification:
     event_type = payload.get("type")
     if event_type == "ready":
-        return ReadyEvent()
+        raw_versions = payload.get("supportedProtocolVersions")
+        supported_versions: tuple[int, ...] | None = None
+        if raw_versions is not None:
+            if not isinstance(raw_versions, list) or any(
+                not isinstance(version, int) or isinstance(version, bool)
+                for version in raw_versions
+            ):
+                raise ValueError("ready.supportedProtocolVersions must be integers")
+            supported_versions = tuple(raw_versions)
+        return ReadyEvent(
+            protocol_version=_optional_int(payload, "protocolVersion"),
+            supported_protocol_versions=supported_versions,
+            max_frame_bytes=_optional_int(payload, "maxFrameBytes"),
+            max_reassembled_frame_bytes=_optional_int(
+                payload, "maxReassembledFrameBytes"
+            ),
+        )
     if event_type == "extension_ui_request":
         return parse_extension_ui_request(payload)
     if event_type == "extension_error":

@@ -49,9 +49,10 @@ session-aware recovery on mismatch.
 Inside a section:
 - `SWAP A.=B:` — replace lines A.=B with following `+TEXT` body rows.
 - `SWAP.BLK A:` — replace the syntactic block beginning on line A.
-- `DEL A.=B` / `DEL.BLK A` — delete concrete lines or a resolved block.
+- `CUT A.=B` / `CUT.BLK A` — delete concrete lines or a resolved block and capture them for `PASTE`.
 - `INS.PRE A:` / `INS.POST A:` / `INS.HEAD:` / `INS.TAIL:` — insert following body rows.
 - `INS.BLK.POST A:` — insert following body rows after the resolved block's last line.
+- `PASTE.PRE A` / `PASTE.POST A` / `PASTE.HEAD` / `PASTE.TAIL` / `PASTE.BLK.POST A` — insert the clipboard; no body rows. The register flows top-to-bottom across sections (cross-file moves) and can be host-persisted across batches via `PatcherOptions.clipboard`.
 - `REM` — delete the whole file named by the section header.
 - `MV DEST` — move/rename the section file to `DEST` (optionally after line edits).
 - `+TEXT` — literal body row (use `+` alone for a blank line).

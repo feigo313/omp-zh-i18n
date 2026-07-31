@@ -1,11 +1,24 @@
-import { Activity, AlertCircle, Coins, Cpu, Folder, LayoutDashboard, Smile, TrendingUp, Wrench } from "lucide-react";
+import {
+	Activity,
+	AlertCircle,
+	Coins,
+	Cpu,
+	Folder,
+	LayoutDashboard,
+	Plug,
+	Smile,
+	TrendingUp,
+	Wrench,
+} from "lucide-react";
 import type React from "react";
+import type { TranslationFn } from "../i18n";
 
 export type DashboardSection =
 	| "overview"
 	| "requests"
 	| "errors"
 	| "models"
+	| "providers"
 	| "tools"
 	| "costs"
 	| "behavior"
@@ -41,6 +54,11 @@ export const routes: DashboardRoute[] = [
 		icon: Cpu,
 	},
 	{
+		id: "providers",
+		label: "Providers",
+		icon: Plug,
+	},
+	{
 		id: "tools",
 		label: "Tools",
 		icon: Wrench,
@@ -67,3 +85,11 @@ export const routes: DashboardRoute[] = [
 		icon: TrendingUp,
 	},
 ];
+
+export function getRoutes(t: TranslationFn): DashboardRoute[] {
+	return routes.map(route => ({
+		...route,
+		label: t(`nav.section.${route.id}`),
+		shortLabel: route.shortLabel ? t(`nav.section.${route.id}`) : undefined,
+	}));
+}

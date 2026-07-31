@@ -19,6 +19,22 @@ export class CompactionCancelledError extends Error {
 }
 
 /**
+ * A provider-native compaction request failed after every native protocol
+ * available for the selected model was exhausted.
+ *
+ * The cause stays attached so AI error classification can still recognize
+ * authentication failures. Non-auth failures remain distinguishable from
+ * ordinary summarization errors and must not fall through to another provider.
+ */
+export class NativeCompactionError extends Error {
+	readonly name = "NativeCompactionError" as const;
+
+	constructor(cause: unknown) {
+		super(cause instanceof Error ? cause.message : String(cause), { cause });
+	}
+}
+
+/**
  * Outcome of a compaction attempt, surfaced by `CommandController.executeCompaction`
  * so callers (e.g. the plan-mode approval flow) can distinguish a deliberate abort
  * from an unrelated failure.

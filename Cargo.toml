@@ -1,10 +1,9 @@
 [workspace]
 members = ["crates/pi-*", "crates/vendor/*"]
-exclude = ["crates/vendor/brush-core", "crates/vendor/brush-builtins"]
 resolver = "3"
 
 [workspace.package]
-version = "17.0.8"
+version = "17.2.1"
 edition = "2024"
 license = "MIT"
 authors = ["Can Boluk"]
@@ -178,6 +177,7 @@ too_many_lines = "allow"     # Arbitrary limits don't account for necessary comp
 pi-ast = { path = "crates/pi-ast" }
 pi-iso = { path = "crates/pi-iso" }
 pi-shell = { path = "crates/pi-shell" }
+pi-voice = { path = "crates/pi-voice" }
 pi-walker = { path = "crates/pi-walker" }
 brush-core = { path = "crates/vendor/brush-core" }
 brush-builtins = { path = "crates/vendor/brush-builtins" }
@@ -237,6 +237,16 @@ smallvec = { version = "1.15.1", features = [
 # ──────────────────────────────────────────────────────────────────────────────
 xxhash-rust = { version = "0.8", features = ["xxh64"] }
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Audio & Realtime Media
+# ──────────────────────────────────────────────────────────────────────────────
+audiopus_sys = { version = "0.2.2", features = ["static"] }
+# Pregenerated bindings (crate default): keeps bindgen/libclang out of the
+# build graph so Bazel actions stay hermetic.
+maudio = "0.1.6"
+opus = "0.3.1"
+webrtc = "0.17.2"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # System & Platform

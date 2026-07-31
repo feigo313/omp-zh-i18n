@@ -25,15 +25,48 @@ Behavior notes:
 - RPC mode disables automatic session title generation by default to avoid an extra model call.
 - RPC mode resets workflow-altering `todo.*`, `task.*`, `memory.backend`/`memories.enabled`, `advisor.*`, `async.*`, and `bash.autoBackground.*` settings to their built-in defaults instead of inheriting user overrides.
 - The process reads stdin as JSONL (`readJsonl(Bun.stdin.stream())`).
-- At startup it writes `{ "type": "ready" }` before processing commands.
+- At startup it writes a `ready` frame before processing commands. The frame advertises supported protocol versions and transport limits.
 - When stdin closes, pending host-tool calls and host-URI requests are rejected and the process exits with code `0`.
 - Responses/events are written as one JSON object per line.
 
 ## Transport and Framing
 
-Each frame is a single JSON object followed by `\n`.
+Protocol v1 frames are a single JSON object followed by `\n`. Every physical JSONL frame is limited to 1 MiB.
 
-There is no envelope beyond the object shape itself.
+The initial ready frame uses protocol v1 and advertises the opt-in lossless transport:
+
+```json
+{
+  "type": "ready",
+  "protocolVersion": 1,
+  "supportedProtocolVersions": [1, 2],
+  "maxFrameBytes": 1048576,
+  "maxReassembledFrameBytes": 67108864
+}
+```
+
+Clients that support protocol v2 SHOULD immediately send:
+
+```json
+{ "id": "protocol-1", "type": "negotiate_protocol", "protocolVersion": 2 }
+```
+
+After the success response, oversized stdout objects are emitted losslessly as an uninterrupted sequence of `rpc_chunk` frames. Each chunk carries a base64 segment of the original UTF-8 JSON object:
+
+```json
+{
+  "type": "rpc_chunk",
+  "chunkId": "rpc-1",
+  "index": 0,
+  "count": 7,
+  "byteLength": 1600042,
+  "data": "eyJ0eXBlIjoicmVzcG9uc2UiLC4uLn0="
+}
+```
+
+Clients MUST validate `chunkId`, `index`, `count`, and `byteLength`, reject interleaved or interrupted sequences, enforce the advertised reassembly limit, concatenate decoded bytes in index order, decode them as strict UTF-8, and parse the result as one JSON object. The exported TypeScript `RpcFrameDecoder` implements this validation. The bundled TypeScript and Python `RpcClient` implementations negotiate v2 automatically when the ready frame advertises it.
+
+Legacy clients may ignore the added ready fields and remain on v1. V1 retains its bounded fallback behavior for oversized output. Frames above the v2 reassembly ceiling still fail explicitly; large history APIs should use pagination rather than depending on arbitrarily large logical frames.
 
 ### Outbound frame categories (stdout)
 
@@ -84,9 +117,14 @@ Important edge behavior from runtime:
 - `{ id?, type: "abort_and_prompt", message: string, images?: ImageContent[] }`
 - `{ id?, type: "new_session", parentSession?: string }`
 
+### Protocol
+
+- `{ id?, type: "negotiate_protocol", protocolVersion: 2 }`
+
 ### State
 
 - `{ id?, type: "get_state" }`
+- `{ id?, type: "set_fast_mode", enabled: boolean }`
 - `{ id?, type: "get_available_commands" }`
 - `{ id?, type: "set_todos", phases: TodoPhase[] }`
 - `{ id?, type: "set_host_tools", tools: RpcHostToolDefinition[] }`
@@ -148,6 +186,11 @@ correlate it via `id`. Ordering across concurrent commands is not guaranteed
 ### Messages
 
 - `{ id?, type: "get_messages" }`
+- `{ id?, type: "get_messages_page", cursor?: string, limit?: number }`
+
+`get_messages_page` returns a stable chronological page with `messages`, `totalMessages`, and an opaque `nextCursor` when more messages remain. Cursors are bound to the session ID, durable leaf, and message count. The server rejects stale cursors if the session changes between requests, and refuses to start a paging walk while the session is streaming or compacting. Failed page requests carry a machine-readable `code` on the error response — `session_busy` (session is streaming or compacting) or `stale_cursor` (the snapshot behind the cursor changed, e.g. a background bash appended a message between pages) — so clients can react without matching error-message text. Pages contain at most 256 messages and normally stay below the v1 physical-frame ceiling. A v1 caller can page ordinary histories, but an individual message whose response exceeds that ceiling produces an overflow error; retrieving it losslessly requires negotiated v2 framing.
+
+The bundled TypeScript `RpcClient.getMessages()` and Python `RpcClient.get_messages()` drain this paged endpoint automatically after negotiating v2. They retain the legacy monolithic command when connected to a v1 server, and on either `session_busy` or `stale_cursor` they discard partial pages and fall back to the legacy best-effort snapshot. Direct `getMessagesPage()` and `get_messages_page()` calls remain strict so incremental hosts never mix snapshots silently.
 
 ### Login
 
@@ -189,6 +232,19 @@ Local-only slash commands may emit `command_output` frames before completing via
 
 ### `get_state` payload
 
+`tokensPerSecond` is a number when output throughput is available and `null`
+otherwise. `fastModeEnabled` reports the session setting, while
+`fastModeActive` reports the actual computed active state. For Fireworks,
+`providers.fireworksTier: priority` is a provider-level setting independent of
+the `/fast` family setting, so `fastModeActive` may remain `true` for an
+unsupported Fireworks model.
+
+For direct Anthropic, a provider rejection of `speed: "fast"` uses a sticky
+fallback scoped by the resolved endpoint and exact model: `fastModeEnabled` may
+remain `true` while `fastModeActive` is `false`. An explicit `set_fast_mode`
+enable expresses retry intent and clears that fallback so the provider attempt
+is re-armed.
+
 ```json
 {
   "model": { "provider": "...", "id": "..." },
@@ -201,6 +257,9 @@ Local-only slash commands may emit `command_output` frames before completing via
   "sessionFile": "...",
   "sessionId": "...",
   "sessionName": "...",
+  "fastModeEnabled": false,
+  "tokensPerSecond": null,
+  "fastModeActive": false,
   "autoCompactionEnabled": true,
   "messageCount": 0,
   "queuedMessageCount": 0,
@@ -230,6 +289,73 @@ Local-only slash commands may emit `command_output` frames before completing via
     "contextWindow": 200000,
     "percent": 0.55
   }
+}
+```
+
+### `set_fast_mode` payload
+
+`set_fast_mode` changes whether fast mode is enabled for the session. The
+request is:
+
+```json
+{ "id": "req_fast_on", "type": "set_fast_mode", "enabled": true }
+```
+
+On success, `data` always contains both `enabled` and `active`. These are the
+actual computed values: `enabled` reports the session setting, and `active`
+reports the resulting active state, including any provider-level Fireworks
+priority setting:
+
+For direct Anthropic, an explicit enable also re-arms a provider attempt after
+the sticky rejection fallback, even when fast mode was already enabled.
+
+```json
+{
+  "id": "req_fast_on",
+  "type": "response",
+  "command": "set_fast_mode",
+  "success": true,
+  "data": { "enabled": true, "active": true }
+}
+```
+
+Enabling fast mode on a model without a service-tier family fails with the
+exact error below:
+
+```json
+{
+  "id": "req_fast_on",
+  "type": "response",
+  "command": "set_fast_mode",
+  "success": false,
+  "error": "Fast mode is unavailable for the current model."
+}
+```
+
+Disabling fast mode is idempotent, including on an unsupported model. It
+succeeds as an off/no-op result, but disabling `/fast` does not override
+provider-level settings, so a successful disable does not guarantee
+`active: false`. For example, with an unsupported
+`fireworks/deepseek-v4-flash` model and `providers.fireworksTier: priority`,
+the response reports the session setting as disabled while the provider
+priority keeps the computed active state true:
+
+```json
+{
+  "id": "req_fast_off",
+  "type": "response",
+  "command": "set_fast_mode",
+  "success": true,
+  "data": { "enabled": false, "active": true }
+}
+```
+
+The corresponding `get_state` result reports the same computed state:
+
+```json
+{
+  "fastModeEnabled": false,
+  "fastModeActive": true
 }
 ```
 
@@ -333,6 +459,9 @@ The response payload is:
 Schemes are case-insensitive on the wire and normalized to lowercase before
 the response is sent. Re-sending `set_host_uri_schemes` replaces the entire
 previous set — schemes missing from the new list are unregistered.
+
+`security://` is reserved for OMP's producer-neutral software-security resource
+store. RPC hosts cannot register or shadow that scheme.
 
 ## Event Stream Schema
 

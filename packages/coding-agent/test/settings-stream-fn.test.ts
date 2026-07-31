@@ -115,6 +115,18 @@ describe("createSettingsAwareStreamFn", () => {
 		expect(calls[1]?.options?.streamIdleTimeoutMs).toBe(10_000);
 	});
 
+	it("forwards retry.maxDelayMs while preserving caller overrides", () => {
+		const settings = Settings.isolated({ "retry.maxDelayMs": 300_000 });
+		const { fn: base, calls } = captureBase();
+		const wrapped = createSettingsAwareStreamFn(settings, base);
+
+		wrapped(stubModel, stubContext, undefined);
+		wrapped(stubModel, stubContext, { maxRetryDelayMs: 5_000 });
+
+		expect(calls[0]?.options?.maxRetryDelayMs).toBe(300_000);
+		expect(calls[1]?.options?.maxRetryDelayMs).toBe(5_000);
+	});
+
 	it("treats the default openrouterVariant as absent so the base call carries no variant", () => {
 		const settings = Settings.isolated({ "providers.openrouterVariant": "default" });
 		const { fn: base, calls } = captureBase();

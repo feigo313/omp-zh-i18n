@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { Agent } from "@oh-my-pi/pi-agent-core";
 import {
 	agentLoop,
 	agentLoopContinue,
@@ -14,7 +15,7 @@ import type {
 	AgentToolContext,
 	ToolCallContext,
 } from "@oh-my-pi/pi-agent-core/types";
-import type { AssistantMessage, AssistantMessageEvent, Message, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, AssistantMessageEvent, Context, Message, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
@@ -1059,6 +1060,62 @@ describe("agentLoop with AgentMessage", () => {
 		expect(messages.map(message => message.role)).toEqual(["user", "assistant", "toolResult", "assistant"]);
 		const finalTurn = messages[3] as AssistantMessage;
 		expect(finalTurn.content).toContainEqual({ type: "text", text: "done after custom recovery" });
+	});
+
+	it("routes unadvertised tool calls through resolveFallbackTool", async () => {
+		const executedParams: Array<{ value: string }> = [];
+		const toolSchema = type({ value: "string" });
+		const deviceTool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "browser",
+			label: "Browser",
+			description: "Mounted device tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				executedParams.push(params);
+				return {
+					content: [{ type: "text", text: `device: ${params.value}` }],
+					details: { value: params.value },
+				};
+			},
+		};
+		// The device is NOT in the advertised tool set.
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [] };
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{ type: "toolCall", id: "tool-1", name: "browser", arguments: { value: "open" } },
+						{ type: "toolCall", id: "tool-2", name: "nonexistent", arguments: {} },
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			resolveFallbackTool: name => (name === "browser" ? deviceTool : undefined),
+		};
+
+		const messages = await agentLoop(
+			[createUserMessage("use the device")],
+			context,
+			config,
+			undefined,
+			mock.stream,
+		).result();
+
+		expect(executedParams).toEqual([{ value: "open" }]);
+		const results = messages.filter((m): m is ToolResultMessage => m.role === "toolResult");
+		const deviceResult = results.find(r => r.toolCallId === "tool-1");
+		expect(deviceResult?.isError).toBeFalsy();
+		expect(deviceResult?.content).toContainEqual({ type: "text", text: "device: open" });
+		// Names the resolver does not know keep the "not found" failure.
+		const missingResult = results.find(r => r.toolCallId === "tool-2");
+		expect(missingResult?.isError).toBe(true);
+		expect(missingResult?.content.some(c => c.type === "text" && c.text.includes("Tool nonexistent not found"))).toBe(
+			true,
+		);
 	});
 
 	it("injects and strips intent when intent tracing is enabled", async () => {
@@ -2448,6 +2505,1011 @@ it("recovers from provider whitespace loop recovery without duplicating assistan
 	expect(updates.length).toBeGreaterThan(0);
 });
 
+describe("agentLoop event-driven steering watch", () => {
+	it("wakes on a steering event instead of polling for it", async () => {
+		const executed: string[] = [];
+		let steerReady = false;
+		let drained = false;
+		let waitCalls = 0;
+		let wake: (() => void) | undefined;
+
+		const toolSchema = type({ value: "string" });
+		const tool: AgentTool<typeof toolSchema> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			concurrency: "exclusive",
+			async execute(_toolCallId, params) {
+				executed.push(params.value);
+				// Make a steer available and wake the watcher, the way a real queue
+				// does on enqueue. No timer is involved.
+				if (params.value === "first") {
+					steerReady = true;
+					wake?.();
+				}
+				return { content: [{ type: "text", text: `ok:${params.value}` }], details: { value: params.value } };
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "first" } },
+						{ type: "toolCall", id: "tool-2", name: "echo", arguments: { value: "second" } },
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			interruptMode: "immediate",
+			hasSteeringMessages: () => (steerReady && !drained ? { queued: true, source: "user" } : { queued: false }),
+			waitForSteeringMessages: async signal => {
+				waitCalls++;
+				if (steerReady) return;
+				const waiter = Promise.withResolvers<void>();
+				wake = waiter.resolve;
+				signal?.addEventListener("abort", () => waiter.resolve(), { once: true });
+				await waiter.promise;
+			},
+			getSteeringMessages: async () => {
+				if (steerReady && !drained) {
+					drained = true;
+					return [createUserMessage("interrupt")];
+				}
+				return [];
+			},
+		};
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+
+		// The watcher woke on the event and stopped the batch before the second call.
+		expect(executed).toEqual(["first"]);
+		expect(waitCalls).toBeGreaterThan(0);
+	});
+
+	it("does not miss steering queued between the state check and subscription", async () => {
+		const executed: string[] = [];
+		let steerReady = false;
+		let waitTimedOut = false;
+		const firstToolStarted = Promise.withResolvers<void>();
+		const checkStarted = Promise.withResolvers<void>();
+		const checkRelease = Promise.withResolvers<void>();
+		let checking = false;
+		let drained = false;
+		let wake: (() => void) | undefined;
+		const toolSchema = type({ value: "string" });
+		const tool: AgentTool<typeof toolSchema> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			concurrency: "exclusive",
+			interruptible: true,
+			async execute(_toolCallId, params, signal) {
+				executed.push(params.value);
+				if (params.value === "first") {
+					firstToolStarted.resolve();
+					const waiter = Promise.withResolvers<void>();
+					const timer = setTimeout(() => {
+						waitTimedOut = true;
+						waiter.resolve();
+					}, 500);
+					signal?.addEventListener(
+						"abort",
+						() => {
+							clearTimeout(timer);
+							waiter.resolve();
+						},
+						{ once: true },
+					);
+					await waiter.promise;
+				}
+				return { content: [{ type: "text", text: `ok:${params.value}` }], details: { value: params.value } };
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "first" } },
+						{ type: "toolCall", id: "tool-2", name: "echo", arguments: { value: "second" } },
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			interruptMode: "immediate",
+			hasSteeringMessages: async () => {
+				const queued = steerReady && !drained;
+				if (!checking) {
+					checking = true;
+					checkStarted.resolve();
+					await checkRelease.promise;
+				}
+				return queued ? { queued: true, source: "user" } : { queued: false };
+			},
+			waitForSteeringMessages: async signal => {
+				// This queue emits future transitions only. Queue state belongs to
+				// hasSteeringMessages, so subscribing late cannot recover this edge.
+				const waiter = Promise.withResolvers<void>();
+				wake = waiter.resolve;
+				signal?.addEventListener("abort", () => waiter.resolve(), { once: true });
+				await waiter.promise;
+			},
+			getSteeringMessages: async () => {
+				if (!steerReady || drained) return [];
+				drained = true;
+				return [createUserMessage("arrived on the edge")];
+			},
+		};
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		const completion = (async () => {
+			for await (const _event of stream) {
+				// drain
+			}
+		})();
+		await Promise.all([firstToolStarted.promise, checkStarted.promise]);
+		steerReady = true;
+		wake?.();
+		checkRelease.resolve();
+		await completion;
+
+		expect(waitTimedOut).toBe(false);
+		expect(drained).toBe(true);
+		expect(executed).not.toContain("second");
+	});
+
+	it("completes cleanly when canceling a rejecting wait after queued steering", async () => {
+		let drained = false;
+		let watchCanceled = false;
+		const unhandledRejections: unknown[] = [];
+		const captureUnhandledRejection = (reason: unknown) => unhandledRejections.push(reason);
+		process.on("unhandledRejection", captureUnhandledRejection);
+		const toolSchema = type({ value: "string" });
+		const tool: AgentTool<typeof toolSchema> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			concurrency: "exclusive",
+			async execute(_toolCallId, params) {
+				return { content: [{ type: "text", text: `ok:${params.value}` }], details: { value: params.value } };
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "only" } }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			interruptMode: "immediate",
+			hasSteeringMessages: () => (drained ? { queued: false } : { queued: true, source: "user" }),
+			waitForSteeringMessages: signal => {
+				const waiter = Promise.withResolvers<void>();
+				signal?.addEventListener(
+					"abort",
+					() => {
+						watchCanceled = true;
+						waiter.reject(new Error("watch canceled"));
+					},
+					{ once: true },
+				);
+				return waiter.promise;
+			},
+			getSteeringMessages: async () => {
+				if (drained) return [];
+				drained = true;
+				return [createUserMessage("already queued")];
+			},
+		};
+
+		try {
+			const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+			for await (const _event of stream) {
+				// drain
+			}
+			await Bun.sleep(0);
+
+			expect(drained).toBe(true);
+			expect(watchCanceled).toBe(true);
+			expect(unhandledRejections).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", captureUnhandledRejection);
+		}
+	});
+
+	it("does not hang teardown when the steering wait ignores its signal", async () => {
+		const executed: string[] = [];
+		const toolSchema = type({ value: "string" });
+		const tool: AgentTool<typeof toolSchema> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			concurrency: "exclusive",
+			async execute(_toolCallId, params) {
+				executed.push(params.value);
+				return { content: [{ type: "text", text: `ok:${params.value}` }], details: { value: params.value } };
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "only" } }] },
+				{ content: ["done"] },
+			],
+		});
+
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			interruptMode: "immediate",
+			hasSteeringMessages: () => ({ queued: false }),
+			// Never settles and never observes the signal: a shape an integration can
+			// legitimately write, since the contract does not require honouring it.
+			waitForSteeringMessages: () => Promise.withResolvers<void>().promise,
+			getSteeringMessages: async () => [],
+		};
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+		expect(executed).toEqual(["only"]);
+	});
+
+	it("uses the IRC timer without polling the steering queue", async () => {
+		const secondIrcCheck = Promise.withResolvers<void>();
+		let steeringChecks = 0;
+		let ircChecks = 0;
+		let steeringChecksAtIrcTimer: number | undefined;
+		const toolSchema = type({ value: "string" });
+		const tool: AgentTool<typeof toolSchema> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			concurrency: "exclusive",
+			async execute(_toolCallId, params) {
+				await secondIrcCheck.promise;
+				return { content: [{ type: "text", text: `ok:${params.value}` }], details: { value: params.value } };
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "only" } }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			interruptMode: "immediate",
+			hasSteeringMessages: () => {
+				steeringChecks++;
+				return false;
+			},
+			waitForSteeringMessages: () => Promise.withResolvers<void>().promise,
+			hasIrcInterrupts: () => {
+				ircChecks++;
+				if (ircChecks === 2) {
+					steeringChecksAtIrcTimer = steeringChecks;
+					secondIrcCheck.resolve();
+				}
+				return false;
+			},
+			getSteeringMessages: async () => [],
+		};
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+
+		expect(steeringChecksAtIrcTimer).toBe(1);
+		expect(ircChecks).toBeGreaterThanOrEqual(2);
+	});
+
+	it("does not hang teardown when the steering check ignores cancellation", async () => {
+		const executed: string[] = [];
+		const check = Promise.withResolvers<boolean>();
+		const checkStarted = Promise.withResolvers<void>();
+		let checkCalls = 0;
+		const toolSchema = type({ value: "string" });
+		const tool: AgentTool<typeof toolSchema> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			concurrency: "exclusive",
+			async execute(_toolCallId, params) {
+				await checkStarted.promise;
+				executed.push(params.value);
+				return { content: [{ type: "text", text: `ok:${params.value}` }], details: { value: params.value } };
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "only" } }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			interruptMode: "immediate",
+			hasSteeringMessages: () => {
+				checkCalls++;
+				if (checkCalls !== 1) return false;
+				checkStarted.resolve();
+				return check.promise;
+			},
+			waitForSteeringMessages: () => Promise.withResolvers<void>().promise,
+			getSteeringMessages: async () => [],
+		};
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		const drain = (async () => {
+			for await (const _event of stream) {
+				// drain
+			}
+		})();
+		const completed = await Promise.race([drain.then(() => true), Bun.sleep(1000).then(() => false)]);
+		try {
+			expect(completed).toBe(true);
+			expect(executed).toEqual(["only"]);
+		} finally {
+			check.resolve(false);
+			await drain;
+		}
+	});
+
+	it("stops watching after a steering subscription rejects", async () => {
+		let waitCalls = 0;
+		const toolSchema = type({ value: "string" });
+		const tool: AgentTool<typeof toolSchema> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			concurrency: "exclusive",
+			async execute(_toolCallId, params) {
+				await Bun.sleep(0);
+				return { content: [{ type: "text", text: `ok:${params.value}` }], details: { value: params.value } };
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "only" } }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			interruptMode: "immediate",
+			hasSteeringMessages: () => ({ queued: false }),
+			waitForSteeringMessages: () => {
+				waitCalls++;
+				return Promise.reject(new Error("subscription unavailable"));
+			},
+			getSteeringMessages: async () => [],
+		};
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+
+		expect(waitCalls).toBe(1);
+	});
+});
+
+describe("agentLoop pre-model-call gate", () => {
+	const echoToolSchema = type({ value: "string" });
+
+	function echoTool(executed: string[]): AgentTool<typeof echoToolSchema> {
+		const toolSchema = echoToolSchema;
+		return {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			concurrency: "exclusive",
+			async execute(_toolCallId, params) {
+				executed.push(params.value);
+				return { content: [{ type: "text", text: `ok:${params.value}` }], details: { value: params.value } };
+			},
+		};
+	}
+
+	it("gates the provider-bound context before opening the initial turn", async () => {
+		const context: AgentContext = { systemPrompt: ["stale"], messages: [], tools: [] };
+		const queued = createUserMessage("queued");
+		const providerMessage = createUserMessage("provider") as Message;
+		const mock = createMockModel({ responses: [{ content: ["should not be reached"] }] });
+		let pending = true;
+		let gatedContext: Context | undefined;
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			getSteeringMessages: async () => {
+				if (!pending) return [];
+				pending = false;
+				return [queued];
+			},
+			syncContextBeforeModelCall: current => {
+				current.systemPrompt = ["fresh"];
+			},
+			transformProviderContext: providerContext => ({
+				...providerContext,
+				systemPrompt: [...(providerContext.systemPrompt ?? []), "provider"],
+				messages: [...providerContext.messages, providerMessage],
+			}),
+			beforeModelCall: current => {
+				gatedContext = current;
+				return { stop: true, reason: "over budget" };
+			},
+		};
+
+		const prompts = [createUserMessage("start")];
+		const events: AgentEvent[] = [];
+		const stream = agentLoop(prompts, context, config, undefined, mock.stream);
+		for await (const event of stream) {
+			events.push(event);
+		}
+
+		expect(gatedContext?.systemPrompt).toEqual(["fresh", "provider"]);
+		expect(gatedContext?.messages.at(-1)).toEqual(providerMessage);
+		expect(prompts).toHaveLength(1);
+		expect(events.filter(event => event.type === "message_end")).toHaveLength(2);
+		expect(events.filter(event => event.type === "turn_start")).toHaveLength(0);
+		expect(events.filter(event => event.type === "turn_end")).toHaveLength(0);
+	});
+
+	it("balances the synthetic error turn when the gate throws", async () => {
+		const mock = createMockModel({ responses: [{ content: ["should not be reached"] }] });
+		const agent = new Agent({ streamFn: mock.stream });
+		agent.setBeforeModelCall(() => {
+			throw new Error("gate failed");
+		});
+		const events: AgentEvent[] = [];
+		const unsubscribe = agent.subscribe(event => events.push(event));
+
+		await agent.prompt("start");
+		unsubscribe();
+
+		expect(agent.state.messages.some(message => message.role === "user")).toBe(true);
+		expect(events.filter(event => event.type === "turn_start")).toHaveLength(1);
+		expect(events.filter(event => event.type === "turn_end")).toHaveLength(1);
+		const turnStartIndex = events.findIndex(event => event.type === "turn_start");
+		const userStartIndex = events.findIndex(event => event.type === "message_start" && event.message.role === "user");
+		expect(turnStartIndex).toBeLessThan(userStartIndex);
+	});
+
+	it("stops before the provider call and closes the open turn", async () => {
+		const executed: string[] = [];
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [echoTool(executed)] };
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "first" } }] },
+				// A second provider call would consume this; the gate must prevent it.
+				{ content: ["should not be reached"] },
+			],
+		});
+
+		let calls = 0;
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			// Allow the first request, refuse the one that would follow the tool call.
+			beforeModelCall: () => (++calls > 1 ? ({ stop: true, reason: "over budget" } as const) : undefined),
+		};
+
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const event of stream) {
+			events.push(event);
+		}
+
+		// The tool ran, then the gate stopped the follow-up request.
+		expect(executed).toEqual(["first"]);
+		expect(calls).toBe(2);
+		expect(events.some(e => e.type === "agent_end")).toBe(true);
+
+		// Every started turn is closed, so consumers pairing the events are not
+		// left mid-turn by the stop.
+		const starts = events.filter(e => e.type === "turn_start").length;
+		const ends = events.filter(e => e.type === "turn_end").length;
+		expect(ends).toBe(starts);
+	});
+
+	it("returns a hard tool choice when the gate stops before serving it", async () => {
+		const mock = createMockModel({ responses: [{ content: ["done"] }] });
+		let toolChoiceCalls = 0;
+		let gateCalls = 0;
+		const agent = new Agent({
+			streamFn: mock.stream,
+			getToolChoice: () => {
+				toolChoiceCalls++;
+				return "none";
+			},
+		});
+		agent.setBeforeModelCall(() => (++gateCalls === 1 ? { stop: true, reason: "over budget" } : undefined));
+
+		await agent.prompt("stop");
+		await agent.prompt("continue");
+
+		expect(toolChoiceCalls).toBe(1);
+		expect(mock.calls).toHaveLength(1);
+		expect(mock.calls[0]?.options?.toolChoice).toBe("none");
+	});
+
+	it("discards a deferred tool choice when its tool is no longer active", async () => {
+		const mock = createMockModel({ responses: [{ content: ["done"] }] });
+		let toolChoiceCalls = 0;
+		let gateCalls = 0;
+		let unavailableToolChoices = 0;
+		const agent = new Agent({
+			streamFn: mock.stream,
+			getToolChoice: () => {
+				toolChoiceCalls++;
+				return toolChoiceCalls === 1 ? { type: "tool", name: "echo" } : "none";
+			},
+			onToolChoiceUnavailable: () => {
+				unavailableToolChoices++;
+			},
+		});
+		agent.setTools([echoTool([])]);
+		agent.setBeforeModelCall(() => (++gateCalls === 1 ? { stop: true, reason: "over budget" } : undefined));
+
+		await agent.prompt("stop");
+		agent.setTools([]);
+		await agent.prompt("continue");
+
+		expect(toolChoiceCalls).toBe(2);
+		expect(unavailableToolChoices).toBe(1);
+		expect(mock.calls).toHaveLength(1);
+		expect(mock.calls[0]?.options?.toolChoice).toBe("none");
+	});
+
+	it("clears a deferred tool choice when the agent resets", async () => {
+		const mock = createMockModel({ responses: [{ content: ["done"] }] });
+		let toolChoiceCalls = 0;
+		let gateCalls = 0;
+		const agent = new Agent({
+			streamFn: mock.stream,
+			getToolChoice: () => {
+				toolChoiceCalls++;
+				return toolChoiceCalls === 1 ? "none" : "auto";
+			},
+		});
+		agent.setBeforeModelCall(() => (++gateCalls === 1 ? { stop: true, reason: "over budget" } : undefined));
+
+		await agent.prompt("stop");
+		agent.reset();
+		await agent.prompt("continue");
+
+		expect(toolChoiceCalls).toBe(2);
+		expect(mock.calls).toHaveLength(1);
+		expect(mock.calls[0]?.options?.toolChoice).toBe("auto");
+	});
+
+	it("clears a deferred tool choice with all queued session state", async () => {
+		const mock = createMockModel({ responses: [{ content: ["done"] }] });
+		let toolChoiceCalls = 0;
+		let gateCalls = 0;
+		const agent = new Agent({
+			streamFn: mock.stream,
+			getToolChoice: () => {
+				toolChoiceCalls++;
+				return toolChoiceCalls === 1 ? "none" : "auto";
+			},
+		});
+		agent.setBeforeModelCall(() => (++gateCalls === 1 ? { stop: true, reason: "over budget" } : undefined));
+
+		await agent.prompt("stop");
+		agent.clearAllQueues();
+		await agent.prompt("new session");
+
+		expect(toolChoiceCalls).toBe(2);
+		expect(mock.calls).toHaveLength(1);
+		expect(mock.calls[0]?.options?.toolChoice).toBe("auto");
+	});
+
+	it("leaves tool-choice rejection to a concurrent abort", async () => {
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [] };
+		const mock = createMockModel({ responses: [{ content: ["should not be reached"] }] });
+		const gateEntered = Promise.withResolvers<void>();
+		const gateAborted = Promise.withResolvers<void>();
+		const controller = new AbortController();
+		let rejectedToolChoices = 0;
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			getToolChoice: () => "none",
+			onToolChoiceRejected: () => {
+				rejectedToolChoices++;
+			},
+			beforeModelCall: async (_context, signal) => {
+				if (!signal) throw new Error("missing gate abort signal");
+				gateEntered.resolve();
+				const waiter = Promise.withResolvers<void>();
+				signal.addEventListener(
+					"abort",
+					() => {
+						gateAborted.resolve();
+						waiter.resolve();
+					},
+					{ once: true },
+				);
+				await waiter.promise;
+				return { stop: true, reason: "over budget" };
+			},
+		};
+
+		const stream = agentLoop([createUserMessage("start")], context, config, controller.signal, mock.stream);
+		const drain = (async () => {
+			for await (const _event of stream) {
+				// drain
+			}
+		})();
+		await gateEntered.promise;
+		controller.abort();
+		await drain;
+
+		await gateAborted.promise;
+		expect(rejectedToolChoices).toBe(0);
+		expect(mock.calls).toHaveLength(0);
+	});
+
+	it("passes the run abort signal to agent pre-model hooks", async () => {
+		const mock = createMockModel({ responses: [{ content: ["should not be reached"] }] });
+		const gateEntered = Promise.withResolvers<void>();
+		const gateAborted = Promise.withResolvers<void>();
+		const agent = new Agent({ streamFn: mock.stream });
+		agent.setBeforeModelCall(async (_context, signal) => {
+			gateEntered.resolve();
+			if (!signal) throw new Error("missing gate abort signal");
+			const waiter = Promise.withResolvers<void>();
+			signal.addEventListener(
+				"abort",
+				() => {
+					gateAborted.resolve();
+					waiter.resolve();
+				},
+				{ once: true },
+			);
+			// No return: a pure-observer gate may resolve void and still proceed.
+			await waiter.promise;
+		});
+
+		const prompt = agent.prompt("start");
+		await gateEntered.promise;
+		agent.abort();
+		await prompt;
+		await gateAborted.promise;
+
+		expect(mock.calls).toHaveLength(0);
+	});
+
+	it("opens an error turn before accepted inputs when a tool-choice rejection hook throws", async () => {
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [] };
+		const mock = createMockModel({ responses: [{ content: ["should not be reached"] }] });
+		const softState: NonNullable<AgentLoopConfig["softToolRequirementState"]> = { escalations: 0 };
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			getToolChoice: () => ({
+				soft: true,
+				id: "preview-1",
+				toolName: "resolve",
+				reminder: [createUserMessage("resolve")],
+			}),
+			softToolRequirementState: softState,
+			onToolChoiceRejected: () => {
+				throw new Error("rejection failed");
+			},
+			beforeModelCall: () => ({ stop: true, reason: "over budget" }),
+		};
+		const events: AgentEvent[] = [];
+		let failure: unknown;
+
+		try {
+			const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+			for await (const event of stream) events.push(event);
+		} catch (error) {
+			failure = error;
+		}
+
+		expect(failure).toBeInstanceOf(Error);
+		expect((failure as Error).message).toBe("rejection failed");
+		expect(events.some(event => event.type === "message_end" && event.message.role === "user")).toBe(true);
+		const turnStartIndex = events.findIndex(event => event.type === "turn_start");
+		const userStartIndex = events.findIndex(event => event.type === "message_start" && event.message.role === "user");
+		expect(turnStartIndex).toBeLessThan(userStartIndex);
+		expect(softState.id).toBeUndefined();
+		expect(softState.forcedToolChoice).toBeUndefined();
+		expect(softState.escalations).toBe(0);
+		expect(mock.calls).toHaveLength(0);
+	});
+
+	it("does not return a hard tool choice already served before a later gate stop", async () => {
+		const executed: string[] = [];
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "first" } }] },
+				{ content: ["done"] },
+			],
+		});
+		let toolChoiceCalls = 0;
+		let gateCalls = 0;
+		const agent = new Agent({
+			streamFn: mock.stream,
+			getToolChoice: () => {
+				toolChoiceCalls++;
+				return toolChoiceCalls === 1 ? { type: "tool", name: "echo" } : undefined;
+			},
+		});
+		agent.setTools([echoTool(executed)]);
+		agent.setBeforeModelCall(() => (++gateCalls === 2 ? { stop: true, reason: "over budget" } : undefined));
+
+		await agent.prompt("run");
+		await agent.prompt("continue");
+
+		expect(executed).toEqual(["first"]);
+		expect(toolChoiceCalls).toBe(3);
+		expect(mock.calls).toHaveLength(2);
+		expect(mock.calls[0]?.options?.toolChoice).toEqual({ type: "tool", name: "echo" });
+		expect(mock.calls[1]?.options?.toolChoice).toBeUndefined();
+	});
+	it("gates a soft reminder once in the final provider context", async () => {
+		const reminder = createUserMessage("resolve the pending preview");
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [] };
+		const mock = createMockModel({ responses: [{ content: ["done"], stopReason: "aborted" }] });
+		let gatedContext: Context | undefined;
+		let gateCalls = 0;
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			getToolChoice: () => ({
+				soft: true,
+				id: "preview-1",
+				toolName: "resolve",
+				reminder: [reminder],
+			}),
+			beforeModelCall: providerContext => {
+				gateCalls++;
+				gatedContext = providerContext;
+				return undefined;
+			},
+		};
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+
+		expect(gateCalls).toBe(1);
+		expect(gatedContext?.messages).toContain(reminder);
+		expect(mock.calls).toHaveLength(1);
+	});
+
+	it("retains a soft reminder escalation when a gate stops the forced call", async () => {
+		const reminder = createUserMessage("resolve the pending preview");
+		const executed: string[] = [];
+		let pending = true;
+		const tool = echoTool(executed);
+		const execute = tool.execute.bind(tool);
+		tool.execute = async (...args) => {
+			pending = false;
+			return execute(...args);
+		};
+		const mock = createMockModel({
+			responses: [
+				{ content: ["not yet"] },
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "resolved" } }] },
+				{ content: ["done"] },
+			],
+		});
+		let gateCalls = 0;
+		const agent = new Agent({
+			streamFn: mock.stream,
+			getToolChoice: () =>
+				pending
+					? {
+							soft: true,
+							id: "preview-1",
+							toolName: "echo",
+							reminder: [reminder],
+						}
+					: undefined,
+		});
+		agent.setTools([tool]);
+		agent.setBeforeModelCall(() => (++gateCalls === 2 ? { stop: true, reason: "over budget" } : undefined));
+
+		await agent.prompt("start");
+		await agent.prompt("continue");
+
+		expect(mock.calls).toHaveLength(3);
+		expect(mock.calls[1]?.options?.toolChoice).toEqual({ type: "tool", name: "echo" });
+		expect(executed).toEqual(["resolved"]);
+		expect(agent.state.messages.filter(message => message === reminder)).toHaveLength(1);
+	});
+
+	it("clears retained soft-requirement state with all queued session state", async () => {
+		const reminder = createUserMessage("resolve the pending preview");
+		const executed: string[] = [];
+		let pending = true;
+		const tool = echoTool(executed);
+		const execute = tool.execute.bind(tool);
+		tool.execute = async (...args) => {
+			pending = false;
+			return execute(...args);
+		};
+		const mock = createMockModel({
+			responses: [
+				{ content: ["not yet"] },
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "resolved" } }] },
+				{ content: ["done"] },
+			],
+		});
+		let gateCalls = 0;
+		const agent = new Agent({
+			streamFn: mock.stream,
+			getToolChoice: () =>
+				pending
+					? {
+							soft: true,
+							id: "preview-1",
+							toolName: "echo",
+							reminder: [reminder],
+						}
+					: undefined,
+		});
+		agent.setTools([tool]);
+		agent.setBeforeModelCall(() => (++gateCalls === 2 ? { stop: true, reason: "over budget" } : undefined));
+
+		await agent.prompt("start");
+		agent.clearAllQueues();
+		await agent.prompt("continue");
+
+		// The cleared lifecycle treats the still-pending requirement as new: the
+		// reminder is re-injected and the discarded run's earned escalation is
+		// not applied to the next request.
+		expect(mock.calls).toHaveLength(3);
+		expect(mock.calls[1]?.options?.toolChoice).toBeUndefined();
+		expect(executed).toEqual(["resolved"]);
+		expect(agent.state.messages.filter(message => message === reminder)).toHaveLength(2);
+	});
+
+	it("closes an open Harmony retry turn when the gate stops the retry", async () => {
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [] };
+		const mock = createMockModel({
+			provider: "openai-codex",
+			responses: [{ content: ["Some prose. analysis to=functions.edit code"] }],
+		});
+		const retryModel = { ...mock.model, id: "retry-model" };
+		let gateCalls = 0;
+		let turnEndCalls = 0;
+		let rejectedToolChoices = 0;
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			getModel: () => (gateCalls === 0 ? mock.model : retryModel),
+			convertToLlm: identityConverter,
+			beforeModelCall: () => (++gateCalls > 1 ? { stop: true, reason: "over budget" } : undefined),
+			onTurnEnd: () => {
+				turnEndCalls++;
+			},
+			onToolChoiceRejected: () => {
+				rejectedToolChoices++;
+			},
+		};
+
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const event of stream) {
+			events.push(event);
+		}
+		const messages = await stream.result();
+
+		expect(mock.calls).toHaveLength(1);
+		expect(events.filter(event => event.type === "turn_start")).toHaveLength(1);
+		expect(events.filter(event => event.type === "turn_end")).toHaveLength(1);
+		expect(turnEndCalls).toBe(1);
+		expect(rejectedToolChoices).toBe(0);
+		const final = messages.at(-1);
+		expect(final?.role).toBe("assistant");
+		if (final?.role !== "assistant") throw new Error("expected stopped assistant message");
+		expect(final.stopReason).toBe("aborted");
+		expect(final.errorMessage).toBe("over budget");
+		expect(final.model).toBe(retryModel.id);
+	});
+
+	it("closes an open Harmony retry turn when abort lands inside the retry gate", async () => {
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [] };
+		const mock = createMockModel({
+			provider: "openai-codex",
+			responses: [{ content: ["Some prose. analysis to=functions.edit code"] }],
+		});
+		const gateEntered = Promise.withResolvers<void>();
+		const controller = new AbortController();
+		let gateCalls = 0;
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			beforeModelCall: async (_context, signal) => {
+				if (++gateCalls === 1) return undefined;
+				if (!signal) throw new Error("missing gate abort signal");
+				gateEntered.resolve();
+				const waiter = Promise.withResolvers<void>();
+				signal.addEventListener("abort", () => waiter.resolve(), { once: true });
+				await waiter.promise;
+				return undefined;
+			},
+		};
+
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("start")], context, config, controller.signal, mock.stream);
+		const drain = (async () => {
+			for await (const event of stream) events.push(event);
+		})();
+		await gateEntered.promise;
+		controller.abort();
+		await drain;
+
+		expect(mock.calls).toHaveLength(1);
+		expect(events.filter(event => event.type === "turn_start")).toHaveLength(1);
+		expect(events.filter(event => event.type === "turn_end")).toHaveLength(1);
+	});
+
+	it("proceeds when the gate returns undefined", async () => {
+		const executed: string[] = [];
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [echoTool(executed)] };
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "only" } }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			beforeModelCall: () => undefined,
+		};
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+
+		expect(executed).toEqual(["only"]);
+	});
+});
+
 describe("agentLoop useless-flag propagation", () => {
 	async function runProbe(toolReturn: unknown): Promise<ToolResultMessage> {
 		const toolSchema = type({});
@@ -2690,6 +3752,141 @@ describe("agentLoopContinue with AgentMessage", () => {
 
 		expect(executed).toEqual([123]);
 	});
+	it("applies beforeToolCall args replacement to execution, events, and the assistant message", async () => {
+		const toolSchema = type({ value: "string" });
+		const executed: string[] = [];
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				executed.push(params.value);
+				return {
+					content: [{ type: "text", text: `echoed: ${params.value}` }],
+					details: { value: params.value },
+				};
+			},
+		};
+
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "original" } }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			beforeToolCall: async () => ({ args: { value: "revised" } }),
+		};
+
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("echo something")], context, config, undefined, mock.stream);
+		for await (const event of stream) {
+			events.push(event);
+		}
+
+		// The revision is the single source of truth: execute, the start event,
+		// and the persisted assistant message tool call all carry it.
+		expect(executed).toEqual(["revised"]);
+		const toolStart = events.find(e => e.type === "tool_execution_start");
+		expect(toolStart?.type === "tool_execution_start" && toolStart.args).toEqual({ value: "revised" });
+		const messages = await stream.result();
+		const assistant = messages.find(m => m.role === "assistant");
+		const toolCallBlock =
+			assistant?.role === "assistant" ? assistant.content.find(c => c.type === "toolCall") : undefined;
+		expect(toolCallBlock?.type === "toolCall" && toolCallBlock.arguments).toEqual({ value: "revised" });
+	});
+
+	it("resolves functional concurrency from beforeToolCall-revised args", async () => {
+		const toolSchema = type({ value: "string" });
+		const concurrencySeen: unknown[] = [];
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			concurrency: args => {
+				concurrencySeen.push({ ...(args as Record<string, unknown>) });
+				return (args as { value: string }).value === "exclusive" ? "exclusive" : "shared";
+			},
+			async execute(_toolCallId, params) {
+				return {
+					content: [{ type: "text", text: `echoed: ${params.value}` }],
+					details: { value: params.value },
+				};
+			},
+		};
+
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "shared" } }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			beforeToolCall: async () => ({ args: { value: "exclusive" } }),
+		};
+
+		const stream = agentLoop([createUserMessage("echo something")], context, config, undefined, mock.stream);
+		for await (const _ of stream) {
+			// drain
+		}
+
+		// Scheduling resolves concurrency AFTER the hook revision, so an
+		// argument-dependent policy (e.g. bash pty => exclusive) sees the
+		// arguments the tool actually runs with.
+		expect(concurrencySeen).toEqual([{ value: "exclusive" }]);
+	});
+
+	it("rejects a beforeToolCall args replacement that fails schema validation", async () => {
+		const toolSchema = type({ value: "string" });
+		const executed: string[] = [];
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				executed.push(params.value);
+				return {
+					content: [{ type: "text", text: `echoed: ${params.value}` }],
+					details: { value: params.value },
+				};
+			},
+		};
+
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "hello" } }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			beforeToolCall: async () => ({ args: { bogus: 42 } }),
+		};
+
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("echo something")], context, config, undefined, mock.stream);
+		for await (const event of stream) {
+			events.push(event);
+		}
+
+		expect(executed).toEqual([]);
+		const toolEnd = events.find(e => e.type === "tool_execution_end");
+		expect(toolEnd?.type === "tool_execution_end" && toolEnd.isError).toBe(true);
+	});
 
 	it("afterToolCall overrides content and isError on the emitted tool result", async () => {
 		const toolSchema = type({ value: "string" });
@@ -2753,6 +3950,54 @@ describe("agentLoopContinue with AgentMessage", () => {
 			expect(toolResultMessage.isError).toBe(true);
 			expect(toolResultMessage.content).toEqual([{ type: "text", text: "rewritten" }]);
 		}
+	});
+
+	it("fails closed when afterToolCall returns malformed computer provider metadata", async () => {
+		const toolSchema = type({});
+		const tool: AgentTool<typeof toolSchema> = {
+			name: "probe",
+			label: "Probe",
+			description: "Probe tool",
+			parameters: toolSchema,
+			async execute() {
+				return { content: [], details: {} };
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-metadata", name: "probe", arguments: {} }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			afterToolCall: async () =>
+				({
+					providerMetadata: {
+						type: "computer",
+						screenshot: {
+							type: "computer_screenshot",
+							image_url: "data:image/png;base64,AAEC",
+							file_id: "file_conflicting_ref",
+						},
+						acknowledgedSafetyChecks: [{ id: 42 }],
+					},
+				}) as never,
+		};
+		const events: AgentEvent[] = [];
+		for await (const event of agentLoop([createUserMessage("go")], context, config, undefined, mock.stream)) {
+			events.push(event);
+		}
+		const result = events
+			.filter(event => event.type === "message_end" && event.message.role === "toolResult")
+			.map(event =>
+				event.type === "message_end" && event.message.role === "toolResult" ? event.message : undefined,
+			)[0];
+		expect(result?.isError).toBe(true);
+		expect(result?.providerMetadata).toBeUndefined();
+		expect(JSON.stringify(result?.content)).toContain("computer providerMetadata had an unsupported shape");
 	});
 
 	it("runs afterToolCall for a completed result even when the run aborts before the hook", async () => {

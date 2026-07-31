@@ -26,7 +26,8 @@
     "test": "bun test --parallel",
     "fix": "biome check --write --unsafe .",
     "fmt": "biome format --write .",
-    "generate": "bun run src/generate.ts --typescript-dir /tmp/pi-mono-source --count-per-type 4"
+    "generate": "bun run src/generate.ts --typescript-dir /tmp/pi-mono-source",
+    "edit-shapes": "bun run src/edit-shape-stats.ts"
   },
   "dependencies": {
     "@babel/generator": "catalog:",
@@ -35,8 +36,8 @@
     "@babel/types": "catalog:",
     "@oh-my-pi/hashline": "catalog:",
     "@oh-my-pi/pi-agent-core": "catalog:",
-    "@oh-my-pi/pi-coding-agent": "workspace:*",
-    "@oh-my-pi/pi-utils": "workspace:*",
+    "@oh-my-pi/pi-coding-agent": "catalog:",
+    "@oh-my-pi/pi-utils": "catalog:",
     "diff": "catalog:",
     "@oh-my-pi/pi-natives": "catalog:",
     "prettier": "catalog:",

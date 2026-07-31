@@ -632,8 +632,8 @@ export function getDocsRsCacheDir(): string {
 	return dirs.rootSubdir("webcache", "cache");
 }
 
-/**Get AutoQa db directory */
-export function getAutoQaDbDir(): string {
+/** Get the auto-QA grievances SQLite database path (~/.omp/autoqa.db; XDG: $XDG_DATA_HOME/omp/autoqa.db). */
+export function getAutoQaDbPath(): string {
 	return dirs.rootSubdir("autoqa.db", "data");
 }
 /**
@@ -719,6 +719,16 @@ export function getAutoresearchDbPath(encodedProject: string): string {
 /** Get the per-run artifact directory (~/.omp/autoresearch/<encoded-project>/runs/<runId>). */
 export function getAutoresearchRunDir(encodedProject: string, runId: number): string {
 	return path.join(getAutoresearchProjectDir(encodedProject), "runs", String(runId).padStart(4, "0"));
+}
+
+/** Get the security-analysis state directory (~/.omp/security). */
+export function getSecurityDir(): string {
+	return dirs.rootSubdir("security", "state");
+}
+
+/** Get one project's security-analysis state directory (~/.omp/security/<project-key>). */
+export function getSecurityProjectDir(projectKey: string): string {
+	return path.join(getSecurityDir(), projectKey);
 }
 
 // =============================================================================

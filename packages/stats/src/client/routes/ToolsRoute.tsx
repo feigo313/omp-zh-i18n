@@ -155,7 +155,7 @@ function buildToolCallSeries(
 }
 
 function ToolCallsChart({ series, timeRange }: { series: ToolTimeSeriesPoint[]; timeRange: TimeRange }) {
-	const { t, locale } = useTranslation();
+	const { t } = useTranslation();
 	const theme = useSystemTheme();
 	const chartTheme = CHART_THEMES[theme];
 	const meta = rangeMeta(timeRange, t);

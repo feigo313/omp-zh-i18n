@@ -55,7 +55,7 @@
 | `viewport` | `{ width: number; height: number; scale?: number }` | No | Requested viewport. For headless launch this becomes the initial viewport; for a page it is applied with `page.setViewport()`. `scale` maps to Puppeteer `deviceScaleFactor`. |
 | `wait_until` | `"load" \| "domcontentloaded" \| "networkidle0" \| "networkidle2"` | No | Navigation wait condition. Defaults to `"load"` where omitted, including `open` navigation and later `tab.goto(...)`. |
 | `dialogs` | `"accept" \| "dismiss"` | No | Installs a page `dialog` handler that auto-accepts or auto-dismisses dialogs. Omitted means no handler. |
-| `app` | `{ path?: string; cdp_url?: string; args?: string[]; target?: string }` | No | Selects browser kind. With no `app`, the cmux backend is used when a cmux socket is available (`CMUX_SOCKET_PATH`, gated by the `browser.cmux` setting / `PI_BROWSER_CMUX` override); otherwise the session `browser.headless` setting applies. `app.path` is resolved against the session cwd and used as the executable path for spawn/attach reuse. `app.cdp_url` connects to an existing CDP endpoint. `args` are appended only when spawning `app.path`. `target` is only used for attached/spawned-app page selection. |
+| `app` | `{ path?: string; cdp_url?: string; args?: string[]; target?: string }` | No | Selects browser kind. With no `app`, a configured `browser.cdpUrl` setting attaches to that endpoint; otherwise the cmux backend is used when a cmux socket is available (`CMUX_SOCKET_PATH`, gated by the `browser.cmux` setting / `PI_BROWSER_CMUX` override); otherwise the session `browser.headless` setting applies. `app.path` is resolved against the session cwd and used as the executable path for spawn/attach reuse. `app.cdp_url` connects to an existing CDP endpoint. `args` are appended only when spawning `app.path`. `target` is only used for attached/spawned-app page selection. |
 
 ### `action: "close"`
 
@@ -84,7 +84,7 @@ The tool returns one result per call; no streaming partial output is emitted fro
   - any other object/array becomes pretty JSON text (`JSON.stringify(value, null, 2)`); a value that is not structured-cloneable is dropped with a debug note.
   - helper side effects (`read`/`write`/`tree`/...) emit `status` events that surface as compact JSON text.
   - primitive `display(value)` (string/number/...) and `console.*` flow to the text channel, which the worker forwards as debug logs rather than tool content; `undefined` is ignored.
-- `tab.screenshot()` also appends text plus an image content item unless `silent: true`; `details.screenshots` records persisted screenshot metadata `{ dest, mimeType, bytes, width, height }`.
+- `tab.screenshot()` returns its saved path and appends text plus an image unless `silent: true`; `details.screenshots` records `{ dest, mimeType, bytes, width, height }`.
 - `run` `details` includes `action`, `name`, current `browser`/`url` when the tab exists, optional `screenshots`, and `details.result` containing only the concatenated text outputs. Combined run text is capped at the inline byte limit via `enforceInlineByteCap()`; over-cap text is saved as a session artifact (`saveBrowserOutputArtifact()`) and the capped text replaces it in content and `details.result`.
 
 ## Flow
@@ -92,6 +92,7 @@ The tool returns one result per call; no streaming partial output is emitted fro
 2. `open` resolves browser kind with `resolveBrowserKind()`:
    - `app.cdp_url` → `{ kind: "connected" }` after trimming trailing slashes.
    - `app.path` → `{ kind: "spawned" }` after resolving against session cwd.
+   - otherwise, a non-empty `browser.cdpUrl` setting → `{ kind: "connected" }` after trimming whitespace and trailing slashes.
    - otherwise, `resolveCmuxKind()` → `{ kind: "cmux", socketPath, password?, surface? }` when `CMUX_SOCKET_PATH` is set and cmux is enabled (`browser.cmux` setting, overridable by `PI_BROWSER_CMUX`).
    - otherwise → `{ kind: "headless", headless: session.settings.get("browser.headless") }`.
 3. `open` rejects reusing the same tab name across different browser kinds (`sameBrowserKind()`); callers must close first.
@@ -125,7 +126,7 @@ The tool returns one result per call; no streaming partial output is emitted fro
    - `tab.observe({ includeAll?, viewportOnly? })`
    - `tab.ariaSnapshot(selector?, { depth?, boxes? })`
    - `tab.ref(id)`
-   - `tab.screenshot({ selector?, fullPage?, save?, silent? })`
+   - `tab.screenshot({ selector?, fullPage?, silent? })`
    - `tab.extract(format = "markdown")`
    - `tab.click(selector)`
    - `tab.type(selector, text)`
@@ -151,7 +152,7 @@ The tool returns one result per call; no streaming partial output is emitted fro
 16a. `tab.ref(id)` resolves a `[ref=eN]` id from the latest `ariaSnapshot()` to a live `ElementHandle` via `resolveAriaRefHandle()` (`page.evaluateHandle` in the main world, walking the document + shadow roots for the matching `_ariaRef`), throwing if no element matches; it accepts a bare `eN` or a prefixed form. For inline selector use, `parseAriaRefSelector()` recognizes only the explicit `aria-ref=eN` / `aria-ref/eN` / `ariaref/eN` forms inside `tab.click/type/fill/waitFor/scrollIntoView` — a bare `eN` is intentionally rejected there so it does not collide with cmux's native observe ids. The cmux backend resolves the same explicit forms through its `aria-ref` `SelectorSpec` kind in `findElement`.
 17. `tab.goto()` clears the cached element ids before navigating. Any new `tab.observe()` also clears and rebuilds the cache.
 18. `tab.click()` uses a custom retry loop for `text/...` selectors to find an actionable visible match; other selectors use `page.locator(...).click()`. Interactive actions (`click`/`fill`/`type`/`press`/`scroll`/`drag`/`scrollIntoView`/`select`/`uploadFile`) and the `waitFor*` helpers run under a per-op deadline (`min(cellBudget − slack, ceiling)`) threaded into both the puppeteer `signal` and `.setTimeout()`, so a stalled helper aborts the CDP action and rejects with a named `tab.<op> timed out after <ms>ms` that leaves cell budget — never the opaque whole-cell timeout. `goto`/`evaluate` stay uncapped.
-19. `tab.screenshot()` captures either the whole page or a selector PNG, downsizes a copy for model output, chooses a persistence path, writes the image to disk, records metadata, and optionally emits text + image display entries.
+19. `tab.screenshot()` captures the page or selected element as PNG, resizes a model copy, saves under `browser.screenshotDir` or the OS temp directory, returns that path, records metadata, and optionally emits text plus image content.
 20. `display()` calls accumulate in an array. After code finishes, the worker posts `{ displays, returnValue, screenshots }`; `BrowserTool.#run()` appends the return value as trailing text content when not `undefined`.
 21. `close` releases one tab or all tabs via `releaseTab()` / `releaseAllTabs()`. Each tab aborts pending runs, asks the worker to close, waits up to `750` ms for a `closed` ack, terminates the worker, decrements browser refcount, and disposes the browser handle when refcount reaches zero.
 
@@ -163,7 +164,7 @@ The tool returns one result per call; no streaming partial output is emitted fro
 - **Browser kind**
   - **Headless**: launches local Chromium with Puppeteer, applies stealth patches, and creates a fresh page per tab.
   - **Spawned app (`app.path`)**: reuses an existing CDP-enabled process for that executable when possible; otherwise kills same-path processes, spawns the executable with remote debugging enabled, then attaches. No stealth patches are injected.
-  - **Connected browser (`app.cdp_url`)**: attaches to an already-running CDP endpoint. No process ownership; close only disconnects.
+  - **Connected browser (`app.cdp_url`, or the `browser.cdpUrl` setting when the call carries no `app`)**: attaches to an already-running CDP endpoint. No process ownership; close only disconnects.
   - **Cmux surface (`browser.cmux`)**: with no `app` and a cmux socket available (`CMUX_SOCKET_PATH`, enabled by the `browser.cmux` setting / `PI_BROWSER_CMUX` override), drives a cmux WKWebView surface over a unix-socket JSON-RPC client instead of Puppeteer. No Bun worker and no stealth patches; `open` opens a split (owning that surface), `run` executes via `runCmuxCode()`, and `close` issues `surface.close` for surfaces it owns (leaving the workspace's last surface open).
 - **Target selection for attached/spawned browsers**
   - With `app.target`, `pickElectronTarget()` returns the first page whose URL or title contains the case-insensitive substring.
@@ -176,9 +177,9 @@ The tool returns one result per call; no streaming partial output is emitted fro
   - `accept`/`dismiss`: page `dialog` events are handled automatically.
   - Changing dialog policy on an existing live tab forces tab recreation instead of mutating the worker in place.
 - **Screenshot persistence**
-  - `save` provided: persist full-resolution PNG at the resolved cwd-relative or absolute path.
   - `browser.screenshotDir` session setting set: persist full-resolution PNG under that directory with a timestamped filename.
-  - Neither set: persist the resized image to a temp-file path under the OS temp dir.
+  - Unset: persist to a temp-file path under the OS temp dir.
+  - `tab.screenshot()` returns the saved file path.
 
 ## Side Effects
 - Filesystem
@@ -199,7 +200,7 @@ The tool returns one result per call; no streaming partial output is emitted fro
 - Session state (transcript, memory, jobs, checkpoints, registries)
   - Browser handles are cached in a process-global `Map` keyed by browser kind in `packages/coding-agent/src/tools/browser/registry.ts`.
   - Tabs are cached in a process-global `Map` keyed by `name` in `packages/coding-agent/src/tools/browser/tab-supervisor.ts`.
-  - `run` captures session cwd and optional `browser.screenshotDir` for screenshot/save path resolution.
+  - `run` captures session cwd and optional `browser.screenshotDir` for screenshot path resolution.
   - `restartForModeChange()` drops only headless tabs.
 - User-visible prompts / interactive UI
   - None beyond normal tool output. Dialog auto-handling is invisible unless it fails and emits debug logs.

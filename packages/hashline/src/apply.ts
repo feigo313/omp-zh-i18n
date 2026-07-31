@@ -7,6 +7,8 @@
  * which absorbs common model mistakes where a payload restates unchanged range
  * boundaries or duplicates/drops structural closers.
  */
+
+import { resolveClipboardEdits } from "./clipboard";
 import {
 	afterInsertLandingShiftWarning,
 	ambiguousBoundaryEchoMessage,
@@ -15,7 +17,7 @@ import {
 	UNRESOLVED_BLOCK_INTERNAL,
 } from "./messages";
 import { cloneCursor } from "./tokenizer";
-import type { Anchor, ApplyResult, Cursor, Edit } from "./types";
+import type { Anchor, ApplyResult, Clipboard, Cursor, Edit } from "./types";
 
 type LineOrigin = "original" | "insert" | "replacement";
 
@@ -1221,24 +1223,43 @@ function repairAfterInsertLandings(
 	return { edits: out ?? edits, warnings };
 }
 
+/** Optional knobs for {@link applyEdits}. */
+export interface ApplyEditsOptions {
+	/**
+	 * Clipboard register filled by `cut` edits and read by `paste` edits.
+	 * Thread one register through every section of a batch to move content
+	 * across files; omitted, the call gets a private register.
+	 */
+	clipboard?: Clipboard;
+	/** `PASTE` with an empty register: `throw` (default) or `drop` (streaming previews). */
+	onEmptyPaste?: "throw" | "drop";
+}
+
 /**
  * Apply a parsed list of edits to a text body. Pure function — no I/O.
  *
  * Returns the post-edit text and the first changed line number (1-indexed).
  * Throws if an anchor is out of bounds.
  */
-export function applyEdits(text: string, edits: readonly Edit[]): ApplyResult {
+export function applyEdits(text: string, edits: readonly Edit[], options: ApplyEditsOptions = {}): ApplyResult {
 	if (edits.length === 0) return { text, firstChangedLine: undefined };
+
+	const fileLines = text.split("\n");
+
+	// Clipboard pre-pass: capture `cut` ranges from the original lines and
+	// expand `paste` edits into plain inserts in authored order.
+	const concrete = resolveClipboardEdits(edits, fileLines, options.clipboard ?? {}, {
+		...(options.onEmptyPaste === undefined ? {} : { onEmptyPaste: options.onEmptyPaste }),
+	});
 
 	// Block edits are deferred until `resolveBlockEdits` expands them into
 	// concrete inserts + deletes. Reaching the applier with one still present
 	// is an internal wiring bug, not authored-input error.
-	for (const edit of edits) {
+	for (const edit of concrete) {
 		if (edit.kind === "block") throw new Error(UNRESOLVED_BLOCK_INTERNAL);
 	}
-	const appliedEdits = edits as readonly AppliedEdit[];
+	const appliedEdits = concrete as readonly AppliedEdit[];
 
-	const fileLines = text.split("\n");
 	const lineOrigins: LineOrigin[] = fileLines.map(() => "original");
 
 	let firstChangedLine: number | undefined;

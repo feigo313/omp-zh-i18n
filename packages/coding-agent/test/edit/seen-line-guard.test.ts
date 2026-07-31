@@ -262,7 +262,7 @@ describe("read → edit seen-line guard", () => {
 		expect(seen?.has(1122)).toBe(true);
 		await executeHashlineSingle(
 			execOptions(
-				`[src/main.c#${tag}]\nINS.POST 1122:\n+\tbeep_3k8hz_on();\n+\tk_sleep(K_MSEC(300));\n+\tbeep_3k8hz_off();\nDEL 1288.=1291`,
+				`[src/main.c#${tag}]\nINS.POST 1122:\n+\tbeep_3k8hz_on();\n+\tk_sleep(K_MSEC(300));\n+\tbeep_3k8hz_off();\nCUT 1288.=1291`,
 				session,
 			),
 		);
@@ -313,7 +313,7 @@ describe("read → edit seen-line guard", () => {
 		const tag = tagFromOutput(resultText(read));
 
 		// Anchor 60 unseen lines — deliberately over the 40-line cap.
-		const dels = Array.from({ length: 60 }, (_, i) => `DEL ${100 + i}`).join("\n");
+		const dels = Array.from({ length: 60 }, (_, i) => `CUT ${100 + i}`).join("\n");
 		let message: string | undefined;
 		try {
 			await executeHashlineSingle(execOptions(`[long.txt#${tag}]\n${dels}`, session));

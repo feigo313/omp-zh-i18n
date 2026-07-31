@@ -400,11 +400,11 @@ describe("boundary-balance repair", () => {
 		expect(warnings.filter(warning => /structural closing line/.test(warning))).toHaveLength(1);
 	});
 	// #3142: the range's deleted `}` is matched by an opener another hunk deletes
-	// (`DEL 1`). The patch nets to balanced, so the closer must stay deleted —
+	// (`CUT 1`). The patch nets to balanced, so the closer must stay deleted —
 	// the per-group repair wrongly kept it, leaving a stray `}`.
 	it("does not keep a deleted closer when another hunk removes its opener (#3142)", () => {
 		const file = ["if enabled {", '\tText("Old")', "}", '\tText("Tail")'].join("\n");
-		const diff = ["DEL 1", "SWAP 2.=3:", '+Text("New")'].join("\n");
+		const diff = ["CUT 1", "SWAP 2.=3:", '+Text("New")'].join("\n");
 		const { text, warnings } = apply(file, diff);
 		expect(text).toBe(['Text("New")', '\tText("Tail")'].join("\n"));
 		expect(warnings.filter(warning => /structural closing line/.test(warning))).toHaveLength(0);
@@ -414,7 +414,7 @@ describe("boundary-balance repair", () => {
 	// residual must be spent on the genuine hunk, not the wrapper-removed one.
 	it("spends the missing-closer residual on the genuine hunk, not an earlier wrapper removal", () => {
 		const file = ["if enabled {", '\tText("Old")', "}", "const config = {", "\ta: 1,", "};"].join("\n");
-		const diff = ["DEL 1", "SWAP 2.=3:", '+Text("New")', "SWAP 6.=6:", "+\tb: 2,"].join("\n");
+		const diff = ["CUT 1", "SWAP 2.=3:", '+Text("New")', "SWAP 6.=6:", "+\tb: 2,"].join("\n");
 		const { text, warnings } = apply(file, diff);
 		expect(text).toBe(['Text("New")', "const config = {", "\ta: 1,", "\tb: 2,", "};"].join("\n"));
 		expect(warnings.filter(warning => /structural closing line/.test(warning))).toHaveLength(1);
@@ -470,7 +470,7 @@ describe("boundary-balance repair", () => {
 
 	it("ignores non-contiguously deleted openers when choosing which closer to keep", () => {
 		const file = ["if (a) {", "\told();", "\tmore();", "}", "const obj = {", "\ta: 1,", "};"].join("\n");
-		const diff = ["DEL 1", "SWAP 3.=4:", "+\tnew();", "SWAP 7.=7:", "+\tb: 2,"].join("\n");
+		const diff = ["CUT 1", "SWAP 3.=4:", "+\tnew();", "SWAP 7.=7:", "+\tb: 2,"].join("\n");
 		const { text, warnings } = apply(file, diff);
 		expect(text).toBe(["\told();", "\tnew();", "const obj = {", "\ta: 1,", "\tb: 2,", "};"].join("\n"));
 		expect(warnings.filter(warning => /structural closing line/.test(warning))).toHaveLength(1);

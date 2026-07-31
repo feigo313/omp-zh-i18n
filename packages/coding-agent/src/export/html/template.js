@@ -1,6 +1,27 @@
     (function() {
       'use strict';
 
+      const THEME_STORAGE_KEY = 'omp-export-theme';
+      const themeSelect = document.getElementById('theme-select');
+      let themePreference = 'auto';
+      try {
+        const stored = localStorage.getItem(THEME_STORAGE_KEY);
+        if (stored === 'light' || stored === 'dark' || stored === 'auto') themePreference = stored;
+      } catch {}
+
+      function applyThemePreference(next) {
+        themePreference = next;
+        if (next === 'light' || next === 'dark') document.documentElement.dataset.theme = next;
+        else delete document.documentElement.dataset.theme;
+        if (themeSelect) themeSelect.value = next;
+        try {
+          localStorage.setItem(THEME_STORAGE_KEY, next);
+        } catch {}
+      }
+
+      applyThemePreference(themePreference);
+      if (themeSelect) themeSelect.addEventListener('change', () => applyThemePreference(themeSelect.value));
+
       // ============================================================
       // BOOT
       // ============================================================
@@ -374,7 +395,7 @@
           }
 
           // Apply filter mode
-          const isSettingsEntry = ['label', 'custom', 'model_change', 'thinking_level_change', 'mode_change', 'ttsr_injection', 'session_init'].includes(entry.type);
+          const isSettingsEntry = ['label', 'custom', 'model_change', 'thinking_level_change', 'mode_change', 'ttsr_injection', 'session_init', 'credential_pin'].includes(entry.type);
           let passesFilter = true;
 
           switch (filterMode) {

@@ -6,6 +6,7 @@ import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockHandler } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { loadAdvisorTranscriptCosts } from "@oh-my-pi/pi-coding-agent/advisor/transcript-recorder";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
@@ -134,6 +135,34 @@ describe("AgentSession.branchFromBtw", () => {
 		expect(promoted?.role).toBe("assistant");
 		if (promoted?.role !== "assistant") throw new Error("Expected promoted assistant message");
 		expectSanitizedBtwAssistant(promoted);
+	});
+	it("does not record a late advisor turn into a /btw branch", async () => {
+		const activeSession = await createSession();
+		activeSession.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
+		activeSession.toggleAdvisorEnabled();
+		const advisor = activeSession.getAdvisorAgent();
+		if (!advisor) throw new Error("Expected advisor agent to exist");
+		activeSession.sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() });
+		await activeSession.sessionManager.flush();
+		const createBranchedSession = activeSession.sessionManager.createBranchedSession.bind(
+			activeSession.sessionManager,
+		);
+		vi.spyOn(activeSession.sessionManager, "createBranchedSession").mockImplementation(parentId => {
+			const result = createBranchedSession(parentId);
+			const lateMessage = createBtwAssistant();
+			lateMessage.usage.cost.total = 9;
+			advisor.emitExternalEvent({ type: "message_end", message: lateMessage });
+			return result;
+		});
+
+		const result = await activeSession.branchFromBtw("question", createBtwAssistant());
+		expect(result.cancelled).toBe(false);
+		const replacementSessionFile = activeSession.sessionFile;
+		if (!replacementSessionFile) throw new Error("Expected the replacement session to be persisted");
+		await activeSession.dispose();
+		session = undefined;
+
+		expect((await loadAdvisorTranscriptCosts(replacementSessionFile)).get("")).toBeUndefined();
 	});
 
 	it("honors session_before_branch cancellation without creating a branch", async () => {

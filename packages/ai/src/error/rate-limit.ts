@@ -21,17 +21,25 @@ const ACCOUNT_RATE_LIMIT_PATTERN =
 const INSUFFICIENT_BALANCE_PATTERN = /insufficient.?balance/i;
 const SPEND_LIMIT_PATTERN = /spend.?limit/i;
 const OPENROUTER_DAILY_FREE_LIMIT_PATTERN = /\bfree[-_ ]models[-_ ]per[-_ ]day\b/i;
+// gRPC/Connect end-streams carry the status as its name (`resource_exhausted`),
+// while HTTP bodies use the phrase ("resource exhausted"). Strip either form
+// before classifying explicit details; an otherwise opaque status is transient
+// model capacity, while quota/rate-limit/server wording remains authoritative.
+const RESOURCE_EXHAUSTED_PATTERN = /resource.?exhausted/gi;
 
 /**
  * Classify a rate-limit error message into a reason category.
- * Priority order: QUOTA (Antigravity "quota will reset") > MODEL_CAPACITY > QUOTA (account) >
- * RATE_LIMIT > QUOTA (generic) > SERVER_ERROR > UNKNOWN.
+ * Priority order: explicit details in a resource-exhausted error > QUOTA
+ * (Antigravity "quota will reset") > MODEL_CAPACITY > QUOTA (account) >
+ * RATE_LIMIT > QUOTA (generic) > SERVER_ERROR > bare resource-exhausted > UNKNOWN.
  *
- * "resource exhausted" maps to MODEL_CAPACITY (transient, short wait)
- * "quota exceeded" / "quota will reset" maps to QUOTA_EXHAUSTED (long wait, switch account)
+ * Bare "resource exhausted" / "resource_exhausted" maps to MODEL_CAPACITY (transient, short wait).
+ * Explicit details such as "quota exceeded" retain their normal classification.
  */
 export function parseRateLimitReason(errorMessage: string): RateLimitReason {
-	const lower = errorMessage.toLowerCase();
+	const lowerWithStatus = errorMessage.toLowerCase();
+	const lower = lowerWithStatus.replace(RESOURCE_EXHAUSTED_PATTERN, "");
+	const hasResourceExhaustedStatus = lower !== lowerWithStatus;
 
 	// Antigravity / Cloud Code Assist surface multi-hour daily-quota exhaustion as
 	// "You have exhausted your capacity on this model. Your quota will reset after …".
@@ -42,13 +50,7 @@ export function parseRateLimitReason(errorMessage: string): RateLimitReason {
 		return "QUOTA_EXHAUSTED";
 	}
 
-	if (
-		lower.includes("capacity") ||
-		lower.includes("overloaded") ||
-		lower.includes("529") ||
-		lower.includes("503") ||
-		lower.includes("resource exhausted")
-	) {
+	if (lower.includes("capacity") || lower.includes("overloaded") || lower.includes("529") || lower.includes("503")) {
 		return "MODEL_CAPACITY_EXHAUSTED";
 	}
 
@@ -90,6 +92,10 @@ export function parseRateLimitReason(errorMessage: string): RateLimitReason {
 
 	if (lower.includes("500") || lower.includes("internal error") || lower.includes("internal server error")) {
 		return "SERVER_ERROR";
+	}
+
+	if (hasResourceExhaustedStatus) {
+		return "MODEL_CAPACITY_EXHAUSTED";
 	}
 
 	return "UNKNOWN";

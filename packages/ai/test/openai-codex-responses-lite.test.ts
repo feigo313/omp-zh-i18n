@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import {
 	type InputItem,
 	type RequestBody,
@@ -11,10 +11,14 @@ import {
 	streamOpenAICodexResponses,
 } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { isOpenAIResponsesProgressEvent } from "@oh-my-pi/pi-ai/providers/openai-shared";
+import { configureCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import type { CodexCompactionRequestContext, Context, FetchImpl, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import * as piUtils from "@oh-my-pi/pi-utils";
 import { createCodexModel } from "./helpers";
+
+beforeAll(() => configureCredentialRedaction(true));
+afterAll(() => configureCredentialRedaction(false));
 
 const TEST_INSTALLATION_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -87,6 +91,16 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 	return value;
 }
 
+/**
+ * Decode a captured Codex SSE request body. The provider zstd-compresses the
+ * body by default, so a binary payload is decompressed before JSON parsing.
+ */
+function decodeCodexRequestBody(body: RequestInit["body"]): string {
+	if (typeof body === "string") return body;
+	if (body instanceof Uint8Array) return new TextDecoder().decode(Bun.zstdDecompressSync(body));
+	throw new Error("expected a string or binary Codex request body");
+}
+
 function parseTurnMetadata(clientMetadata: Record<string, unknown>): Record<string, unknown> {
 	const encoded = clientMetadata["x-codex-turn-metadata"];
 	if (typeof encoded !== "string") throw new Error("expected x-codex-turn-metadata");
@@ -106,7 +120,7 @@ function createCodexFetchMock(sse: string, onRequest: (captured: CapturedCodexRe
 		if (url.endsWith("/responses")) {
 			onRequest({
 				headers: init?.headers instanceof Headers ? init.headers : new Headers(init?.headers),
-				body: typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : {},
+				body: JSON.parse(decodeCodexRequestBody(init?.body)) as Record<string, unknown>,
 			});
 			return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
 		}
@@ -361,6 +375,22 @@ describe("openai-codex Responses Lite input shaping", () => {
 		expect(disabled.tools).toBeUndefined();
 	});
 
+	it.each(["gpt-5.3-codex-spark", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"])(
+		"preserves a forced computer function through Lite for %s",
+		async modelId => {
+			const model = createCodexModel(modelId);
+			const computer = { type: "function", name: "computer", parameters: { type: "object" } };
+			const other = { type: "function", name: "read", parameters: { type: "object" } };
+			const body = await transformRequestBody(
+				{ model: model.id, tools: [computer, other], tool_choice: { type: "function", name: "computer" } },
+				model,
+				{ responsesLite: true },
+			);
+			expect(body.input?.[0]).toEqual({ type: "additional_tools", role: "developer", tools: [computer] });
+			expect(body.tool_choice).toBe("required");
+		},
+	);
+
 	it("moves instructions and tools into input items under lite", async () => {
 		const model = createCodexModel("gpt-5.6-terra");
 		const tools = [{ type: "function", name: "shot", parameters: { type: "object" } }];
@@ -390,17 +420,30 @@ describe("openai-codex Responses Lite input shaping", () => {
 		});
 	});
 
-	it("defaults lite from the model useResponsesLite flag and honors explicit opt-out", async () => {
+	it("resolves Lite from explicit options, the environment, then the model default", async () => {
+		const previous = Bun.env.PI_CODEX_RESPONSES_LITE;
 		const model = createCodexModel("gpt-5.6-terra", { useResponsesLite: true });
-		const lite = await transformRequestBody({ model: model.id, instructions: "sys" }, model, {});
-		expect(lite.instructions).toBeUndefined();
-		expect(lite.input?.[0]?.type).toBe("additional_tools");
+		try {
+			delete Bun.env.PI_CODEX_RESPONSES_LITE;
+			const modelDefault = await transformRequestBody({ model: model.id, instructions: "sys" }, model, {});
+			expect(modelDefault.instructions).toBeUndefined();
+			expect(modelDefault.input?.[0]?.type).toBe("additional_tools");
 
-		const optOut = await transformRequestBody({ model: model.id, instructions: "sys" }, model, {
-			responsesLite: false,
-		});
-		expect(optOut.instructions).toBe("sys");
-		expect(optOut.input?.some(item => item.type === "additional_tools")).toBe(false);
+			Bun.env.PI_CODEX_RESPONSES_LITE = "false";
+			const envOptOut = await transformRequestBody({ model: model.id, instructions: "sys" }, model, {});
+			expect(envOptOut.instructions).toBe("sys");
+			expect(envOptOut.input?.some(item => item.type === "additional_tools")).toBe(false);
+
+			Bun.env.PI_CODEX_RESPONSES_LITE = "true";
+			const explicitOptOut = await transformRequestBody({ model: model.id, instructions: "sys" }, model, {
+				responsesLite: false,
+			});
+			expect(explicitOptOut.instructions).toBe("sys");
+			expect(explicitOptOut.input?.some(item => item.type === "additional_tools")).toBe(false);
+		} finally {
+			if (previous === undefined) delete Bun.env.PI_CODEX_RESPONSES_LITE;
+			else Bun.env.PI_CODEX_RESPONSES_LITE = previous;
+		}
 	});
 });
 
