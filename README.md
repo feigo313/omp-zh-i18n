@@ -22,6 +22,24 @@
   Fork of <a href="https://github.com/badlogic/pi-mono">Pi</a> by <a href="https://github.com/mariozechner">@mariozechner</a>
 </p>
 
+## 中文界面预览
+
+以下截图来自本项目的中文汉化运行界面，覆盖欢迎页和常用设置页。
+
+### 欢迎页
+
+![中文欢迎页](./assets/screenshots/welcome.png)
+
+### 设置页
+
+![外观设置](./assets/screenshots/settings-appearance.png)
+
+![模型设置](./assets/screenshots/settings-model.png)
+
+![交互设置](./assets/screenshots/settings-interaction.png)
+
+![工具设置](./assets/screenshots/settings-tools.png)
+
 The most capable agent surface that ships. Continuously tuned by real-world use — complete out of the box, open all the way down.
 
 **40+** providers · **32** built-in tools · **14** lsp ops · **28** dap ops · **~55k** lines of Rust core.
