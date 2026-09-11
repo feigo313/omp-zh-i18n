@@ -1,32 +1,77 @@
 # Development Rules
 
-> **Local (this machine / Orca handoff)**  
-> Project entry: `CLAUDE.md` · **Paused SoT**: `docs/local/STATUS-2026-07-24-paused.md`  
-> Public: https://github.com/feigo313/omp-zh-i18n · baseline coding-agent **17.1.0** · irregular updates.  
-> Default: no new i18n work until user asks; then edit `packages/coding-agent/src/i18n/lang` (+ needed wiring).  
-> (Everything below is upstream Oh My Pi agent rules.)
+## This Fork (omp-zh-i18n)
+
+| | |
+|---|---|
+| What | Chinese localization fork of Oh My Pi — not upstream `can1357/oh-my-pi` |
+| Public | https://github.com/feigo313/omp-zh-i18n · branch `master` · also `gitee.com/atrix313/omp-zh-i18n` |
+| Upstream remote | `upstream` → `https://github.com/can1357/oh-my-pi.git` |
+| Current baseline | coding-agent **17.2.1-zh** (irregular upstream sync; X/Y change triggers a new zh release) |
+| Primary work | `packages/coding-agent/src/i18n/lang/zh-*.json` + required en SoT / wiring (`interceptor.ts`, settings UI) |
+
+**Defaults for agents**
+
+- Do **not** start new i18n or release work unless the user asks.
+- Prefer editing bundled `lang/zh-*.json` (+ explicitly requested en/wiring). Do not treat `~/.omp/lang` as the delivery path.
+- Never `commit` / `push` / GitHub comment / open issues unless the user explicitly asks.
+- Source strings stay English; translate at the UI boundary (`interceptUIString` / `i18n.t`).
+- Brand names, model ids, `true`/`false` may remain English.
+
+**Local-only files (`.git/info/exclude`, not `.gitignore`)**
+
+These exist on this machine, are **not tracked**, and must not be force-added for release:
+
+- `docs/local/` — worklogs, STATUS, audits
+- `i18n.release.json` — overlay roots / release metadata
+- `scripts/i18n/`, `.agents/`, `.reasonix/`, `.tools/`
+- `.github/workflows/i18n-upstream-check.yml`
+
+**Where to read next**
+
+| Need | File |
+|---|---|
+| Session entry / Chinese collab norms | `CLAUDE.md` (tracked) |
+| **Canonical** zh release process | `docs/local/I18N-RELEASE-WORKFLOW.md` (local-only SoT) |
+| Historical status / worklogs | `docs/local/*` (archives; workflow file wins on conflict) |
+
+Do not re-implement the release Gates here. Upstream `bun run release` is **not** the normal path for `vX.Y.Z-zh` builds.
 
 ## Default Context
 
 This repo contains multiple packages, but **`packages/coding-agent/`** is the primary focus. Unless otherwise specified, assume work refers to this package.
 
-**Terminology**: When the user says "agent" or asks "why is agent doing X", they mean the **coding-agent package implementation**, not you (the assistant). The coding-agent is a CLI tool — questions about its behavior refer to code in `packages/coding-agent/`, not your current session.
+**Terminology**: When the user says "agent" or asks "why is agent doing X", they mean the **coding-agent package implementation**, not you (the assistant). The coding-agent is a CLI tool — questions about its behavior refer to code in `packages/coding-agent/`, not your current session. i18n / 中文翻译 → `packages/coding-agent/src/i18n/`.
 
 ### Package Structure
 
-| Package                 | Description                                          |
-| ----------------------- | ---------------------------------------------------- |
-| `packages/ai`           | Multi-provider LLM client with streaming support     |
-| `packages/catalog`      | Model catalog: bundled models.json, provider descriptors, model identity/classification |
-| `packages/agent`        | Agent runtime with tool calling and state management |
-| `packages/coding-agent` | Main CLI application (primary focus)                 |
-| `packages/tui`          | Terminal UI library with differential rendering      |
-| `packages/natives`      | Bindings for native text/image/grep operations       |
-| `packages/stats`        | Local observability dashboard (`omp stats`)          |
-| `packages/utils`        | Shared utilities (logger, streams, temp files)       |
-| `crates/pi-natives`     | Rust crate for performance-critical text/grep ops    |
+| Package | Description |
+| --- | --- |
+| `packages/ai` | Multi-provider LLM client with streaming support |
+| `packages/catalog` | Model catalog: bundled models.json, provider descriptors, model identity/classification |
+| `packages/agent` | Agent runtime with tool calling and state management |
+| `packages/coding-agent` | Main CLI application (primary focus) |
+| `packages/tui` | Terminal UI library with differential rendering |
+| `packages/natives` | Bindings for native text/image/grep operations |
+| `packages/stats` | Local observability dashboard (`omp stats`) |
+| `packages/utils` | Shared utilities (logger, streams, temp files) |
+| `packages/wire` | Shared wire/protocol types |
+| `packages/hashline` | Content-hash anchored edit format |
+| `packages/mnemopi` | Memory backend package |
+| `packages/snapcompact` | Snapshot/compaction helpers |
+| `packages/collab-web` | Collab relay web UI + tool-view codegen (`gen:tool-views`) |
+| `packages/metaharness` | Meta-harness tooling |
+| `crates/pi-natives` | Rust crate for performance-critical text/grep ops |
 
 **Catalog import convention**: code in this repo imports catalog *values* (bundled models, model-thinking helpers, identity, descriptors, model manager/cache) from `@oh-my-pi/pi-catalog/<module>` — never via `@oh-my-pi/pi-ai`. The pi-ai barrel re-exports only the model/effort *types* its own signatures use (`Model`, `Api`, `ThinkingConfig`, `Effort`, …); type-only imports of those from `@oh-my-pi/pi-ai` are fine.
+
+### i18n wiring (fork-critical)
+
+- Bundled files: `packages/coding-agent/src/i18n/lang/{en,zh}-*.json`.
+- They are **statically imported** in `src/i18n/index.ts` and registered in `EMBEDDED_TRANSLATIONS` — a new lang JSON that is not imported there will not ship in the binary.
+- Load order: bundled `lang/` first, then optional user overrides under `~/.omp/lang/`.
+- UI boundary: `src/i18n/interceptor.ts` (`interceptUIString`, settings/command translators). Keep source English; do not sprinkle Chinese literals in components.
+- Do **not** bulk-run extract/generate/translate scripts unless the user asks; edit keys by hand and keep en/zh key symmetry (no empty strings).
 
 ## GitHub
 
@@ -215,7 +260,27 @@ For the bash tool specifically:
 ## Commands
 
 - NEVER commit unless asked.
-- Never use `tsc`/`npx tsc` — always `bun check`.
+- Never use `tsc`/`npx tsc` — always `bun check` (package gate uses `tsgo`, not `tsc`).
+- Runtime is **Bun** (`packageManager: bun@1.3.14`). On Windows use PowerShell; do not assume bash-only paths.
+
+### High-signal scripts (root unless noted)
+
+| Task | Command |
+| --- | --- |
+| Install + native build + link `omp` | `bun run setup` |
+| Run CLI from source | `bun run dev` |
+| Full type+lint gate (TS+RS parallel) | `bun check` |
+| TS-only gate | `bun run check:ts` |
+| Package gate | `cd packages/coding-agent && bun run check` (`check:types` = `tsgo`) |
+| Local test suite | `bun run test` (`scripts/ci-test-ts.ts local`) |
+| TS tests only | `bun run test:ts` |
+| Focused coding-agent buckets | `bun run ci:test:coding-agent:singleton` / `:ui` / `:runtime` / `:native` / `:heavy` |
+| CLI smoke (workers, tiny model) | `bun run ci:test:smoke` |
+| Regenerate model catalog | `bun run gen:models` |
+| Rebuild collab tool views after renderer edits | `bun run gen:tool-views` |
+| Validate a zh JSON file | `bun -e "JSON.parse(await Bun.file('packages/coding-agent/src/i18n/lang/zh-settings-tools.json').text()); console.log('ok')"` |
+
+Tests are **bucketed** via `scripts/ci-test-ts.ts` — do not assume a single `bun test` covers coding-agent; UI/native/heavy suites are split on purpose (OOM/GC).
 
 ## Testing Guidance
 
@@ -257,6 +322,10 @@ Location: `packages/*/CHANGELOG.md` (per package).
 - External contributions: `Added feature X ([#456](https://github.com/can1357/oh-my-pi/pull/456) by [@username](https://github.com/username))`.
 
 ## Releasing
+
+**Fork note:** Chinese releases (`vX.Y.Z-zh`) follow `docs/local/I18N-RELEASE-WORKFLOW.md` (local-only). That file is the sole process SoT: master-only, no feature branches/PRs for release, one tag + one GitHub Release per version, no force-push. Do not invent a parallel flow.
+
+Upstream-style package release (only when explicitly aligning with official npm publish):
 
 1. Ensure all changes since last release are in each affected package's `[Unreleased]` section.
 2. Run `bun run release`.
