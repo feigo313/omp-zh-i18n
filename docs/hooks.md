@@ -1,6 +1,6 @@
 # Hooks
 
-This document describes the **current hook subsystem code** in `src/extensibility/hooks/*`.
+This document describes the **current hook subsystem code** in `packages/coding-agent/src/extensibility/hooks/*`.
 
 ## Current status in runtime
 
@@ -15,11 +15,11 @@ So this file documents the legacy hook subsystem implementation itself (types/lo
 
 ## Key files
 
-- `src/extensibility/hooks/types.ts` — hook context, event types, and result contracts
-- `src/extensibility/hooks/loader.ts` — module loading and hook discovery bridge
-- `src/extensibility/hooks/runner.ts` — event dispatch, command lookup, error signaling
-- `src/extensibility/hooks/tool-wrapper.ts` — pre/post tool interception wrapper
-- `src/extensibility/hooks/index.ts` — exports/re-exports
+- `packages/coding-agent/src/extensibility/hooks/types.ts` — hook context, event types, and result contracts
+- `packages/coding-agent/src/extensibility/hooks/loader.ts` — module loading and hook discovery bridge
+- `packages/coding-agent/src/extensibility/hooks/runner.ts` — event dispatch, command lookup, error signaling
+- `packages/coding-agent/src/extensibility/hooks/tool-wrapper.ts` — pre/post tool interception wrapper
+- `packages/coding-agent/src/extensibility/hooks/index.ts` — exports/re-exports
 
 ## What a hook module is
 
@@ -47,8 +47,8 @@ The factory can:
 - persist non-LLM state with `pi.appendEntry(...)`
 - register slash commands via `pi.registerCommand(...)`
 - register custom message renderers via `pi.registerMessageRenderer(...)`
-- run shell commands via `pi.exec(...)`
-- author schemas/helpers with injected `pi.zod`, `pi.typebox`, and package exports via `pi.pi`
+- run shell commands via `pi.exec(...)` and log through `pi.logger`
+- use the injected Zod-compatible builder `pi.zod`, native omptype builder `pi.arktype`, legacy `pi.typebox`, and package exports via `pi.pi`
 
 ## Discovery and loading
 
@@ -58,6 +58,15 @@ Default sessions load JS/TS hook factories discovered by `hookCapability` throug
 2. Load importable `.ts`/`.js` hook factories from the hook capability registry
 3. Append plugin extension entry points
 4. Append explicitly configured paths
+
+### Native discovery location
+
+The native provider scans only two subdirectories per config root — a factory placed **directly** in `hooks/` is not discovered:
+
+- Project: `<cwd>/.omp/hooks/pre/*.{ts,js}` and `<cwd>/.omp/hooks/post/*.{ts,js}`
+- User: `<agentDir>/hooks/pre/*.{ts,js}` and `<agentDir>/hooks/post/*.{ts,js}` (default `~/.omp/agent/hooks/...`; profile- and `PI_CODING_AGENT_DIR`-aware)
+
+So `<cwd>/.omp/hooks/psy-guards.ts` (no `pre/`/`post/` subdirectory) loads nothing and reports no error — move it into `pre/` or `post/`, e.g. `<cwd>/.omp/hooks/pre/psy-guards.ts`. This mirrors `.claude/hooks/pre|post/`. Only `.ts`/`.js` factories are appended to the extension pipeline and bound through the extension runner. See [Extension Loading](./extension-loading.md) for the shared module pipeline these factories flow through (native `.omp/extensions/` roots, plugin entries, configured paths, load order, and disable controls).
 
 The legacy `discoverAndLoadHooks(configuredPaths, cwd)` helper still exists and does:
 
@@ -110,10 +119,10 @@ Hook events are strongly typed in `types.ts`.
 
 ### Tool events (pre/post model)
 
-- `tool_call` (pre-execution) → can return `{ block?: boolean; reason?: string; input?: Record<string, unknown> }`. A non-blocking handler that returns `input` replaces the arguments the tool executes with (the raw execution input, not the normalized `event.input` view); ignored when `block` is true, and not applied to `computer` tool calls.
+- `tool_call` (pre-execution) → can return `{ block?: boolean; reason?: string; input?: Record<string, unknown> }`. A non-blocking handler that returns `input` replaces the arguments the tool executes with (the raw execution input, not the normalized `event.input` view); ignored when `block` is true.
 - `tool_result` (post-execution) → can return `{ content?; details?; isError? }`
 
-This is the hook subsystem’s core pre/post interception model.
+This is the hook subsystem’s core pre/post interception model. Eval prelude invocations such as `browser.open(...)`, direct `BrowserTab` helpers, `tab.run(...)`, direct `computer` helpers, and `computer.run(fnOrCode, options)` are host bridge calls, not AgentTool calls, so they do not emit `tool_call` or `tool_result`.
 
 ```text
 Hook tool interception flow
@@ -165,13 +174,13 @@ On tool failure, wrapper emits `tool_result` with `isError: true` and error text
 ### What hooks can mutate
 
 - LLM context for a single call via `context` (`messages` replacement chain)
+- raw tool execution arguments by returning `input` from `tool_call`
 - tool output content/details on successful tool calls (`tool_result` path)
 - pre-agent injected message via `before_agent_start`
 - cancellation/custom compaction/tree behavior via `session_before_*` and `session.compacting`
 
 ### What hooks cannot mutate in this implementation
 
-- raw tool input parameters in-place (only block/allow on `tool_call`)
 - execution continuation after thrown tool errors (error path rethrows)
 - final success/error status in wrapper behavior (returned `isError` is typed but not applied by `HookToolWrapper`)
 
@@ -338,7 +347,7 @@ export default function (pi: HookAPI): void {
 
 ## Export surface
 
-`src/extensibility/hooks/index.ts` and the package subpath `@oh-my-pi/pi-coding-agent/extensibility/hooks` export:
+`packages/coding-agent/src/extensibility/hooks/index.ts` and the package subpath `@oh-my-pi/pi-coding-agent/extensibility/hooks` export:
 
 - loading APIs (`discoverAndLoadHooks`, `loadHooks`)
 - runner and wrapper (`HookRunner`, `HookToolWrapper`)

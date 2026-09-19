@@ -12,10 +12,6 @@ interface XAICredentials {
 	baseURL: string;
 }
 
-export function ohMyPiXAIUserAgent(): string {
-	return "oh-my-pi/xai";
-}
-
 /** xAI provider ids supported by shared HTTP tool transport resolution. */
 export type XAIHttpProvider = "xai-oauth" | "xai";
 
@@ -82,16 +78,17 @@ function resolveXAIBaseURL(
 /**
  * Resolve an xAI tool endpoint and its provider/model header overrides.
  */
-export function resolveXAIHttpTransport(
+export async function resolveXAIHttpTransport(
 	modelRegistry: ModelRegistry,
 	provider: XAIHttpProvider,
 	modelId?: string,
-): XAIHttpTransport {
+): Promise<XAIHttpTransport> {
+	const model = modelId ? modelRegistry.find(provider, modelId) : undefined;
 	return {
 		baseURL: resolveXAIBaseURL(modelRegistry, provider, modelId),
-		headers:
-			(modelId ? modelRegistry.find(provider, modelId)?.headers : undefined) ??
-			modelRegistry.getProviderHeaders(provider),
+		headers: model
+			? await modelRegistry.resolveModelHeaders(model)
+			: await modelRegistry.getProviderHeaders(provider),
 	};
 }
 

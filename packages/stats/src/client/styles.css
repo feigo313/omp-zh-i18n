@@ -35,6 +35,7 @@
   --accent-cyan: var(--link);
   --bg-hover: var(--surface-2);
   --bg-elevated: var(--surface-2);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 
   --radius-sm: 3px;
   --radius-md: 6px;
@@ -60,6 +61,7 @@
     --link: oklch(0.58 0.13 230);
     --success: oklch(0.55 0.13 150);
     --danger: oklch(0.55 0.19 25);
+    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23555' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
     --warning: oklch(0.6 0.13 85);
   }
 }
@@ -81,6 +83,7 @@
   --link: oklch(0.58 0.13 230);
   --success: oklch(0.55 0.13 150);
   --danger: oklch(0.55 0.19 25);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23555' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   --warning: oklch(0.6 0.13 85);
 }
 
@@ -232,48 +235,6 @@
   color: var(--dim);
 }
 
-/* Collapsed Nav Rail */
-.stats-nav-rail-collapsed {
-  width: 56px;
-}
-
-.stats-nav-rail-collapsed .stats-nav-rail-header {
-  padding: 0;
-  justify-content: center;
-}
-
-.stats-nav-rail-collapse-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  cursor: pointer;
-  padding: 8px;
-  border-radius: var(--radius-md);
-  transition: all 0.15s ease;
-}
-
-.stats-nav-rail-collapse-btn:hover {
-  color: var(--text);
-  background: var(--surface-2);
-}
-
-.stats-nav-rail-collapsed .stats-nav-rail-menu {
-  padding: 16px 8px;
-  align-items: center;
-}
-
-.stats-nav-rail-collapsed .stats-nav-rail-item {
-  padding: 10px;
-  justify-content: center;
-}
-
-.stats-nav-rail-collapsed .stats-nav-rail-item[data-active="true"]::before {
-  left: -8px;
-}
-
 /* Main Content Area */
 .stats-main-pane {
   flex: 1;
@@ -332,7 +293,6 @@
   font-weight: 600;
   color: var(--text);
   margin: 0;
-  white-space: nowrap;
 }
 
 .stats-top-bar-right {
@@ -346,39 +306,6 @@
     width: 100%;
     justify-content: space-between;
     gap: 8px;
-    flex-wrap: wrap;
-  }
-}
-
-.stats-exchange-rate {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.stats-exchange-rate-label {
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.stats-exchange-rate-value {
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.stats-exchange-rate-timestamp {
-  font-size: 10px;
-}
-
-.stats-exchange-rate-refresh {
-  font-size: 11px;
-  padding: 2px 6px;
-}
-
-@media (max-width: 767px) {
-  .stats-exchange-rate-label,
-  .stats-exchange-rate-timestamp {
-    display: none;
   }
 }
 
@@ -540,6 +467,62 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
+/* Select (native <select>, themed to match RangeControl/Buttons) */
+.stats-select {
+  appearance: none;
+  padding: 6px 28px 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--text);
+  background-color: var(--surface-2);
+  /* Chevron follows theme: light stroke on dark, dark stroke on light. */
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+
+.stats-select:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background-color: var(--bg-hover);
+}
+
+.stats-select:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
+}
+
+.stats-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Prevent iOS from zooming the viewport when a select receives focus. */
+@media (pointer: coarse) {
+  .stats-select {
+    font-size: 16px;
+  }
+}
+
+/* Dropdown list itself follows the page theme via color-scheme. */
+.stats-select option {
+  background-color: var(--surface);
+  color: var(--text);
+}
+/* Forced-colors (Windows High Contrast) suppresses background images, so the
+   custom chevron vanishes; restore the native indicator instead. */
+@media (forced-colors: active) {
+  .stats-select {
+    appearance: auto;
+  }
+}
+
 /* Sync Button & Container */
 .stats-sync-container {
   display: flex;
@@ -639,7 +622,7 @@
 
 .stats-metric-primary-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -1248,6 +1231,7 @@
 .stats-text-primary { color: var(--text); }
 .stats-text-secondary { color: var(--muted); }
 .stats-text-muted { color: var(--dim); }
+.stats-text-warning { color: var(--warning); }
 .stats-text-xs { font-size: 12px; }
 .stats-font-medium { font-weight: 500; }
 .stats-font-semibold { font-weight: 600; }
@@ -1406,117 +1390,347 @@
 }
 
 /* ==========================================================================
-   Language Select (dropdown for language switching)
+   Traces (session flamegraph)
    ========================================================================== */
-.stats-language-select {
-  appearance: none;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text);
-  cursor: pointer;
-  outline: none;
-  transition: all 0.2s ease;
+.stats-trace-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
-.stats-language-select:hover {
-  border-color: var(--accent);
-  background: var(--surface);
+.stats-trace-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
-.stats-language-select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.1);
-}
-
-.stats-language-select option {
-  background: var(--surface);
-  color: var(--text);
-  padding: 4px 8px;
-}
-
-/* ==========================================================================
-   Model Filter (dropdown for model selection)
-   ========================================================================== */
-.stats-model-filter {
-  appearance: none;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 28px 6px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text);
-  cursor: pointer;
-  outline: none;
-  transition: all 0.2s ease;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  min-width: 120px;
-  max-width: 240px;
-}
-
-.stats-model-filter:hover {
-  border-color: var(--accent);
-  background-color: var(--surface);
-}
-
-.stats-model-filter:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.1);
-}
-
-.stats-model-filter option {
-  background: var(--surface);
-  color: var(--text);
-  padding: 4px 8px;
-}
-
-/* ==========================================================================
-   Pagination
-   ========================================================================== */
-.stats-pagination-btn {
+.stats-trace-back {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 32px;
-  height: 32px;
-  padding: 0 8px;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease;
+}
+
+.stats-trace-back:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.stats-trace-back:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+.stats-trace-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-trace-cwd {
+  font-size: 11px;
+  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Summary strip: one bordered card, hairline-divided stat columns. */
+.stats-trace-summary {
+  display: flex;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.stats-trace-summary-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 16px;
+  border-right: 1px solid var(--border);
+  min-width: 76px;
+}
+
+.stats-trace-summary-cell:last-child {
+  border-right: none;
+}
+
+.stats-trace-summary-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--dim);
+}
+
+.stats-trace-summary-value {
   font-size: 13px;
   font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Toolbar row above the timeline. */
+.stats-trace-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.stats-trace-toolbar-hint {
+  font-size: 10px;
+  color: var(--dim);
+  margin-left: auto;
+}
+
+.stats-trace-input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+/* Prevent iOS from zooming the viewport when a search input receives focus
+   (mirrors the .stats-select coarse-pointer treatment). */
+@media (pointer: coarse) {
+  .stats-trace-input {
+    font-size: 16px;
+  }
+}
+
+/* Native clear button is a dark glyph in WebKit; keep it visible in the dark
+   theme by inverting it (no-op in light). */
+.stats-trace-input::-webkit-search-cancel-button {
+  filter: invert(1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .stats-trace-input::-webkit-search-cancel-button {
+    filter: none;
+  }
+}
+
+[data-theme="light"] .stats-trace-input::-webkit-search-cancel-button {
+  filter: none;
+}
+
+.stats-trace-input:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
+}
+
+.stats-trace-input::placeholder {
+  color: var(--dim);
+}
+
+.stats-trace-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
   cursor: pointer;
-  transition: all 0.2s ease;
   user-select: none;
 }
 
-.stats-pagination-btn:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
+/* Brand-tint the native checkbox instead of leaving the browser default. */
+.stats-trace-check input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.stats-trace-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease;
+}
+
+.stats-trace-icon-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.stats-trace-icon-btn:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+.stats-trace-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Timeline card: minimap + canvas share one bordered surface. */
+.stats-trace-timeline-card {
   background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.stats-pagination-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
+.stats-trace-timeline {
+  position: relative;
+  display: flex;
+  max-height: 560px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
-.stats-pagination-btn-active {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
+.stats-trace-canvas {
+  cursor: grab;
+  outline: none;
+  touch-action: none;
+  border-radius: var(--radius-sm);
 }
 
-.stats-pagination-btn-active:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
+.stats-trace-canvas:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+.stats-trace-canvas:active {
+  cursor: grabbing;
+}
+
+.stats-trace-chevron {
+  display: inline-flex;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.stats-trace-chevron:hover {
+  color: var(--text);
+}
+
+.stats-trace-gutter-track {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.stats-trace-gutter-model {
+  font-size: 9px;
+  color: var(--dim);
+}
+
+.stats-trace-gutter-lane {
+  position: absolute;
+  font-size: 8px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Transcript list under the timeline. */
+.stats-trace-list {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  height: 340px;
+  overflow-y: auto;
+}
+
+.stats-trace-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 28px;
+  width: 100%;
+  padding: 0 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.stats-trace-row:hover {
+  background: var(--bg-hover);
+}
+
+.stats-trace-row:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: -2px;
+}
+
+.stats-trace-row[data-selected="true"] {
+  background: var(--accent-muted);
+}
+
+.stats-trace-row-static {
+  cursor: default;
+}
+
+.stats-trace-row-static:hover {
+  background: transparent;
+}
+
+.stats-trace-kind {
+  flex-shrink: 0;
+  width: 58px;
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-radius: 3px;
+  padding: 2px 0;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-trace-row-meta {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  gap: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stats-trace-back,
+  .stats-trace-icon-btn,
+  .stats-trace-row {
+    transition: none;
+  }
 }

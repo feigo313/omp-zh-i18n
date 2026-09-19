@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
+import { type } from "@oh-my-pi/omptype";
 import { normalizeTools } from "@oh-my-pi/pi-agent-core/agent-loop";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core/types";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
-import { type } from "arktype";
 
 const toolSchema = type({
 	path: type("string").describe("where to read"),
@@ -45,12 +45,12 @@ function fieldDescription(parameters: unknown, field: string): unknown {
 
 describe("normalizeTools — pruneDescriptions", () => {
 	it("keeps the top-level description when pruning is off", () => {
-		const tools = normalizeTools([makeTool()], false);
+		const tools = normalizeTools([makeTool()], { injectIntent: false });
 		expect(tools?.[0]?.description).toBe("top-level tool description");
 	});
 
 	it("empties the description and strips nested schema descriptions when pruning", () => {
-		const tools = normalizeTools([makeTool()], false, undefined, true);
+		const tools = normalizeTools([makeTool()], { injectIntent: false, pruneDescriptions: true });
 		const tool = tools?.[0];
 		expect(tool?.description).toBe("");
 		const wire = JSON.stringify(tool?.parameters);
@@ -62,8 +62,21 @@ describe("normalizeTools — pruneDescriptions", () => {
 		expect(hasField(tool?.parameters, "nested")).toBe(true);
 	});
 
+	it("reuses injected parameters by identity across calls so downstream schema memos hit", () => {
+		const tool = makeTool();
+		for (const pruneDescriptions of [false, true]) {
+			const first = normalizeTools([tool], { injectIntent: true, pruneDescriptions })?.[0]?.parameters;
+			const second = normalizeTools([tool], { injectIntent: true, pruneDescriptions })?.[0]?.parameters;
+			expect(first).toBeDefined();
+			expect(second).toBe(first);
+		}
+		const bare = normalizeTools([tool], { injectIntent: true, pruneDescriptions: true })?.[0]?.parameters;
+		const described = normalizeTools([tool], { injectIntent: true })?.[0]?.parameters;
+		expect(described).not.toBe(bare);
+	});
+
 	it("injects the intent field WITHOUT a description when pruning", () => {
-		const tools = normalizeTools([makeTool()], true, undefined, true);
+		const tools = normalizeTools([makeTool()], { injectIntent: true, pruneDescriptions: true });
 		const params = tools?.[0]?.parameters;
 		expect(hasField(params, INTENT_FIELD)).toBe(true);
 		expect(fieldDescription(params, INTENT_FIELD)).toBeUndefined();
@@ -72,7 +85,7 @@ describe("normalizeTools — pruneDescriptions", () => {
 	});
 
 	it("keeps the intent field description when not pruning", () => {
-		const tools = normalizeTools([makeTool()], true);
+		const tools = normalizeTools([makeTool()], { injectIntent: true });
 		expect(typeof fieldDescription(tools?.[0]?.parameters, INTENT_FIELD)).toBe("string");
 	});
 });
@@ -90,7 +103,7 @@ describe("normalizeTools — omit-intent tools", () => {
 				return { content: [{ type: "text", text: "ok" }] };
 			},
 		};
-		const out = normalizeTools([tool], true)?.[0];
+		const out = normalizeTools([tool], { injectIntent: true })?.[0];
 		expect(out?.parameters).toMatchObject({ type: "object" });
 		expect(hasField(out?.parameters, "action")).toBe(true);
 		expect(hasField(out?.parameters, "reason")).toBe(true);
@@ -110,14 +123,14 @@ describe("normalizeTools — omit-intent tools", () => {
 				return { content: [{ type: "text", text: "ok" }] };
 			},
 		};
-		const out = normalizeTools([tool], true)?.[0];
+		const out = normalizeTools([tool], { injectIntent: true })?.[0];
 		expect(out?.parameters).toMatchObject({ type: "object" });
 		expect(hasField(out?.parameters, "note")).toBe(true);
 		expect(hasField(out?.parameters, "i")).toBe(false);
 	});
 
 	it("wire-encodes parameters even when intent injection is disabled globally", () => {
-		const out = normalizeTools([makeTool()], false)?.[0];
+		const out = normalizeTools([makeTool()], { injectIntent: false })?.[0];
 		expect(out?.parameters).toMatchObject({ type: "object" });
 		expect(hasField(out?.parameters, "path")).toBe(true);
 		expect(hasField(out?.parameters, "nested")).toBe(true);
@@ -148,7 +161,7 @@ describe("normalizeTools — union-shaped schemas", () => {
 	}
 
 	it("injects the intent field into each anyOf branch", () => {
-		const out = normalizeTools([unionTool()], true)?.[0];
+		const out = normalizeTools([unionTool()], { injectIntent: true })?.[0];
 		const params = out?.parameters as {
 			anyOf?: Array<{ properties?: Record<string, unknown>; required?: string[] }>;
 		};
@@ -164,7 +177,7 @@ describe("normalizeTools — union-shaped schemas", () => {
 		// Root must stay a pure union; adding sibling `properties: { i }` /
 		// `required: [i]` collides with each closed branch's
 		// `additionalProperties: false` and leaves no satisfiable input.
-		const out = normalizeTools([unionTool()], true)?.[0];
+		const out = normalizeTools([unionTool()], { injectIntent: true })?.[0];
 		const params = out?.parameters as Record<string, unknown>;
 		expect(params.properties).toBeUndefined();
 		expect(params.required).toBeUndefined();

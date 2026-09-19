@@ -15,7 +15,20 @@
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
+import {
+	type AgentMessage,
+	type AgentToolResult,
+	type AgentToolUpdateCallback,
+	type MessageCountOptions,
+	Tokenizer,
+} from "@oh-my-pi/pi-agent-core";
+import { findCutPoint as computeCutPoint, type CutPointResult } from "@oh-my-pi/pi-agent-core/compaction";
+import type { SessionEntry as CompactionSessionEntry } from "@oh-my-pi/pi-agent-core/compaction/entries";
+import {
+	createBranchSummaryMessage,
+	createCompactionSummaryMessage,
+	createCustomMessage,
+} from "@oh-my-pi/pi-agent-core/compaction/messages";
 import { type AuthCredential, SqliteAuthCredentialStore, type TSchema } from "@oh-my-pi/pi-ai";
 import { piEscapeRegexLiteral, piJoinPath } from "@oh-my-pi/pi-ai/providers/cursor-pi-args";
 import { getKeybindings, type Keybinding, Text } from "@oh-my-pi/pi-tui";
@@ -27,9 +40,9 @@ import {
 	parseFrontmatter as parseOmpFrontmatter,
 } from "@oh-my-pi/pi-utils";
 import { getPackageDir as getOmpPackageDir } from "../config";
-import { formatKeyHints } from "../config/keybindings";
+import { formatKeyHints } from "@oh-my-pi/pi-tui/app-keybindings";
 import type { PromptTemplate } from "../config/prompt-templates";
-import { type SettingPath, Settings } from "../config/settings";
+import { findScopedSettings, type SettingPath, Settings } from "../config/settings";
 import { EditTool } from "../edit";
 import type { CreateAgentSessionOptions, CreateAgentSessionResult, LoadExtensionsResult } from "../sdk";
 import {
@@ -45,22 +58,34 @@ import {
 	type TruncationResult,
 	truncateHead,
 	truncateTail,
-} from "../session/streaming-output";
+} from "@oh-my-pi/pi-tui/tools/streaming-output";
+import type { SessionEntry } from "../session/session-entries";
 import type { Tool, ToolSession } from "../tools";
 import { BashTool } from "../tools/bash";
 import { GlobTool } from "../tools/glob";
 import { GrepTool } from "../tools/grep";
 import { ReadTool } from "../tools/read";
-import { formatBytes } from "../tools/render-utils";
+import { formatBytes } from "@oh-my-pi/pi-tui/render/render-utils";
 import { WriteTool } from "../tools/write";
 import { EventBus } from "../utils/event-bus";
+import { convertImageToPng } from "@oh-my-pi/pi-tui/chat/image-loading";
 import { discoverExtensionPaths, loadExtensionFromFactory, loadExtensions } from "./extensions";
 import { ExtensionRuntime } from "./extensions/loader";
-import type { ExtensionFactory, ToolDefinition } from "./extensions/types";
+import type {
+	BashToolResultEvent,
+	EditToolResultEvent,
+	ExtensionFactory,
+	GrepToolResultEvent,
+	ReadToolResultEvent,
+	ToolDefinition,
+	ToolResultEvent,
+	ToolShellEnvironmentContext,
+	WriteToolResultEvent,
+} from "./extensions/types";
+import { Type } from "./legacy-typebox";
 import { getEnabledPlugins, resolvePluginExtensionPaths, type ScopedInstalledPlugin } from "./plugins/loader";
 import type { Skill } from "./skills";
 import { loadSkillsFromDir } from "./skills";
-import { Type } from "./typebox";
 
 const TOOL_DEFINITION_MARKER = "__isToolDefinition";
 const LEGACY_BUILTIN_TOOL_MARKER = "__ompLegacyBuiltinTool";
@@ -78,11 +103,7 @@ interface LegacyThemeLike {
 	bold(text: string): string;
 }
 
-export interface BashSpawnContext {
-	command: string;
-	cwd: string;
-	env: NodeJS.ProcessEnv;
-}
+export type BashSpawnContext = ToolShellEnvironmentContext;
 
 export type BashSpawnHook = (context: BashSpawnContext) => BashSpawnContext;
 
@@ -384,6 +405,28 @@ async function executeLegacyBashOperations(
 	}
 }
 
+/**
+ * Convert an image attachment to PNG using the legacy package-root contract.
+ *
+ * Invalid or unsupported image data returns `null`, matching Pi's historical
+ * helper instead of surfacing Bun's decoder error to extensions.
+ */
+export async function convertToPng(
+	base64Data: string,
+	mimeType: string,
+): Promise<{ data: string; mimeType: string } | null> {
+	if (mimeType === "image/png") {
+		return { data: base64Data, mimeType };
+	}
+
+	try {
+		const converted = await convertImageToPng({ type: "image", data: base64Data, mimeType });
+		return { data: converted.data, mimeType: converted.mimeType };
+	} catch {
+		return null;
+	}
+}
+
 /** Format the active shortcut for legacy extensions that render keybinding hints. */
 export function keyText(action: Keybinding): string {
 	return formatKeyHints(getKeybindings().getKeys(action));
@@ -450,12 +493,30 @@ export function createReadTool(cwd: string, options?: ReadToolOptions): ToolDefi
 /** Create the legacy bash tool definition. */
 export function createBashToolDefinition(cwd: string, options?: BashToolOptions): ToolDefinition {
 	const tool = createRegistryTool(cwd, "bash");
+	const spawnHook = options?.spawnHook;
+	const shellEnv = spawnHook
+		? (spawn: ToolShellEnvironmentContext): Record<string, string> => {
+				const baseline = { ...spawn.env };
+				const result = spawnHook(spawn);
+				// Legacy hooks conventionally return `{ ...context.env, EXTRA }`.
+				// The consumer applies this as per-command overrides on an already
+				// filtered base env, so forwarding the whole object would reintroduce
+				// everything filterChildShellEnv removed. Forward only entries the
+				// hook added or changed relative to the env it was handed.
+				return Object.fromEntries(
+					Object.entries(result.env).filter(
+						(entry): entry is [string, string] => typeof entry[1] === "string" && baseline[entry[0]] !== entry[1],
+					),
+				);
+			}
+		: undefined;
 	return markToolDefinition({
 		name: "bash",
 		label: "Bash",
 		description: tool.description,
 		parameters: legacyBashSchema,
 		approval: "exec",
+		...(shellEnv ? { shellEnv } : {}),
 		renderCall: (params, optionsArg, themeArg) => {
 			const theme = renderTheme(optionsArg, themeArg);
 			const command = stringField(params, "command") ?? "";
@@ -704,9 +765,22 @@ export function createReadOnlyTools(cwd: string): ToolDefinition[] {
 	});
 }
 
+/**
+ * Legacy pi `SettingsManager` shim.
+ *
+ * Upstream Pi's `SettingsManager.create(cwd)` is **synchronous** and returns a
+ * manager exposing `getGlobalSettings()`/`getProjectSettings()` (plus the typed
+ * `get(path)`). OMP's `Settings` is that manager, so the shim resolves the
+ * active extension session's instance first, then falls back to a live instance
+ * matching the requested `cwd`/`agentDir`, or an isolated instance when nothing
+ * matches. Returning the promise from `Settings.init()` here broke every pi
+ * extension that read settings synchronously — e.g. pi-vim's `session_start`
+ * handler (#10397); selecting a process-global instance would leak one session's
+ * settings into another.
+ */
 export const SettingsManager = {
-	create(cwd: string, agentDir?: string): Promise<Settings> {
-		return Settings.init({ cwd, agentDir });
+	create(cwd?: string, agentDir?: string): Settings {
+		return findScopedSettings(cwd, agentDir) ?? Settings.isolated();
 	},
 
 	inMemory(): Settings {
@@ -825,7 +899,7 @@ export class DefaultPackageManager {
  * callbacks, `additional*Paths`, `extensionFactories`, `settingsManager`,
  * `eventBus`) plus the discovery results, and the sibling `createAgentSession`
  * override below translates them into OMP's native session options
- * (`disableExtensionDiscovery`, `preloadedExtensionPaths`, `extensions`,
+ * (`disableExtensionDiscovery`, prepared/path extension preloads, `extensions`,
  * `skills`, `promptTemplates`, `contextFiles`, `settings`, `eventBus`,
  * `systemPrompt`) before delegating to `../sdk`.
  *
@@ -1327,7 +1401,11 @@ export async function createAgentSession(
 	// `preloadedExtensions` seam. Skipping this branch would let
 	// `createAgentSession` re-run its own discovery and undo the caller's
 	// `noExtensions: true`.
-	if (rest.preloadedExtensions === undefined && rest.preloadedExtensionPaths === undefined) {
+	if (
+		rest.preloadedExtensions === undefined &&
+		rest.preloadedPreparedExtensions === undefined &&
+		rest.preloadedExtensionPaths === undefined
+	) {
 		forwarded.preloadedExtensions = state.extensionsResult;
 	}
 
@@ -1415,12 +1493,94 @@ export function getPackageDir(): string {
 	return getOmpPackageDir() ?? (isCompiledBinary() ? path.dirname(process.execPath) : process.cwd());
 }
 
-// Legacy pi's `@earendil-works/pi-coding-agent` re-exported `estimateTokens`
-// from its package root (via `./core/compaction/index.ts`). In omp it lives in
+// Legacy pi's `@earendil-works/pi-coding-agent` re-exported `estimateTokens`,
+// `compact`, `serializeConversation`, and `calculateContextTokens` from its
+// package root (via `./core/compaction/index.ts`). In omp these live in
 // `@oh-my-pi/pi-agent-core/compaction`, and the coding-agent barrel below does
-// not forward it, so legacy extensions importing it fail Bun's static export
-// check during validation (issue #6583).
-export { estimateTokens } from "@oh-my-pi/pi-agent-core/compaction";
+// not forward them, so legacy extensions importing them fail Bun's static
+// export check during validation (issues #6583, #7174, #7403, #10278).
+export { calculateContextTokens, compact, serializeConversation } from "@oh-my-pi/pi-agent-core/compaction";
+
+const legacyTokenizer = new Tokenizer();
+
+/**
+ * Legacy `estimateTokens(message, tokenizer?, options?)` export. The core API
+ * became `Tokenizer.countMessage`, but legacy pi extensions still import this
+ * free function by name (issues #6583, #7174, #7403), so the export surface
+ * must survive; a shared model-agnostic Tokenizer backs the tokenizer-less
+ * legacy call shape.
+ */
+export function estimateTokens(message: AgentMessage, tokenizer?: Tokenizer, options?: MessageCountOptions): number {
+	return (tokenizer ?? legacyTokenizer).countMessage(message, options);
+}
+
+// Legacy pi's `@earendil-works/pi-coding-agent` also exported `findCutPoint` and
+// `sessionEntryToContextMessages` from its package root (upstream Pi 0.84.2
+// public API). In omp `findCutPoint` moved to `@oh-my-pi/pi-agent-core/compaction`
+// AND grew a required `Tokenizer` parameter, and `sessionEntryToContextMessages`
+// has no canonical equivalent, so neither reaches the barrel below and legacy
+// extensions importing them (e.g. NVlabs/SoL-Pi's online-context-compact) fail
+// Bun's static export check during validation (issue #11796).
+
+/**
+ * Legacy `findCutPoint(entries, startIndex, endIndex, keepRecentTokens)` export.
+ * The canonical helper now requires an explicit `Tokenizer`; legacy callers use
+ * the tokenizer-less 4-arg shape, so adapt it with the shared model-agnostic
+ * tokenizer (mirroring `estimateTokens`). A raw re-export would instead misread
+ * the caller's `startIndex` as the tokenizer argument at runtime.
+ */
+export function findCutPoint(
+	entries: SessionEntry[],
+	startIndex: number,
+	endIndex: number,
+	keepRecentTokens: number,
+): CutPointResult {
+	// The coding-agent `SessionEntry` union is a superset of the compaction
+	// module's (the package split makes them nominally distinct); findCutPoint
+	// only walks message entries, so the extra variants are inert.
+	return computeCutPoint(entries as CompactionSessionEntry[], legacyTokenizer, startIndex, endIndex, keepRecentTokens);
+}
+
+/**
+ * Legacy `sessionEntryToContextMessages(entry)` export: project one session entry
+ * into its LLM/runtime messages. Plain custom/state entries do not participate in
+ * context and yield `[]`. omp's `buildSessionContext` only projects whole branches,
+ * so this ports upstream Pi's per-entry mapper.
+ */
+export function sessionEntryToContextMessages(entry: SessionEntry): AgentMessage[] {
+	if (entry.type === "message") {
+		const message = entry.message;
+		if (
+			(message.role === "user" ||
+				message.role === "assistant" ||
+				message.role === "toolResult" ||
+				message.role === "custom") &&
+			message.content == null
+		) {
+			return [{ ...message, content: [] }];
+		}
+		return [message];
+	}
+	if (entry.type === "custom_message") {
+		return [
+			createCustomMessage(
+				entry.customType,
+				entry.content ?? [],
+				entry.display,
+				entry.details,
+				entry.timestamp,
+				entry.attribution,
+			),
+		];
+	}
+	if (entry.type === "branch_summary" && entry.summary) {
+		return [createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp)];
+	}
+	if (entry.type === "compaction") {
+		return [createCompactionSummaryMessage(entry.summary, entry.tokensBefore, entry.timestamp)];
+	}
+	return [];
+}
 
 // Same barrel gap for two more legacy package-root exports: pi re-exported the
 // `CONFIG_DIR_NAME` constant and the CLI parser `parseArgs`. In omp
@@ -1431,6 +1591,57 @@ export { CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils";
 export { parseArgs } from "../cli/args";
 
 export * from "../index";
-export { formatBytes as formatSize } from "../tools/render-utils";
+export { formatBytes as formatSize } from "@oh-my-pi/pi-tui/render/render-utils";
 export { copyToClipboard } from "../utils/clipboard";
-export { Type } from "./typebox";
+export { Type } from "./legacy-typebox";
+
+// Legacy pi's `@earendil-works/pi-coding-agent` root exported an `is<Tool>ToolResult`
+// family of type guards that narrow a `tool_result` event (`ToolResultEvent`) by
+// tool name. omp removed them from the public API in 10.2.3, and the barrel above
+// does not forward them, so legacy extensions importing them (e.g.
+// `pi-lean-ctx@3.9.18`, which uses `isEditToolResult`/`isWriteToolResult` to
+// invalidate its read cache after a native edit/write) fail Bun's static export
+// check during validation (issue #8161). Restore the full guard family; legacy
+// `find`/`ls` tool results arrive through omp's custom-event branch, so those
+// guards narrow the tool name while leaving their details unknown.
+
+/** Narrow a `tool_result` event to the `bash` tool. */
+export function isBashToolResult(e: ToolResultEvent): e is BashToolResultEvent {
+	return e.toolName === "bash";
+}
+
+/** Narrow a `tool_result` event to the `read` tool. */
+export function isReadToolResult(e: ToolResultEvent): e is ReadToolResultEvent {
+	return e.toolName === "read";
+}
+
+/** Narrow a `tool_result` event to the `edit` tool. */
+export function isEditToolResult(e: ToolResultEvent): e is EditToolResultEvent {
+	return e.toolName === "edit";
+}
+
+/** Narrow a `tool_result` event to the `write` tool. */
+export function isWriteToolResult(e: ToolResultEvent): e is WriteToolResultEvent {
+	return e.toolName === "write";
+}
+
+/** Narrow a `tool_result` event to the `grep` tool. */
+export function isGrepToolResult(e: ToolResultEvent): e is GrepToolResultEvent {
+	return e.toolName === "grep";
+}
+
+/** Legacy `find` result event represented by omp's custom-event branch. */
+export type FindToolResultEvent = ToolResultEvent & { toolName: "find" };
+
+/** Narrow a `tool_result` event to the legacy `find` tool. */
+export function isFindToolResult(e: ToolResultEvent): e is FindToolResultEvent {
+	return e.toolName === "find";
+}
+
+/** Legacy `ls` result event represented by omp's custom-event branch. */
+export type LsToolResultEvent = ToolResultEvent & { toolName: "ls" };
+
+/** Narrow a `tool_result` event to the legacy `ls` tool. */
+export function isLsToolResult(e: ToolResultEvent): e is LsToolResultEvent {
+	return e.toolName === "ls";
+}

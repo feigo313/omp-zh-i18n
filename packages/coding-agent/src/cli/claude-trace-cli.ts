@@ -10,14 +10,14 @@ import * as path from "node:path";
 import * as tls from "node:tls";
 import * as zlib from "node:zlib";
 import { PtySession } from "@oh-my-pi/pi-natives";
-import xterm from "@xterm/headless";
+import xterm from "@oh-my-pi/pi-utils/vterm";
 
 const DEFAULT_PROXY_HOST = "127.0.0.1";
 const DEFAULT_PROXY_PORT = 8080;
 const DEFAULT_COMMAND = "claude";
 const DEFAULT_MESSAGE = "hi";
 const DEFAULT_TIMEOUT_MS = 120_000;
-const DEFAULT_INPUT_DELAY_MS = 1_000;
+const DEFAULT_INPUT_DELAY_MS = 3_000;
 const DEFAULT_COLS = 120;
 const DEFAULT_ROWS = 40;
 const DOUBLE_CRLF = Buffer.from("\r\n\r\n", "latin1");
@@ -27,14 +27,54 @@ const TEXT_DECODER = new TextDecoder();
 // Debug-only local MITM certificate. Claude is launched with
 // NODE_TLS_REJECT_UNAUTHORIZED=0, so the certificate has no trust value; it only
 // lets Node's TLS stack complete the CONNECT tunnel handshake.
-function getClaudeTraceDebugTlsCredentials(): { cert: string; key: string } {
-	const cert = process.env.OMP_CLAUDE_TRACE_DEBUG_CERT;
-	const key = process.env.OMP_CLAUDE_TRACE_DEBUG_KEY;
-	if (!cert || !key) {
-		throw new Error("Claude trace requires OMP_CLAUDE_TRACE_DEBUG_CERT and OMP_CLAUDE_TRACE_DEBUG_KEY.");
-	}
-	return { cert, key };
-}
+export const CLAUDE_TRACE_DEBUG_CERT = `-----BEGIN CERTIFICATE-----
+MIIDFzCCAf+gAwIBAgIUAe9omAqLbydZc5ZYZGhwbbpMSF0wDQYJKoZIhvcNAQEL
+BQAwGzEZMBcGA1UEAwwQb21wLWNsYXVkZS10cmFjZTAeFw0yNjA2MDIwODA2MjFa
+Fw0zNjA1MzAwODA2MjFaMBsxGTAXBgNVBAMMEG9tcC1jbGF1ZGUtdHJhY2UwggEi
+MA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCmpGe5T8B0oA2L82Rn5JJdXOBS
+ZX0DyBjiIK+Tqe8T3oAr41XDLnweqtrMDSBDYbVqAoKjNbaTUSYYcxSm0MAVs63w
+08SfJmShZM9pElfANqXqMiyhksFgji7JEyt/rbbId207a7s5KvRvm3g/sxN/wGtr
+C5LCLMlc2GWEGD8qrVIQbmLw884qvtXi70RFUPP3Wpy4wGMWSdE+9IA27R5cMJS5
+oHsO4HGB6J8VzLY+HGY2yr4BJ9qrAyjd1UetFd9RdcjyWpsbAfX8nWP+uleTNOiT
+ExNz7dPt/k6OPLNmI1iT/ruRS0uUzHZTimPd67TPQR/70RaW7Bh5wArawGw9AgMB
+AAGjUzBRMB0GA1UdDgQWBBQa4Ir8P3GAolZoPiuB4V2cq3riAjAfBgNVHSMEGDAW
+gBQa4Ir8P3GAolZoPiuB4V2cq3riAjAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3
+DQEBCwUAA4IBAQClPYki235gDEUu7eDm60qsAGWxbKVv4pSh+vB+xgNgzMk4aOuU
+mSfp8Y8covwklph8VfDoKTaEGqqX0Q5s74Ctl6Mwy7b0u8Zztk/g4GynLocI7TQD
+ftZMgZka49+FkEsjp+XZtQbO4vOL5UsccpsLhFQQQuhVyiJ4gNo/VzgvSDkBuf3Q
+Rz7xFiDKCqFEoMPty4+nKEw5832FJ5mDCOyMk6fGSO8Wbt/hmRQQFu2cSdoBs0OT
+AQQJETQjPkKeTDX4jdSAlOeKwfyjfdfgeQuMkzX8xafisJa66MLPzOVbIuGbvbWD
+QVCd76iYPcfNK+JZUhmAUvTHSuwgJMZ6+NgI
+-----END CERTIFICATE-----`;
+
+export const CLAUDE_TRACE_DEBUG_KEY = `-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCmpGe5T8B0oA2L
+82Rn5JJdXOBSZX0DyBjiIK+Tqe8T3oAr41XDLnweqtrMDSBDYbVqAoKjNbaTUSYY
+cxSm0MAVs63w08SfJmShZM9pElfANqXqMiyhksFgji7JEyt/rbbId207a7s5KvRv
+m3g/sxN/wGtrC5LCLMlc2GWEGD8qrVIQbmLw884qvtXi70RFUPP3Wpy4wGMWSdE+
+9IA27R5cMJS5oHsO4HGB6J8VzLY+HGY2yr4BJ9qrAyjd1UetFd9RdcjyWpsbAfX8
+nWP+uleTNOiTExNz7dPt/k6OPLNmI1iT/ruRS0uUzHZTimPd67TPQR/70RaW7Bh5
+wArawGw9AgMBAAECggEADX2mhA3H0pPuj35J36X/5Me9xWM//AwOr6febwGalazg
+Ctg3EOZ01/VptzaiKQetAdhoLmxidooNn9HD7JQJKPid7q7w7m1+R26mN/xrLD2A
+WyBqv+iQoo+ANs5y1BMChuIxmVY/FwFk6UWDNlekuXqgzPln4okbrYTmBbaszniO
+Mu1SI/3fpnTA3iJ634FUSRVoUPP8r0WEEUtpW1wAhsJR701gvKRYw/+YcRglkhm7
+T4l6TuBcgIVzUqAc3oZLHVIMKN0ZprZSeopSRozTcUANfYONakvK9Hx1qf+/rmTR
+qZHg2uOxlqvxyABnwdk8rmyFx8YqUeN9jaAbbXxtBQKBgQDQRjc0gVg4STqcFqUu
+FW35MZ88S7+xTuRd/EG1dpsu2lptx1yhSLTsF5GfxBQKXCQUfWrpkyuCmlV6s+wJ
+H0LSyAJQ4ffBsFterQz7dRKTlhRJNk5PYn8jjNCAuBYVSbQZqZ3yZgG3CT3G5+PZ
+8Ln3tJHqTRfP5B8KTMcNYiLI0wKBgQDM0/gdb9Dvdz/32GIpxwNNIb52IxnNVVrm
+M69+4XNg6CqvctZFuaMQ03W2J5IKAdESaCGLz9pwHZRjfBORcw3BPKD2QkfN5NJg
+hWvLlfAsblCYiCCjTCB6rf1OJOQ5fHoNFh1wqDaQCk0flsb9nlZmQQR5ZUHaJhSC
+QqMmeKvMrwKBgQDDzp+sH0Z/dGlDwg59auw/caWRHG4WFmOg8L4eCmoO/H4z41B0
+2VQu+mGQYNmue733/Yl8Gz62xL5EY88vLFK4tA1pWWiCknj0Y6Fm70QNuPVNd17c
+R2/cTlDgEzG/xdEqp0q1T62hFXEdBXoztZxBA2SDcQNIEeIU3uXs8SxevQKBgFp4
+acf+wody4aNERR900sV32RtvJ49lWxAA1kwxone0NF5oV7JWa2scK4r4cW3QHZuG
+uQJ7HV2WAxvqCu6cpf+rGuGKpxKPNkkBxXoX0Qye8SReRCQ8lL/7J74jV1b43yP2
+l6xR8D+w/R2tyFjvXfQuVZ6VFgAX/8kFS/DLLf7rAoGAcnFgCwyzcq6FWL8iW23J
+GnbZ0IQk6SPch87MzMmnOFlEXrCf5l832vwI65tNzOoB0yQoWVfBv5sb4Zy9zeFj
+FbkpRZC0Kfi9PLzDV4IawoIINYthOJxIKJg+yrmrUWCggXxwdzYIYKLRIskMXoYs
+mNMXfUstElEcKO7+DKiPi6U=
+-----END PRIVATE KEY-----`;
 
 export interface HeaderEntry {
 	name: string;
@@ -537,59 +577,78 @@ export class ClaudeMessagesProxy {
 	#handleProxyRequest(socket: net.Socket, head: string, rest: Buffer): void {
 		const firstLine = head.split("\r\n", 1)[0] ?? "";
 		const parts = firstLine.split(/\s+/u);
-		if (parts[0] !== "CONNECT") {
-			socket.end("HTTP/1.1 501 Not Implemented\r\nConnection: close\r\n\r\n");
+		if (parts[0] === "CONNECT") {
+			const target = parseConnectTarget(parts[1] ?? "");
+			if (!target) {
+				socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+				return;
+			}
+			socket.write("HTTP/1.1 200 Connection Established\r\n\r\n", () => this.#openMitmTunnel(socket, target, rest));
 			return;
 		}
-		const target = parseConnectTarget(parts[1] ?? "");
+		this.#handleForwardProxyRequest(socket, head, rest);
+	}
+
+	#handleForwardProxyRequest(socket: net.Socket, head: string, rest: Buffer): void {
+		const firstLine = head.split("\r\n", 1)[0] ?? "";
+		const parts = firstLine.split(/\s+/u);
+		const targetUrl = parts[1] ?? "";
+		let target: ConnectTarget | null = null;
+		if (targetUrl.startsWith("http://") || targetUrl.startsWith("https://")) {
+			try {
+				const parsed = new URL(targetUrl);
+				const isHttps = parsed.protocol === "https:";
+				const port = parsed.port ? Number.parseInt(parsed.port, 10) : isHttps ? 443 : 80;
+				if (Number.isSafeInteger(port) && port > 0 && port <= 65535) {
+					target = { host: parsed.hostname, port, display: `${parsed.hostname}:${port}` };
+				}
+			} catch {}
+		}
+		if (!target) {
+			const headers = parseHeaders(head).headers;
+			const hostHeader = headerValue(headers, "host");
+			if (hostHeader) {
+				target = parseConnectTarget(hostHeader);
+			}
+		}
 		if (!target) {
 			socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
 			return;
 		}
-		socket.write("HTTP/1.1 200 Connection Established\r\n\r\n", () => this.#openMitmTunnel(socket, target, rest));
+		const upstream = this.#track(
+			net.connect({ host: target.host, port: target.port }, () => {
+				upstream.write(head);
+				upstream.write(DOUBLE_CRLF);
+				if (rest.length > 0) upstream.write(rest);
+				socket.pipe(upstream);
+				upstream.pipe(socket);
+			}),
+		);
+		upstream.on("error", () => socket.destroy());
 	}
 
 	#openMitmTunnel(socket: net.Socket, target: ConnectTarget, rest: Buffer): void {
-		void this.#openMitmTunnelAsync(socket, target, rest).catch(() => socket.destroy());
-	}
-
-	async #openMitmTunnelAsync(socket: net.Socket, target: ConnectTarget, rest: Buffer): Promise<void> {
-		const clientReady = Promise.withResolvers<tls.TLSSocket>();
-		const { cert, key } = getClaudeTraceDebugTlsCredentials();
-		const tlsServer = tls.createServer({ cert, key, ALPNProtocols: ["http/1.1"] }, clientTls => {
-			this.#track(clientTls);
-			clientReady.resolve(clientTls);
-		});
-		tlsServer.once("error", error => clientReady.reject(error));
-		const listening = Promise.withResolvers<void>();
-		tlsServer.listen(0, DEFAULT_PROXY_HOST, () => listening.resolve());
-		await listening.promise;
-		const address = tlsServer.address();
-		if (!address || typeof address === "string") {
-			tlsServer.close();
-			throw new Error("Internal TLS bridge did not bind to a TCP address");
-		}
-		const bridge = this.#track(net.connect({ host: DEFAULT_PROXY_HOST, port: address.port }));
-		const connected = Promise.withResolvers<void>();
-		bridge.once("connect", () => connected.resolve());
-		bridge.once("error", error => connected.reject(error));
-		await connected.promise;
-		socket.pipe(bridge);
-		bridge.pipe(socket);
-		const closeInternalServer = () => tlsServer.close();
-		socket.once("close", closeInternalServer);
-		bridge.once("close", closeInternalServer);
-		if (rest.length > 0) bridge.write(rest);
-		const clientTls = await clientReady.promise;
-		const upstreamTls = this.#track(
-			tls.connect({
-				host: target.host,
-				port: target.port,
-				servername: net.isIP(target.host) ? undefined : target.host,
-				rejectUnauthorized: this.#upstreamTlsRejectUnauthorized,
+		const clientTls = this.#track(
+			new tls.TLSSocket(socket, {
+				isServer: true,
+				cert: CLAUDE_TRACE_DEBUG_CERT,
+				key: CLAUDE_TRACE_DEBUG_KEY,
 				ALPNProtocols: ["http/1.1"],
 			}),
 		);
+		if (rest.length > 0) {
+			clientTls.unshift(rest);
+		}
+		const upstreamTlsSocket: tls.TLSSocket = tls.connect({
+			host: target.host,
+			port: target.port,
+			servername: net.isIP(target.host) ? undefined : target.host,
+			rejectUnauthorized: this.#upstreamTlsRejectUnauthorized,
+			ALPNProtocols: ["http/1.1"],
+		});
+		// Annotate: `tls.connect` infers `any` under some @types/node versions,
+		// which would leave the "data" listener parameter untyped below.
+		const upstreamTls = this.#track(upstreamTlsSocket);
 		const requestParser = new HttpMessageParser("request");
 		const responseParser = new HttpMessageParser("response");
 		const responseQueue: Array<PendingCapturedRequest | null> = [];
@@ -601,8 +660,7 @@ export class ClaudeMessagesProxy {
 			}
 		};
 		clientTls.on("data", chunk => {
-			if (!Buffer.isBuffer(chunk)) return;
-			const data = Buffer.from(chunk);
+			const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
 			upstreamTls.write(data);
 			const messages = requestParser.push(data);
 			for (const message of messages) {
@@ -614,8 +672,7 @@ export class ClaudeMessagesProxy {
 			}
 		});
 		upstreamTls.on("data", chunk => {
-			if (!Buffer.isBuffer(chunk)) return;
-			const data = Buffer.from(chunk);
+			const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
 			clientTls.write(data);
 			flushResponses(responseParser.push(data));
 		});
@@ -633,7 +690,6 @@ export class ClaudeMessagesProxy {
 		});
 		clientTls.on("error", () => upstreamTls.destroy());
 		upstreamTls.on("error", () => clientTls.destroy());
-		clientTls.once("close", closeInternalServer);
 	}
 }
 function errorMessage(error: unknown): string {

@@ -7,9 +7,9 @@ RPC mode runs the coding agent as a newline-delimited JSON protocol over stdio.
 
 Primary implementation:
 
-- `src/modes/rpc/rpc-mode.ts`
-- `src/modes/rpc/rpc-types.ts`
-- `src/session/agent-session.ts`
+- `packages/coding-agent/src/modes/rpc/rpc-mode.ts`
+- `packages/coding-agent/src/modes/rpc/rpc-types.ts`
+- `packages/coding-agent/src/session/agent-session.ts`
 - `packages/agent/src/agent.ts`
 - `packages/agent/src/agent-loop.ts`
 
@@ -23,15 +23,15 @@ Behavior notes:
 
 - `@file` CLI arguments are rejected in RPC mode.
 - RPC mode disables automatic session title generation by default to avoid an extra model call.
-- RPC mode resets workflow-altering `todo.*`, `task.*`, `memory.backend`/`memories.enabled`, `advisor.*`, `async.*`, and `bash.autoBackground.*` settings to their built-in defaults instead of inheriting user overrides.
-- The process reads stdin as JSONL (`readJsonl(Bun.stdin.stream())`).
+- RPC/ACP host defaults cover task isolation/execution, memory, advisor, tier, async-job, and bash auto-background settings. They are applied only when a path is not explicitly configured; project/global config, `--config`, and isolated settings remain authoritative. Todo settings are not host-defaulted.
+- The process claims stdin before extension discovery, then parses it one non-empty JSONL line at a time. Malformed JSON emits a recoverable `command: "parse"` failure and does not terminate the loop.
 - At startup it writes a `ready` frame before processing commands. The frame advertises supported protocol versions and transport limits.
-- When stdin closes, pending host-tool calls and host-URI requests are rejected and the process exits with code `0`.
+- When stdin closes, pending extension UI, host-tool, and host-URI requests are rejected; accepted commands are drained, the session is disposed, pending stdout is delivered, and the process exits with code `0`.
 - Responses/events are written as one JSON object per line.
 
 ## Transport and Framing
 
-Protocol v1 frames are a single JSON object followed by `\n`. Every physical JSONL frame is limited to 1 MiB.
+Protocol v1 stdout frames are a single JSON object followed by `\n`. The server caps each physical stdout frame at 1 MiB. Inbound commands are always one unchunked JSONL object; clients SHOULD keep them within the advertised physical-frame limit.
 
 The initial ready frame uses protocol v1 and advertises the opt-in lossless transport:
 
@@ -64,9 +64,13 @@ After the success response, oversized stdout objects are emitted losslessly as a
 }
 ```
 
-Clients MUST validate `chunkId`, `index`, `count`, and `byteLength`, reject interleaved or interrupted sequences, enforce the advertised reassembly limit, concatenate decoded bytes in index order, decode them as strict UTF-8, and parse the result as one JSON object. The exported TypeScript `RpcFrameDecoder` implements this validation. The bundled TypeScript and Python `RpcClient` implementations negotiate v2 automatically when the ready frame advertises it.
+Clients MUST validate `chunkId`, `index`, `count`, and `byteLength`, reject interleaved or interrupted sequences, enforce the advertised reassembly limit, concatenate decoded bytes in index order, decode them as strict UTF-8, and parse the result as one JSON object. The TypeScript `RpcFrameDecoder`, exported from `@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame`, implements this validation. The bundled TypeScript and Python `RpcClient` implementations negotiate v2 automatically when the ready frame advertises it.
 
 Legacy clients may ignore the added ready fields and remain on v1. V1 retains its bounded fallback behavior for oversized output. Frames above the v2 reassembly ceiling still fail explicitly; large history APIs should use pagination rather than depending on arbitrarily large logical frames.
+
+Output goes directly to stdout while the reader keeps up. Under backpressure, the server spills pending bytes to a private temporary file and drains it in 64 KiB blocks, preserving frame order. This limits queued output memory at the cost of disk I/O and temporary disk usage, which can grow until the reader catches up. The file is removed when the backlog drains or the process shuts down. Output or spool failures are logged, dispose the session, and exit with code `1`.
+
+Clients MUST continue reading stdout after closing stdin. Normal EOF and extension-requested shutdown wait for pending output delivery; a client that keeps its stdout pipe open without reading can delay exit indefinitely.
 
 ### Outbound frame categories (stdout)
 
@@ -99,14 +103,14 @@ All commands accept optional `id?: string`.
 Important edge behavior from runtime:
 
 - Unknown command responses are emitted with `id: undefined` (even if the request had an `id`).
-- Parse/handler exceptions in the input loop emit `command: "parse"` with `id: undefined`.
+- Malformed JSON and synchronous dispatch failures emit `command: "parse"` with `id: undefined`. Exceptions while handling a recognized command emit a failure with that command's `type` and `id`.
 - `prompt` and `abort_and_prompt` return immediate success, then may emit a later error response with the **same** id if async prompt scheduling fails.
 - `prompt` success responses may include `data.agentInvoked`. `false` means the prompt completed locally without an agent turn; `true` means the prompt produced agent lifecycle events; omitted means the host must rely on session events for completion.
 - `abort_and_prompt` does not currently emit `data.agentInvoked` or `prompt_result`; hosts should treat it as the legacy abort-then-schedule path and rely on session events or same-id scheduling errors.
 
 ## Command Schema (canonical)
 
-`RpcCommand` is defined in `src/modes/rpc/rpc-types.ts`:
+`RpcCommand` is defined in `packages/coding-agent/src/modes/rpc/rpc-types.ts`:
 
 ### Prompting
 
@@ -197,12 +201,17 @@ The bundled TypeScript `RpcClient.getMessages()` and Python `RpcClient.get_messa
 - `{ id?, type: "get_login_providers" }`
 - `{ id?, type: "login", providerId: string }`
 
+Login forwards ordinary OAuth input prompts only after the provider emits an
+authorization URL. Prompts marked `secret: true` are always rejected with a
+failed `login` response directing the user to the terminal UI; no ordinary
+`input` request is emitted. RPC does not negotiate secret-input support.
+
 ## Response Schema
 
 All command results use `RpcResponse`:
 
 - Success: `{ id?, type: "response", command: <command>, success: true, data?: ... }`
-- Failure: `{ id?, type: "response", command: string, success: false, error: string }`
+- Failure: `{ id?, type: "response", command: string, success: false, error: string, code?: string }`
 
 Data payloads are command-specific and defined in `rpc-types.ts`.
 
@@ -428,6 +437,11 @@ The response payload is:
 These tools are added to the active session tool registry before the next model
 call. Re-sending `set_host_tools` replaces the previous host-owned set.
 
+Definitions also accept `hidden?: boolean` and
+`loadMode?: "essential" | "discoverable"`. An explicit mode wins. When omitted,
+known essential built-in names remain `"essential"`; other host tools default
+to `"discoverable"`. `toolNames` in the response lists the registered names.
+
 ### `set_host_uri_schemes` payload
 
 Replaces the current set of host-owned URL schemes the RPC server should
@@ -475,9 +489,11 @@ Common event types:
 - `tool_execution_start`, `tool_execution_update`, `tool_execution_end`
 - `auto_compaction_start`, `auto_compaction_end`
 - `auto_retry_start`, `auto_retry_end`
+- `retry_fallback_applied`, `retry_fallback_succeeded`
+- `model_changed`, `thinking_level_changed`
 - `ttsr_triggered`
-- `todo_reminder`
-- `todo_auto_clear`
+- `todo_reminder`, `todo_auto_clear`
+- `irc_message`, `notice`, `goal_updated`
 
 Extension runner errors are emitted separately as:
 
@@ -491,6 +507,43 @@ Extension runner errors are emitted separately as:
 ```
 
 `message_update` includes streaming deltas in `assistantMessageEvent` (text/thinking/toolcall deltas).
+
+`agent_end` has this session-level shape (in addition to optional telemetry fields):
+
+```ts
+{
+  type: "agent_end";
+  messages: AgentMessage[];
+  isTerminal?: boolean;
+}
+```
+
+`isTerminal: false` means maintenance or async delivery has scheduled more work,
+so the session will resume before its true final settle. Treat an `agent_end` as
+run completion only when `isTerminal !== false`; the field is optional so frames
+from older runtimes, where it is absent, remain terminal-compatible.
+
+### Available commands
+
+`get_available_commands` returns `{ commands }`, and the same array is pushed
+in `available_commands_update` frames at startup and after command metadata
+changes. Each command has `name`, `source`, and optional `aliases`,
+`description`, `input.hint`, and `subcommands`.
+
+### Subagent subscriptions
+
+Subagent forwarding defaults to `"off"`. `set_subagent_subscription` selects:
+
+- `"off"`: no forwarded subagent frames
+- `"progress"`: lifecycle and progress frames
+- `"events"`: lifecycle, progress, and full subagent event frames
+
+`get_subagents` returns the registry snapshot sorted by subagent index and id.
+`get_subagent_messages` selects a transcript by `subagentId` or `sessionFile`;
+`fromByte` supports incremental reads. Its result contains `sessionFile`,
+`fromByte`, `nextByte`, `reset`, raw transcript `entries`, and converted
+`messages`. If `fromByte` exceeds the current file size, reading restarts at
+byte zero and reports `reset: true`.
 
 ## Prompt/Queue Concurrency and Ordering
 
@@ -507,7 +560,7 @@ This is the most important operational behavior.
 That means:
 
 - command acceptance != run completion
-- agent turns complete via `agent_end`
+- agent turns complete only on `agent_end` frames where `isTerminal !== false`
 - local-only prompts complete via `data.agentInvoked: false` on the response or via a later `prompt_result`
 
 ### While streaming
@@ -545,6 +598,10 @@ Extensions in RPC mode use request/response UI frames.
 `RpcExtensionUIRequest` (`type: "extension_ui_request"`) methods:
 
 - `select`, `confirm`, `input`, `editor`, `cancel`
+  - `select` keeps labels in `options: string[]` and, when any option has a
+    description, emits a positionally aligned
+    `optionDetails: Array<{ description?: string }>` array. Hosts that do not
+    render descriptions can continue using `options` alone.
 - `notify`, `setStatus`, `setWidget`, `setTitle`, `set_editor_text`
 - `open_url` (emitted by RPC login flows)
 
@@ -710,6 +767,10 @@ a message or fall back to `content` for textual error surfacing:
 - Schemes are global to the process; `set_host_uri_schemes` replaces the
   previous set, unregistering anything not in the new list.
 - Schemes are normalized to lowercase before registration.
+- Successful reads require `content`. `contentType` defaults to `text/plain`
+  and, when supplied, is `"text/plain"`, `"text/markdown"`, or
+  `"application/json"`. A result-level `immutable` overrides the registered
+  scheme's value for that read.
 
 ## Error Model and Recoverability
 
@@ -751,7 +812,7 @@ stdout sequence (typical):
 { "id": "req_1", "type": "response", "command": "prompt", "success": true }
 { "type": "agent_start" }
 { "type": "message_update", "assistantMessageEvent": { "type": "text_delta", "delta": "..." }, "message": { "role": "assistant", "content": [] } }
-{ "type": "agent_end", "messages": [] }
+{ "type": "agent_end", "messages": [], "isTerminal": true }
 ```
 
 ### 2) Prompt during streaming with explicit queue policy
@@ -797,9 +858,11 @@ stdin:
 { "type": "extension_ui_response", "id": "ui_7", "value": "feature/rpc-host" }
 ```
 
-## Notes on `RpcClient` helper
+## Client libraries
 
-`src/modes/rpc/rpc-client.ts` is a convenience wrapper, not the protocol definition.
+### TypeScript helper
+
+`packages/coding-agent/src/modes/rpc/rpc-client.ts` is a convenience wrapper, not the protocol definition.
 
 Current helper characteristics:
 
@@ -809,4 +872,17 @@ Current helper characteristics:
 - Supports host-owned custom tools via `setCustomTools()` and automatic handling of `host_tool_call` / `host_tool_cancel`
 - Wraps common protocol commands including OAuth `getLoginProviders()` / `login(...)`; use raw protocol frames for any surface not wrapped by the helper.
 
-Use raw protocol frames if you need complete surface coverage.
+### Python package
+
+The bundled [`omp-rpc`](../python/omp-rpc/pyproject.toml) distribution provides the process-backed Python client. Its import package is `omp_rpc`; the package API, typed commands and events, host-tool/host-URI helpers, and orchestration examples are maintained in the [`omp-rpc` README](../python/omp-rpc/README.md).
+
+```python
+from omp_rpc import RpcClient
+
+with RpcClient(provider="anthropic", model="claude-sonnet-4-5") as client:
+    state = client.get_state()
+    turn = client.prompt_and_wait("Reply with just the word hello")
+    print(turn.require_assistant_text())
+```
+
+By default, `RpcClient` starts `omp --mode rpc`; pass `command=[...]` to own the exact child command. It handles request correlation, typed notifications, v2 negotiation and chunk reassembly, message pagination, extension UI, and host-owned tools and URI schemes. The Python package owns that client API and process lifecycle; this document and `rpc-types.ts` remain the canonical wire contract. Use raw protocol frames when a client library does not wrap the surface you need.

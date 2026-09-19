@@ -1,8 +1,17 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getTerminalId } from "@oh-my-pi/pi-tui";
-import { getSessionsDir, getTerminalSessionsDir, isEnoent, logger, resolveEquivalentPath } from "@oh-my-pi/pi-utils";
+import { getTerminalId } from "@oh-my-pi/pi-tui/ttyid";
+import {
+	getCustomSessionFilesDir,
+	getSessionsDir,
+	getTerminalSessionsDir,
+	hashPath,
+	pathIsWithin,
+	resolveEquivalentPath,
+} from "@oh-my-pi/pi-utils/dirs";
+import { isEnoent } from "@oh-my-pi/pi-utils/fs-error";
+import * as logger from "@oh-my-pi/pi-utils/logger";
 import type { SessionStorage } from "./session-storage";
 
 const migratedSessionRoots = new Set<string>();
@@ -17,11 +26,13 @@ function migrateSessionDirPath(oldPath: string, newPath: string): void {
 		for (const file of fs.readdirSync(oldPath)) {
 			const src = path.join(oldPath, file);
 			const dst = path.join(newPath, file);
-			if (!fs.existsSync(dst)) {
-				fs.renameSync(src, dst);
+			if (fs.existsSync(dst)) {
+				logger.warn("Session directory migration collision; preserving legacy entry", { src, dst });
+				continue;
 			}
+			fs.renameSync(src, dst);
 		}
-		fs.rmSync(oldPath, { recursive: true, force: true });
+		fs.rmdirSync(oldPath);
 		return;
 	}
 	if (existing) {
@@ -40,7 +51,28 @@ function encodeRelativeSessionDirName(prefix: string, relative: string): string 
 	return encoded ? (prefix.endsWith("-") ? `${prefix}${encoded}` : `${prefix}-${encoded}`) : prefix;
 }
 
-function getDefaultSessionDirName(cwd: string): { encodedDirName: string; resolvedCwd: string } {
+/**
+ * Reconstruct the short-lived hashed session dir name used by 17.2.5-17.2.8
+ * (reverted PR #7397): `<scope>-<readable>-<sha256hex>` keyed by the canonical
+ * cwd. Kept only so {@link migrateHashedSessionDir} can recover sessions
+ * stranded when 17.2.9 restored the legacy names without a reverse migration.
+ */
+function encodeHashedSessionDirName(canonicalCwd: string, scope: "home" | "tmp" | "abs"): string {
+	const normalized = canonicalCwd.replaceAll("\\", "/");
+	const readable = path
+		.basename(canonicalCwd)
+		.replace(/[^a-zA-Z0-9._-]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(-80);
+	const digest = Bun.SHA256.hash(normalized, "hex");
+	return `${scope}-${readable || "project"}-${digest}`;
+}
+
+function getDefaultSessionDirName(cwd: string): {
+	encodedDirName: string;
+	hashedDirName: string;
+	resolvedCwd: string;
+} {
 	const resolvedCwd = path.resolve(cwd);
 	const canonicalCwd = resolveEquivalentPath(resolvedCwd);
 	const home = os.homedir();
@@ -49,13 +81,19 @@ function getDefaultSessionDirName(cwd: string): { encodedDirName: string; resolv
 	const canonicalTempRoot = resolveEquivalentPath(tempRoot);
 	const homeRelative = path.relative(canonicalHome, canonicalCwd);
 	const tempRelative = path.relative(canonicalTempRoot, canonicalCwd);
-	const encodedDirName =
-		homeRelative === "" || (!homeRelative.startsWith("..") && !path.isAbsolute(homeRelative))
-			? encodeRelativeSessionDirName("-", homeRelative)
-			: tempRelative === "" || (!tempRelative.startsWith("..") && !path.isAbsolute(tempRelative))
-				? encodeRelativeSessionDirName("-tmp", tempRelative)
-				: encodeLegacyAbsoluteSessionDirName(canonicalCwd);
-	return { encodedDirName, resolvedCwd };
+	let encodedDirName: string;
+	let scope: "home" | "tmp" | "abs";
+	if (homeRelative === "" || (!homeRelative.startsWith("..") && !path.isAbsolute(homeRelative))) {
+		encodedDirName = encodeRelativeSessionDirName("-", homeRelative);
+		scope = "home";
+	} else if (tempRelative === "" || (!tempRelative.startsWith("..") && !path.isAbsolute(tempRelative))) {
+		encodedDirName = encodeRelativeSessionDirName("-tmp", tempRelative);
+		scope = "tmp";
+	} else {
+		encodedDirName = encodeLegacyAbsoluteSessionDirName(canonicalCwd);
+		scope = "abs";
+	}
+	return { encodedDirName, hashedDirName: encodeHashedSessionDirName(canonicalCwd, scope), resolvedCwd };
 }
 
 /**
@@ -94,8 +132,12 @@ function migrateHomeSessionDirs(sessionsRoot: string): void {
 
 		try {
 			migrateSessionDirPath(oldPath, newPath);
-		} catch {
-			// Best effort
+		} catch (error) {
+			logger.warn("Failed to migrate legacy home session directory", {
+				oldPath,
+				newPath,
+				error: String(error),
+			});
 		}
 	}
 }
@@ -106,8 +148,32 @@ function migrateLegacyAbsoluteSessionDir(cwd: string, sessionDir: string, sessio
 
 	try {
 		migrateSessionDirPath(legacyDir, sessionDir);
-	} catch {
-		// Best effort
+	} catch (error) {
+		logger.warn("Failed to migrate legacy session directory", {
+			oldPath: legacyDir,
+			newPath: sessionDir,
+			error: String(error),
+		});
+	}
+}
+
+/**
+ * Migrate a 17.2.5-17.2.8 hashed session dir back into its legacy path-based
+ * directory. The 17.2.9 revert restored the legacy names but dropped migration,
+ * stranding sessions written under the hashed scheme (issue #7677). Best-effort.
+ */
+function migrateHashedSessionDir(hashedDirName: string, sessionDir: string, sessionsRoot: string): void {
+	const hashedDir = path.join(sessionsRoot, hashedDirName);
+	if (hashedDir === sessionDir || !fs.existsSync(hashedDir)) return;
+
+	try {
+		migrateSessionDirPath(hashedDir, sessionDir);
+	} catch (error) {
+		logger.warn("Failed to migrate hashed session directory", {
+			oldPath: hashedDir,
+			newPath: sessionDir,
+			error: String(error),
+		});
 	}
 }
 
@@ -130,10 +196,11 @@ export function computeDefaultSessionDir(
 	storage: SessionStorage,
 	sessionsRoot: string = getSessionsDir(),
 ): string {
-	const { encodedDirName, resolvedCwd } = getDefaultSessionDirName(cwd);
+	const { encodedDirName, hashedDirName, resolvedCwd } = getDefaultSessionDirName(cwd);
 	migrateHomeSessionDirs(sessionsRoot);
 	const sessionDir = path.join(sessionsRoot, encodedDirName);
 	migrateLegacyAbsoluteSessionDir(resolvedCwd, sessionDir, sessionsRoot);
+	migrateHashedSessionDir(hashedDirName, sessionDir, sessionsRoot);
 	storage.ensureDirSync(sessionDir);
 	return sessionDir;
 }
@@ -142,28 +209,121 @@ export function computeDefaultSessionDir(
 // Terminal breadcrumbs: maps terminal (TTY) -> last session file for --continue
 // =============================================================================
 
+/** Prefix for the optional cwd device+inode line in a terminal breadcrumb. */
+const CWDSTAT_PREFIX = "cwdstat ";
+
+export interface CwdIdentity {
+	dev: string;
+	ino: string;
+}
+
+/**
+ * Snapshot the directory identity of `cwd` for later move detection.
+ * A later path with the same device+inode is the same directory after rename.
+ */
+export function readCwdIdentity(cwd: string): CwdIdentity | undefined {
+	try {
+		const st = fs.statSync(path.resolve(cwd), { bigint: true });
+		if (!st.isDirectory()) return undefined;
+		return { dev: st.dev.toString(), ino: st.ino.toString() };
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * True when `targetCwd` is the same directory that `cwdIdentity` was recorded
+ * from — i.e. the project was renamed or moved, not merely deleted/unmounted.
+ * Missing identity (legacy breadcrumb, or cwd absent at write time) is not evidence.
+ *
+ * Same-filesystem `mv` and `git worktree move` preserve `dev`+`ino` and qualify.
+ * A cross-filesystem `mv` is copy+unlink (new inode, possibly new `dev`) and
+ * therefore returns false — that is intentional. Absence is not a move; we
+ * would rather leave the session in the original bucket than steal it into an
+ * unrelated continue cwd (#11565).
+ */
+export function hasPositiveMovedProjectEvidence(cwdIdentity: CwdIdentity | undefined, targetCwd: string): boolean {
+	if (!cwdIdentity) return false;
+	const target = readCwdIdentity(targetCwd);
+	return target !== undefined && target.dev === cwdIdentity.dev && target.ino === cwdIdentity.ino;
+}
+
+function parseBreadcrumbExtras(lines: string[]): {
+	fresh: boolean;
+	cwdIdentity: CwdIdentity | undefined;
+} {
+	let fresh = false;
+	let cwdIdentity: CwdIdentity | undefined;
+	for (const extra of lines.slice(2)) {
+		if (extra === "fresh") {
+			fresh = true;
+			continue;
+		}
+		if (extra.startsWith(CWDSTAT_PREFIX)) {
+			const [dev, ino] = extra.slice(CWDSTAT_PREFIX.length).split(" ");
+			if (dev && ino) cwdIdentity = { dev, ino };
+		}
+	}
+	return { fresh, cwdIdentity };
+}
+
+/**
+ * Record a session's exact file in the persistent custom-files registry when
+ * the managed-root glob scan cannot fully account for it. Idempotent: the
+ * marker is keyed by a hash of the resolved file, and its content is the
+ * absolute path. Best-effort — a failure here must never break session
+ * creation.
+ *
+ * `sessionFile` may be relative (e.g. `--session .omp-sessions/work`); it is
+ * resolved against the recorded `cwd`, matching how the breadcrumb stores it.
+ */
+function recordCustomSessionFile(cwd: string, sessionFile: string): void {
+	try {
+		const resolvedSessionFile = path.resolve(cwd, sessionFile);
+		if (pathIsWithin(getSessionsDir(), resolvedSessionFile) && resolvedSessionFile.endsWith(".jsonl")) return;
+		const registryDir = getCustomSessionFilesDir();
+		fs.mkdirSync(registryDir, { recursive: true });
+		fs.writeFileSync(path.join(registryDir, hashPath(resolvedSessionFile)), resolvedSessionFile);
+	} catch (err) {
+		if (!isEnoent(err)) logger.debug("Custom session file record failed", { err });
+	}
+}
 /**
  * Write a breadcrumb linking the current terminal to a session file.
  * The breadcrumb contains the cwd and session path so --continue can
  * find "this terminal's last session" even when running concurrent instances.
  *
- * `fresh` marks a `/new` (or freshly-minted) session boundary whose JSONL is
- * not yet materialized (new-session persistence is lazy until assistant output
- * exists). A fresh breadcrumb is honored by {@link readTerminalBreadcrumbEntry}
- * even when its target file is still absent, so relaunch/auto-resume reopens the
- * post-`/new` session instead of falling back to the pre-`/new` transcript. Once
- * the session materializes the caller rewrites the breadcrumb with `fresh:false`
- * so a later external delete is still treated as a genuinely stale crumb.
+ * `fresh` marks a freshly minted, lazy session whose JSONL is not yet
+ * materialized. A fresh breadcrumb is honored by
+ * {@link readTerminalBreadcrumbEntry} even when its target file is still absent,
+ * so a same-terminal relaunch does not fall back to an older transcript. Explicit
+ * `SessionManager.newSession()` boundaries are materialized and therefore also
+ * survive relaunches whose terminal identity changed. Once any lazy session
+ * materializes, the caller rewrites the breadcrumb with `fresh:false` so a later
+ * external delete is still treated as a genuinely stale crumb.
+ *
+ * When `cwd` exists, the breadcrumb also records its device+inode so
+ * `--continue` can tell a rename/move from a deleted or unmounted path.
  */
 export function writeTerminalBreadcrumb(cwd: string, sessionFile: string, fresh = false): void {
+	// Persist session files the managed-root glob scan cannot fully account for,
+	// regardless of terminal identity. Storage GC needs the exact path after the
+	// per-terminal breadcrumb is overwritten by a later session.
+	recordCustomSessionFile(cwd, sessionFile);
+
 	const terminalId = getTerminalId();
 	if (!terminalId) return;
 
 	const breadcrumbDir = getTerminalSessionsDir();
 	const breadcrumbFile = path.join(breadcrumbDir, terminalId);
-	const content = fresh ? `${cwd}\n${sessionFile}\nfresh\n` : `${cwd}\n${sessionFile}\n`;
+	const extras: string[] = [];
+	if (fresh) extras.push("fresh");
+	const identity = readCwdIdentity(cwd);
+	if (identity) extras.push(`${CWDSTAT_PREFIX}${identity.dev} ${identity.ino}`);
+	const extraBlock = extras.length > 0 ? `${extras.join("\n")}\n` : "";
+	const content = `${cwd}\n${sessionFile}\n${extraBlock}`;
 	// Synchronous + best-effort. Infrequent (session create/switch/reset, never
-	// per-append), and writing in order matters: a lazy `/new` fresh crumb is
+	// per-append), and writing in order matters: a lazy fresh-session crumb is
 	// re-stamped non-fresh the instant the session materializes, so an async
 	// fire-and-forget could land the two writes out of order and leave a
 	// materialized session marked fresh.
@@ -182,6 +342,8 @@ export interface TerminalBreadcrumb {
 	exists: boolean;
 	/** Recorded as a `/new` fresh-session boundary whose JSONL may not exist yet. */
 	fresh: boolean;
+	/** Device+inode of `cwd` when the breadcrumb was written, if that path existed. */
+	cwdIdentity?: CwdIdentity;
 }
 
 /**
@@ -191,9 +353,9 @@ export interface TerminalBreadcrumb {
  * mismatch (e.g. a moved/renamed worktree).
  *
  * A missing target file yields `null` UNLESS the breadcrumb is a `fresh`
- * boundary — a lazy `/new` session whose JSONL was never written — in which case
- * the entry is returned with `exists:false` so the caller can distinguish it
- * from a genuinely stale/deleted breadcrumb.
+ * boundary — a lazy session whose JSONL was never written — in which case the
+ * entry is returned with `exists:false` so the caller can distinguish it from a
+ * genuinely stale/deleted breadcrumb.
  */
 export async function readTerminalBreadcrumbEntry(): Promise<TerminalBreadcrumb | null> {
 	const terminalId = getTerminalId();
@@ -207,13 +369,13 @@ export async function readTerminalBreadcrumbEntry(): Promise<TerminalBreadcrumb 
 
 		const breadcrumbCwd = lines[0];
 		const sessionFile = lines[1];
-		const fresh = lines[2] === "fresh";
+		const { fresh, cwdIdentity } = parseBreadcrumbExtras(lines);
 
 		const stat = fs.statSync(sessionFile, { throwIfNoEntry: false });
 		const exists = stat?.isFile() === true;
 		// A materialized target resumes normally; a missing target is honored only
-		// for a fresh `/new` boundary (never-written lazy session).
-		if (exists || fresh) return { cwd: breadcrumbCwd, sessionFile, exists, fresh };
+		// for a never-written lazy fresh-session boundary.
+		if (exists || fresh) return { cwd: breadcrumbCwd, sessionFile, exists, fresh, cwdIdentity };
 	} catch (err) {
 		if (!isEnoent(err)) logger.debug("Terminal breadcrumb read failed", { err });
 		// Breadcrumb doesn't exist or is corrupt — fall through

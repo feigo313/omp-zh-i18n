@@ -19,9 +19,17 @@
  * `types.ts` via the `export *` below — pi-ai still exports both as types,
  * only the runtime `Type` builder and `StringEnum()` helper were removed.
  */
-import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
+import {
+	type Api,
+	type AssistantMessage,
+	type AssistantMessageEventStream,
+	type Context,
+	type Model,
+	type SimpleStreamOptions,
+	streamSimple,
+} from "@oh-my-pi/pi-ai";
 import type { Effort } from "@oh-my-pi/pi-catalog/effort";
-import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
+import { clampThinkingLevelForModel, getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import {
 	calculateCost,
 	getBundledModel,
@@ -29,7 +37,7 @@ import {
 	getBundledProviders,
 	modelsAreEqual,
 } from "@oh-my-pi/pi-catalog/models";
-import { type TSchema, Type } from "./typebox";
+import { type TSchema, Type } from "./legacy-typebox";
 
 export interface StringEnumOptions<T extends string> {
 	description?: string;
@@ -81,6 +89,20 @@ export function clampThinkingLevel<TApi extends Api>(model: Model<TApi>, level: 
 }
 
 /**
+ * Enumerate the thinking levels a model supports, mirroring historical pi-ai's
+ * `getSupportedThinkingLevels` (`@earendil-works/pi-ai` `models.ts`). Upstream
+ * returns `["off"]` for non-reasoning models and, for reasoning models, `off`
+ * followed by each selectable effort in canonical order; OMP's baked
+ * `getSupportedEfforts` supplies that effort ladder directly. Legacy `/thinking`
+ * menus (e.g. `@companion-ai/feynman`) call this to list the levels a user may
+ * pick for the active model.
+ */
+export function getSupportedThinkingLevels<TApi extends Api>(model: Model<TApi>): (Effort | "off")[] {
+	if (!model.reasoning) return ["off"];
+	return ["off", ...getSupportedEfforts(model)];
+}
+
+/**
  * Provider-error classification patterns ported verbatim from historical pi-ai
  * (`@earendil-works/pi-ai` `utils/retry.ts`). Legacy extensions call
  * {@link isRetryableAssistantError} to decide whether to restart a failed
@@ -121,6 +143,23 @@ export { calculateCost, getBundledModel, getBundledModels, getBundledProviders, 
 export const getModel = getBundledModel;
 export const getModels = getBundledModels;
 
+/**
+ * Stream OpenAI Responses through the historical simple-options contract.
+ *
+ * Legacy `/compat` callers pass {@link SimpleStreamOptions}; routing through
+ * `streamSimple` preserves option normalization before provider dispatch.
+ *
+ * Transient-failure retry (overload, rate-limit, 5xx) is the **caller's
+ * responsibility**. Oneshot callers that collect the full result before acting
+ * should wrap with `retryTransientCompletion` from `@oh-my-pi/pi-ai`.
+ */
+export function streamSimpleOpenAIResponses(
+	model: Model<"openai-responses">,
+	context: Context,
+	options?: SimpleStreamOptions,
+): AssistantMessageEventStream {
+	return streamSimple(model, context, options);
+}
 /**
  * Compatibility re-exports for runtime helpers that upstream
  * `@earendil-works/pi-ai` exposed from its package root but omp's

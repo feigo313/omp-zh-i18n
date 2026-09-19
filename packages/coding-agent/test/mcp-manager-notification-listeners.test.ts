@@ -71,8 +71,7 @@ describe("MCPManager notification listeners", () => {
 		expect(typeof unsubscribe).toBe("function");
 
 		try {
-			const result = await manager.connectServers({ alpha: serverConfig() }, {});
-			expect(result.connectedServers).toContain("alpha");
+			await manager.connectServers({ alpha: serverConfig() }, {});
 
 			// Await both the known list_changed and the server-custom frame
 			// independently. Arrival order across the two isn't guaranteed

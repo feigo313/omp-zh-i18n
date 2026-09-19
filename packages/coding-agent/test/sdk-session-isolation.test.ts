@@ -12,6 +12,7 @@ import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as secrets from "@oh-my-pi/pi-coding-agent/secrets";
+import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { VibeSessionRegistry } from "@oh-my-pi/pi-coding-agent/vibe/runtime";
@@ -233,6 +234,59 @@ describe("createAgentSession session storage isolation", () => {
 		expect(replacement).toMatchObject({ status: "idle", session: null });
 	});
 
+	it("reclaims an unrevivable parked generation before a fresh same-id spawn", async () => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-sdk-generation-corpse-${Snowflake.next()}-`));
+		tempDirs.push(tempDir);
+		const cwd = path.join(tempDir, "project");
+		fs.mkdirSync(cwd, { recursive: true });
+		AgentLifecycleManager.resetGlobalForTests();
+		AgentRegistry.resetGlobalForTests();
+		const lifecycle = AgentLifecycleManager.global();
+		const registry = AgentRegistry.global();
+		const corpse = registry.register({
+			id: "reused-worker",
+			displayName: "dead generation",
+			kind: "sub",
+			parentId: "Main",
+			session: null,
+			sessionFile: path.join(tempDir, "old-worker.jsonl"),
+			status: "parked",
+		});
+
+		let session: AgentSession | undefined;
+		try {
+			({ session } = await createAgentSession({
+				cwd,
+				agentDir: path.join(tempDir, "agent"),
+				modelRegistry: sharedModelRegistry,
+				settings: Settings.isolated(),
+				disableExtensionDiscovery: true,
+				skills: [],
+				contextFiles: [],
+				promptTemplates: [],
+				slashCommands: [],
+				enableMCP: false,
+				enableLsp: false,
+				agentRegistry: registry,
+				agentId: "reused-worker",
+				agentDisplayName: "fresh generation",
+				parentTaskPrefix: "reused-worker",
+				parentAgentId: "Main",
+				taskDepth: 1,
+				expectedAgentRef: null,
+			}));
+			const replacement = registry.get("reused-worker");
+			expect(replacement).toBeDefined();
+			expect(replacement).not.toBe(corpse);
+			expect(replacement?.session).toBe(session);
+		} finally {
+			await session?.dispose();
+			await lifecycle.dispose();
+			AgentLifecycleManager.resetGlobalForTests();
+			AgentRegistry.resetGlobalForTests();
+		}
+	});
+
 	it("reuses the exact parked ref authorized for revival", async () => {
 		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-sdk-generation-revive-${Snowflake.next()}-`));
 		tempDirs.push(tempDir);
@@ -349,7 +403,7 @@ describe("createAgentSession session storage isolation", () => {
 			await session.dispose();
 		}
 	});
-	it("loads obfuscator only when secrets exist", async () => {
+	it("loads configured secrets per session alongside built-in credential redaction", async () => {
 		await withClearedSecretEnv(async () => {
 			const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-sdk-secrets-${Snowflake.next()}-`));
 			tempDirs.push(tempDir);
@@ -370,6 +424,7 @@ describe("createAgentSession session storage isolation", () => {
 				enableMCP: false,
 				enableLsp: false,
 			};
+			const configuredSecret = "sdk-secret-token-123456";
 
 			const existingKeySpy = spyOn(secrets, "getExistingSecretPlaceholderKey").mockImplementation(
 				async () => undefined,
@@ -377,7 +432,9 @@ describe("createAgentSession session storage isolation", () => {
 			try {
 				const withoutSecrets = await createAgentSession(commonOptions);
 				try {
-					expect(withoutSecrets.session.obfuscator?.hasSecrets()).toBeFalsy();
+					const obfuscator = withoutSecrets.session.obfuscator;
+					expect(obfuscator?.hasSecrets()).toBe(true);
+					expect(obfuscator?.obfuscate(configuredSecret)).toBe(configuredSecret);
 				} finally {
 					await withoutSecrets.session.dispose();
 				}
@@ -386,11 +443,13 @@ describe("createAgentSession session storage isolation", () => {
 			}
 
 			fs.mkdirSync(path.join(cwd, ".omp"), { recursive: true });
-			fs.writeFileSync(path.join(cwd, ".omp", "secrets.yml"), "- type: plain\n  content: sdk-secret-token-123456\n");
+			fs.writeFileSync(path.join(cwd, ".omp", "secrets.yml"), `- type: plain\n  content: ${configuredSecret}\n`);
 
 			const withSecrets = await createAgentSession(commonOptions);
 			try {
-				expect(withSecrets.session.obfuscator?.hasSecrets()).toBe(true);
+				const obfuscator = withSecrets.session.obfuscator;
+				expect(obfuscator?.hasSecrets()).toBe(true);
+				expect(obfuscator?.obfuscate(configuredSecret)).not.toContain(configuredSecret);
 			} finally {
 				await withSecrets.session.dispose();
 			}

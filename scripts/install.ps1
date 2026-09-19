@@ -16,11 +16,55 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Fail fast on hosts older than Windows PowerShell 5.1: cmdlets used below
+# (e.g. Invoke-WebRequest -TimeoutSec) are missing or unreliable there and
+# fail with cryptic errors halfway through the install. Anything newer,
+# including PowerShell 7+, passes this check.
+if ($PSVersionTable.PSVersion -lt [version]"5.1") {
+    throw "Windows PowerShell 5.1 or newer is required (found $($PSVersionTable.PSVersion)). Install PowerShell 7 from https://aka.ms/powershell and re-run the installer."
+}
+
 $Repo = "can1357/oh-my-pi"
 $Package = "@oh-my-pi/pi-coding-agent"
 $InstallDir = if ($env:PI_INSTALL_DIR) { $env:PI_INSTALL_DIR } else { "$env:LOCALAPPDATA\omp" }
-$BinaryName = "omp-windows-x64.exe"
+# Windows PowerShell 5.1 (.NET Framework) does not reliably resolve
+# [System.Runtime.InteropServices.RuntimeInformation] without an
+# assembly-qualified name, while PowerShell 7+ (Core) loads that type from a
+# different assembly — so read the OS architecture from the environment
+# instead, which works on both. Prefer PROCESSOR_ARCHITEW6432 so a 32-bit
+# host on 64-bit Windows still reports the OS architecture.
+# Note: PROCESSOR_ARCHITEW6432 is only set for 32-bit (WOW64) processes, so
+# x64 PowerShell under ARM64 emulation reports AMD64 and installs the x64
+# binary (runs emulated, not natively). Native ARM64 and x86-on-ARM64 hosts
+# still resolve to arm64.
+$RawArchitecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+if (-not $RawArchitecture) {
+    throw "Unable to determine Windows architecture"
+}
+$NativeArchitecture = switch ($RawArchitecture.ToUpperInvariant()) {
+    "AMD64" { "x64" }
+    "ARM64" { "arm64" }
+    default { throw "Unsupported Windows architecture: $RawArchitecture" }
+}
+$BinaryName = "omp-windows-$NativeArchitecture.exe"
 $MinimumBunVersion = "1.3.14"
+
+# PowerShell 5.1 raises a terminating NativeCommandError for any line a native
+# executable writes to stderr while $ErrorActionPreference is "Stop", regardless
+# of the process exit code. Tools like bun and git emit normal progress on
+# stderr, so run them with the preference relaxed to "Continue" and let callers
+# gate on $LASTEXITCODE. Global "Stop" stays in effect for the cmdlet-driven
+# operations (Invoke-WebRequest/Invoke-RestMethod) that depend on it.
+function Invoke-Native {
+    param([Parameter(Mandatory = $true)][scriptblock]$Command)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Command
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
 
 function Test-BunInstalled {
     try {
@@ -128,11 +172,16 @@ function Configure-BashShell {
                 New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null
             }
 
-            # Read existing settings or create new
+            # Read existing settings or create new. ConvertFrom-Json -AsHashtable
+            # requires PowerShell 6+; build the hashtable manually so Windows
+            # PowerShell 5.1 merges instead of clobbering existing settings.
             $settings = @{}
             if (Test-Path $settingsFile) {
                 try {
-                    $settings = Get-Content $settingsFile -Raw | ConvertFrom-Json -AsHashtable
+                    $parsed = Get-Content $settingsFile -Raw | ConvertFrom-Json
+                    foreach ($prop in $parsed.PSObject.Properties) {
+                        $settings[$prop.Name] = $prop.Value
+                    }
                 } catch {
                     $settings = @{}
                 }
@@ -143,7 +192,7 @@ function Configure-BashShell {
 
             # Write settings
             $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding UTF8
-            Write-Host "✓ Configured shell path in $settingsFile" -ForegroundColor Green
+            Write-Host "[OK] Configured shell path in $settingsFile" -ForegroundColor Green
         } else {
             Write-Host ""
             Write-Host "No bash shell found - OMP will use its built-in shell." -ForegroundColor Cyan
@@ -154,13 +203,13 @@ function Configure-BashShell {
             Write-Host '    { "shellPath": "C:\\path\\to\\bash.exe" }' -ForegroundColor Cyan
         }
     } catch {
-        Write-Host "⚠ Could not configure bash shell: $_" -ForegroundColor Yellow
+        Write-Host "[WARN] Could not configure bash shell: $_" -ForegroundColor Yellow
     }
 }
 
 function Install-Bun {
     Write-Host "Installing bun..."
-    irm bun.sh/install.ps1 | iex
+    Invoke-Native { irm bun.sh/install.ps1 | iex }
     # Refresh PATH
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
     Assert-BunVersion $MinimumBunVersion
@@ -178,19 +227,18 @@ function Install-ViaBun {
 
         try {
             $repoUrl = "https://github.com/$Repo.git"
-            $cloneOk = $false
-            try {
-                git clone --depth 1 --branch $Ref $repoUrl $tmpRoot | Out-Null
-                $cloneOk = $true
-            } catch {
-                $cloneOk = $false
-            }
-
-            if (-not $cloneOk) {
-                git clone $repoUrl $tmpRoot | Out-Null
+            Invoke-Native { git clone --depth 1 --branch $Ref $repoUrl $tmpRoot 2>&1 | Out-Null }
+            if ($LASTEXITCODE -ne 0) {
+                Invoke-Native { git clone $repoUrl $tmpRoot 2>&1 | Out-Null }
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Failed to clone $repoUrl"
+                }
                 Push-Location $tmpRoot
                 try {
-                    git checkout $Ref | Out-Null
+                    Invoke-Native { git checkout $Ref 2>&1 | Out-Null }
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "Failed to checkout $Ref"
+                    }
                 } finally {
                     Pop-Location
                 }
@@ -200,7 +248,7 @@ function Install-ViaBun {
             if (Test-GitLfsInstalled) {
                 Push-Location $tmpRoot
                 try {
-                    git lfs pull | Out-Null
+                    Invoke-Native { git lfs pull 2>&1 | Out-Null }
                 } finally {
                     Pop-Location
                 }
@@ -211,7 +259,7 @@ function Install-ViaBun {
                 throw "Expected package at $packagePath"
             }
 
-            bun install -g $packagePath
+            Invoke-Native { bun install -g $packagePath }
             if ($LASTEXITCODE -ne 0) {
                 throw "Failed to install from $packagePath via bun"
             }
@@ -219,14 +267,14 @@ function Install-ViaBun {
             Remove-Item -Recurse -Force $tmpRoot -ErrorAction SilentlyContinue
         }
     } else {
-        bun install -g $Package
+        Invoke-Native { bun install -g $Package }
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to install $Package via bun"
         }
     }
 
     Write-Host ""
-    Write-Host "✓ Installed omp via bun" -ForegroundColor Green
+    Write-Host "[OK] Installed omp via bun" -ForegroundColor Green
 
     Configure-BashShell
 
@@ -261,7 +309,7 @@ function Install-Binary {
     Invoke-WebRequest -Uri $BinaryUrl -OutFile $OutPath -TimeoutSec 900
 
     Write-Host ""
-    Write-Host "✓ Installed omp to $OutPath" -ForegroundColor Green
+    Write-Host "[OK] Installed omp to $OutPath" -ForegroundColor Green
 
     # Add to PATH if not already there
     $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")

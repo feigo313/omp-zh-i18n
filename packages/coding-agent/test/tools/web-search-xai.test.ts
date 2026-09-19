@@ -122,7 +122,9 @@ const proxyXaiRegistry = {
 	getAll: () => [],
 	find: () => undefined,
 	getProviderBaseUrl: (provider: string) => (provider === "xai-oauth" ? "https://proxy.example/v1/" : undefined),
-	getProviderHeaders: (provider: string) => (provider === "xai-oauth" ? { "X-Proxy-Tenant": "tenant-1" } : undefined),
+	getProviderHeaders: async (provider: string) =>
+		provider === "xai-oauth" ? { "X-Proxy-Tenant": "tenant-1" } : undefined,
+	resolver: () => async () => "proxy-key",
 } as unknown as ModelRegistry;
 
 describe("xAI web search provider", () => {
@@ -253,6 +255,7 @@ describe("xAI web search provider", () => {
 		const modelRegistry = {
 			...proxyXaiRegistry,
 			authStorage,
+			resolver: authStorage.resolver.bind(authStorage),
 		} as unknown as ModelRegistry;
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = Object.assign(capture.fetchMock, { preconnect: originalFetch.preconnect });
@@ -542,7 +545,7 @@ describe("xAI web search provider", () => {
 					content: [
 						{
 							type: "output_text",
-							text: "Ignored because output_text wins",
+							text: "Message-level xAI answer",
 							annotations: [
 								{
 									type: "url_citation",
@@ -567,7 +570,7 @@ describe("xAI web search provider", () => {
 
 		expect(response).toMatchObject({
 			provider: "xai",
-			answer: "Top-level xAI answer",
+			answer: "Message-level xAI answer",
 			requestId: "resp_xai_123",
 			model: "grok-4.3",
 			authMode: "api_key",
@@ -799,6 +802,67 @@ describe("xAI web search provider", () => {
 		const response = await searchXAI(makeParams(capture.fetchMock));
 		expect(response).toMatchObject({
 			answer: "First content part\nSecond content part",
+		});
+	});
+
+	it("extracts offset snippets and raw sources from web_search_call output", async () => {
+		const answer = "Context before [cited source](https://example.com/cited) context after.";
+		const start = answer.indexOf("[cited source]");
+		const capture = captureFetch({
+			id: "resp_raw_sources",
+			output: [
+				{
+					type: "message",
+					content: [
+						{
+							type: "output_text",
+							text: answer,
+							annotations: [
+								{
+									type: "url_citation",
+									url: "https://example.com/cited",
+									title: "Cited result",
+									start_index: start,
+									end_index: start + "[cited source]".length,
+								},
+							],
+						},
+					],
+				},
+				{
+					type: "web_search_call",
+					action: {
+						sources: [
+							{ url: "https://example.com/raw", title: "Raw result" },
+							{ source_website_url: "https://example.com/fallback", caption: "Fallback result" },
+						],
+					},
+					results: [{ url: "https://example.com/cited", title: "Duplicate result" }],
+				},
+			],
+		});
+
+		const response = await searchXAI(makeParams(capture.fetchMock));
+
+		expect(response.answer).toBe(answer);
+		expect(response.sources).toEqual([
+			{
+				title: "Cited result",
+				url: "https://example.com/cited",
+				snippet: "Context before cited source context after.",
+			},
+			{ title: "Raw result", url: "https://example.com/raw", snippet: undefined },
+			{ title: "Fallback result", url: "https://example.com/fallback", snippet: undefined },
+		]);
+	});
+
+	it("rejects successful responses with no answer or sources", async () => {
+		const capture = captureFetch({ id: "resp_empty", output: [] });
+
+		await expect(searchXAI(makeParams(capture.fetchMock))).rejects.toMatchObject({
+			provider: "xai",
+			status: 502,
+			message: "xAI web_search returned no answer or sources",
 		});
 	});
 

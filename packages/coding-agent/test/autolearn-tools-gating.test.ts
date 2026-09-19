@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { type } from "@oh-my-pi/omptype";
 import { getManagedSkillsDir } from "@oh-my-pi/pi-coding-agent/autolearn/managed-skills";
 import { type SettingPath, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { resetActiveSkillsForTests, type Skill, setActiveSkills } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
@@ -12,7 +13,6 @@ import { LearnTool } from "@oh-my-pi/pi-coding-agent/tools/learn";
 import { ManageSkillTool } from "@oh-my-pi/pi-coding-agent/tools/manage-skill";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils/dirs";
-import { type } from "arktype";
 
 function makeSession(
 	settingsOverrides: Partial<Record<SettingPath, unknown>> = {},

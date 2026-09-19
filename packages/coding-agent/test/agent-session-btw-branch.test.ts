@@ -48,6 +48,12 @@ function expectSanitizedBtwAssistant(message: AssistantMessage): void {
 	]);
 }
 
+function requiredLeafId(session: AgentSession): string {
+	const leafId = session.sessionManager.getLeafId();
+	if (!leafId) throw new Error("Expected session leaf");
+	return leafId;
+}
+
 describe("AgentSession.branchFromBtw", () => {
 	let tempDir: string;
 	let session: AgentSession | undefined;
@@ -82,7 +88,7 @@ describe("AgentSession.branchFromBtw", () => {
 		const sessionManager =
 			options?.persisted === false ? SessionManager.inMemory() : SessionManager.create(tempDir, tempDir);
 		const settings = Settings.isolated({ "compaction.enabled": false });
-		authStorage = await AuthStorage.create(path.join(tempDir, "testauth.db"));
+		authStorage = await AuthStorage.create(":memory:");
 		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"));
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
 		session = new AgentSession({
@@ -122,7 +128,12 @@ describe("AgentSession.branchFromBtw", () => {
 		const originalRaw = fs.readFileSync(originalFile!, "utf8");
 		const assistantMessage = createBtwAssistant();
 
-		const result = await activeSession.branchFromBtw("why did this fail?", assistantMessage);
+		const result = await activeSession.branchFromBtw(
+			"why did this fail?",
+			assistantMessage,
+			requiredLeafId(activeSession),
+			activeSession.sessionManager.getSessionId(),
+		);
 
 		expect(result.cancelled).toBe(false);
 		expect(result.sessionFile).toBe(activeSession.sessionFile);
@@ -130,7 +141,12 @@ describe("AgentSession.branchFromBtw", () => {
 		expect(result.sessionFile).not.toBe(originalFile);
 		expect(fs.readFileSync(originalFile!, "utf8")).toBe(originalRaw);
 		const messages = activeSession.messages;
-		expect(messages.at(-2)).toMatchObject({ role: "user", content: [{ type: "text", text: "why did this fail?" }] });
+		// The promoted question is the user's own words, so it must carry the user's attribution.
+		expect(messages.at(-2)).toMatchObject({
+			role: "user",
+			content: [{ type: "text", text: "why did this fail?" }],
+			attribution: "user",
+		});
 		const promoted = messages.at(-1);
 		expect(promoted?.role).toBe("assistant");
 		if (promoted?.role !== "assistant") throw new Error("Expected promoted assistant message");
@@ -155,7 +171,12 @@ describe("AgentSession.branchFromBtw", () => {
 			return result;
 		});
 
-		const result = await activeSession.branchFromBtw("question", createBtwAssistant());
+		const result = await activeSession.branchFromBtw(
+			"question",
+			createBtwAssistant(),
+			requiredLeafId(activeSession),
+			activeSession.sessionManager.getSessionId(),
+		);
 		expect(result.cancelled).toBe(false);
 		const replacementSessionFile = activeSession.sessionFile;
 		if (!replacementSessionFile) throw new Error("Expected the replacement session to be persisted");
@@ -176,7 +197,12 @@ describe("AgentSession.branchFromBtw", () => {
 		await activeSession.sessionManager.flush();
 		const originalFile = activeSession.sessionFile;
 
-		const result = await activeSession.branchFromBtw("question", createBtwAssistant());
+		const result = await activeSession.branchFromBtw(
+			"question",
+			createBtwAssistant(),
+			requiredLeafId(activeSession),
+			activeSession.sessionManager.getSessionId(),
+		);
 
 		expect(result).toEqual({ cancelled: true, sessionFile: originalFile });
 		expect(activeSession.sessionFile).toBe(originalFile);
@@ -184,6 +210,52 @@ describe("AgentSession.branchFromBtw", () => {
 			type: "session_before_branch",
 			entryId: activeSession.sessionManager.getLeafId(),
 		});
+	});
+
+	it("refuses when the session leaf advances while a branch hook is pending", async () => {
+		const hookStarted = Promise.withResolvers<void>();
+		const hookRelease = Promise.withResolvers<void>();
+		const extensionRunner = {
+			hasHandlers: vi.fn((eventType: string) => eventType === "session_before_branch"),
+			emit: vi.fn(async () => {
+				hookStarted.resolve();
+				await hookRelease.promise;
+				return undefined;
+			}),
+		} as unknown as ExtensionRunner;
+		const activeSession = await createSession({ extensionRunner });
+		activeSession.sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() });
+		await activeSession.sessionManager.flush();
+		const originalFile = activeSession.sessionFile;
+
+		const branchPromise = activeSession.branchFromBtw(
+			"question",
+			createBtwAssistant(),
+			requiredLeafId(activeSession),
+			activeSession.sessionManager.getSessionId(),
+		);
+		await hookStarted.promise;
+		activeSession.sessionManager.appendMessage({ role: "user", content: "late work", timestamp: Date.now() });
+		await activeSession.sessionManager.flush();
+		hookRelease.resolve();
+
+		await expect(branchPromise).rejects.toThrow("Cannot branch /btw: session changed since /btw started");
+		expect(activeSession.sessionFile).toBe(originalFile);
+	});
+
+	it("refuses when the authorized session id no longer matches the loaded session", async () => {
+		const activeSession = await createSession();
+		activeSession.sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() });
+		await activeSession.sessionManager.flush();
+		const originalFile = activeSession.sessionFile;
+		const leafId = requiredLeafId(activeSession);
+
+		// A resumed/branched session preserves the entry id, so the leaf still matches
+		// while the loaded session is different.
+		await expect(
+			activeSession.branchFromBtw("question", createBtwAssistant(), leafId, "some-other-session"),
+		).rejects.toThrow("Cannot branch /btw: session changed since /btw started");
+		expect(activeSession.sessionFile).toBe(originalFile);
 	});
 
 	it("syncs promoted /btw messages into live context even when hooks skip conversation restore", async () => {
@@ -197,7 +269,12 @@ describe("AgentSession.branchFromBtw", () => {
 		await activeSession.sessionManager.flush();
 		const assistantMessage = createBtwAssistant();
 
-		const result = await activeSession.branchFromBtw("question", assistantMessage);
+		const result = await activeSession.branchFromBtw(
+			"question",
+			assistantMessage,
+			requiredLeafId(activeSession),
+			activeSession.sessionManager.getSessionId(),
+		);
 
 		expect(result.cancelled).toBe(false);
 		const messages = activeSession.messages;
@@ -208,47 +285,35 @@ describe("AgentSession.branchFromBtw", () => {
 		expectSanitizedBtwAssistant(promoted);
 	});
 
-	it("aborts an in-flight main stream before switching to the /btw branch", async () => {
+	it("refuses to defer a /btw branch while the main turn is streaming", async () => {
 		const providerStarted = Promise.withResolvers<void>();
 		const activeSession = await createSession({
 			handler: () => {
 				providerStarted.resolve();
-				return { content: ["main response should not move"], delayMs: 60_000 };
+				return { content: ["main response"], delayMs: 60_000 };
 			},
 		});
 		activeSession.sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() });
 		await activeSession.sessionManager.flush();
+		const originalFile = activeSession.sessionFile;
 
 		const promptPromise = activeSession.prompt("main prompt");
 		await providerStarted.promise;
 		expect(activeSession.isStreaming).toBe(true);
-		await activeSession.followUp("queued follow-up should not move");
-		expect(activeSession.queuedMessageCount).toBe(1);
 
-		const assistantMessage = createBtwAssistant();
-		const result = await activeSession.branchFromBtw("question", assistantMessage);
+		await expect(
+			activeSession.branchFromBtw(
+				"question",
+				createBtwAssistant(),
+				requiredLeafId(activeSession),
+				activeSession.sessionManager.getSessionId(),
+			),
+		).rejects.toThrow("Cannot branch /btw while session maintenance or user work is still running");
+		expect(activeSession.isStreaming).toBe(true);
+		expect(activeSession.sessionFile).toBe(originalFile);
+
+		await activeSession.abort({ goalReason: "internal", reason: "test cleanup" });
 		await promptPromise;
-
-		expect(result.cancelled).toBe(false);
-		const messages = activeSession.messages;
-		expect(messages.at(-2)).toMatchObject({ role: "user", content: [{ type: "text", text: "question" }] });
-		const promoted = messages.at(-1);
-		expect(promoted?.role).toBe("assistant");
-		if (promoted?.role !== "assistant") throw new Error("Expected promoted assistant message");
-		expectSanitizedBtwAssistant(promoted);
-		expect(messages).not.toContainEqual(
-			expect.objectContaining({
-				role: "assistant",
-				content: [{ type: "text", text: "main response should not move" }],
-			}),
-		);
-		expect(activeSession.queuedMessageCount).toBe(0);
-		expect(messages).not.toContainEqual(
-			expect.objectContaining({
-				role: "user",
-				content: [{ type: "text", text: "queued follow-up should not move" }],
-			}),
-		);
 	});
 
 	it("refuses to branch /btw while user bash work is still running", async () => {
@@ -259,11 +324,16 @@ describe("AgentSession.branchFromBtw", () => {
 		const bashPromise = activeSession.executeBash('bun -e "await Bun.sleep(60_000)"', () => undefined, {
 			useUserShell: false,
 		});
-		while (!activeSession.isBashRunning) await Bun.sleep(1);
+		expect(activeSession.isBashRunning).toBe(true);
 
-		await expect(activeSession.branchFromBtw("question", createBtwAssistant())).rejects.toThrow(
-			"Cannot branch /btw while session maintenance or user work is still running",
-		);
+		await expect(
+			activeSession.branchFromBtw(
+				"question",
+				createBtwAssistant(),
+				requiredLeafId(activeSession),
+				activeSession.sessionManager.getSessionId(),
+			),
+		).rejects.toThrow("Cannot branch /btw while session maintenance or user work is still running");
 
 		activeSession.abortBash();
 		await bashPromise.catch(() => undefined);
@@ -278,9 +348,14 @@ describe("AgentSession.branchFromBtw", () => {
 		activeSession.trackEvalExecution(execution, abortController).catch(() => undefined);
 		expect(activeSession.isEvalRunning).toBe(true);
 
-		await expect(activeSession.branchFromBtw("question", createBtwAssistant())).rejects.toThrow(
-			"Cannot branch /btw while session maintenance or user work is still running",
-		);
+		await expect(
+			activeSession.branchFromBtw(
+				"question",
+				createBtwAssistant(),
+				requiredLeafId(activeSession),
+				activeSession.sessionManager.getSessionId(),
+			),
+		).rejects.toThrow("Cannot branch /btw while session maintenance or user work is still running");
 
 		abortController.abort();
 	});
@@ -295,12 +370,17 @@ describe("AgentSession.branchFromBtw", () => {
 		});
 		sessionWithMaintenance._maintenanceForTest = true;
 
-		await expect(activeSession.branchFromBtw("question", createBtwAssistant())).rejects.toThrow(
-			"Cannot branch /btw while session maintenance or user work is still running",
-		);
+		await expect(
+			activeSession.branchFromBtw(
+				"question",
+				createBtwAssistant(),
+				requiredLeafId(activeSession),
+				activeSession.sessionManager.getSessionId(),
+			),
+		).rejects.toThrow("Cannot branch /btw while session maintenance or user work is still running");
 	});
 
-	it("cancels post-prompt work after branch hooks before switching sessions", async () => {
+	it("refuses when post-prompt work starts a turn while a branch hook is pending", async () => {
 		const hookRelease = Promise.withResolvers<void>();
 		const extensionRunner = {
 			hasHandlers: vi.fn((eventType: string) => eventType === "session_before_branch"),
@@ -312,6 +392,7 @@ describe("AgentSession.branchFromBtw", () => {
 		const activeSession = await createSession({ extensionRunner });
 		activeSession.sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() });
 		await activeSession.sessionManager.flush();
+		const originalFile = activeSession.sessionFile;
 		activeSession.queueDeferredMessage({
 			role: "custom",
 			customType: "test-hidden-message",
@@ -321,23 +402,32 @@ describe("AgentSession.branchFromBtw", () => {
 		});
 		expect(activeSession.hasPostPromptWork).toBe(true);
 
-		const branchPromise = activeSession.branchFromBtw("question", createBtwAssistant());
+		const branchPromise = activeSession.branchFromBtw(
+			"question",
+			createBtwAssistant(),
+			requiredLeafId(activeSession),
+			activeSession.sessionManager.getSessionId(),
+		);
 		await Promise.resolve();
-		expect(activeSession.hasPostPromptWork).toBe(true);
-
 		hookRelease.resolve();
-		const result = await branchPromise;
 
-		expect(result.cancelled).toBe(false);
-		expect(activeSession.hasPostPromptWork).toBe(false);
+		await expect(branchPromise).rejects.toThrow(
+			"Cannot branch /btw while session maintenance or user work is still running",
+		);
+		expect(activeSession.sessionFile).toBe(originalFile);
 	});
 
 	it("throws for in-memory sessions", async () => {
 		const activeSession = await createSession({ persisted: false });
 		activeSession.sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() });
 
-		await expect(activeSession.branchFromBtw("question", createBtwAssistant())).rejects.toThrow(
-			"Cannot branch /btw: session is not persisted",
-		);
+		await expect(
+			activeSession.branchFromBtw(
+				"question",
+				createBtwAssistant(),
+				requiredLeafId(activeSession),
+				activeSession.sessionManager.getSessionId(),
+			),
+		).rejects.toThrow("Cannot branch /btw: session is not persisted");
 	});
 });

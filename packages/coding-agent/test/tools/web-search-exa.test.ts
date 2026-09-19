@@ -1,3 +1,4 @@
+import type { BodyInit } from "bun";
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -13,7 +14,17 @@ import {
 	searchExa,
 	synthesizeAnswer,
 } from "@oh-my-pi/pi-coding-agent/web/search/providers/exa";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { isRecord, removeWithRetries } from "@oh-my-pi/pi-utils";
+
+type PostedMcpRequest = Record<string, unknown> & { id: string | number };
+
+function parsePostedMcpRequest(body: BodyInit | null | undefined): PostedMcpRequest {
+	const request: unknown = JSON.parse(String(body));
+	if (!isRecord(request) || (typeof request.id !== "string" && typeof request.id !== "number")) {
+		throw new Error("Expected an MCP JSON-RPC request body");
+	}
+	return { ...request, id: request.id };
+}
 
 async function withLocalAuthStorage<T>(run: (authStorage: AuthStorage) => Promise<T>): Promise<T> {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "web-search-exa-auth-"));
@@ -428,6 +439,19 @@ describe("searchExa", () => {
 		expect(result.sources[0].snippet).toBe("summary here");
 	});
 
+	it("caps snippets at 500 characters", async () => {
+		const result = await searchExa({
+			query: "bounded snippet",
+			fetch: mockFetch(
+				makeMockExaResponse({
+					results: [{ title: "Long", url: "https://long.example", summary: "x".repeat(800) }],
+				}),
+			),
+		});
+
+		expect(result.sources[0].snippet).toHaveLength(500);
+	});
+
 	it("falls back to text when summary is null", async () => {
 		const result = await searchExa({
 			query: "fallback",
@@ -510,11 +534,10 @@ describe("searchExa", () => {
 		let calledUrl = "";
 		const fetchMock: FetchImpl = (url, init) => {
 			calledUrl = String(url);
-			if (init?.body) {
-				capturedRequestBody = JSON.parse(init.body as string);
-			}
+			const request = parsePostedMcpRequest(init?.body);
+			capturedRequestBody = request;
 			return Promise.resolve(
-				new Response(JSON.stringify({ jsonrpc: "2.0", id: "mcp-1", result: makeMockExaResponse() }), {
+				new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: makeMockExaResponse() }), {
 					status: 200,
 					headers: { "Content-Type": "application/json" },
 				}),
@@ -535,14 +558,98 @@ describe("searchExa", () => {
 		});
 	});
 
-	it("parses Exa MCP plain-text payloads when API key is missing", async () => {
+	it("selects the matching Exa MCP SSE response after a notification", async () => {
 		delete process.env.EXA_API_KEY;
-		const fetchMock: FetchImpl = () => {
+		const fetchMock: FetchImpl = (_url, init) => {
+			const request = parsePostedMcpRequest(init?.body);
+			const body = [
+				'data:{"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":1}}',
+				`data:${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: makeMockExaResponse() })}`,
+				"",
+			].join("\n\n");
+			return Promise.resolve(new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } }));
+		};
+
+		const result = await searchExa({ query: "notification first", fetch: fetchMock });
+
+		expect(result.provider).toBe("exa");
+		expect(result.sources).toHaveLength(3);
+		expect(result.requestId).toBe("req-123");
+	});
+
+	it("encodes MCP filters in the basic query, uses camel-case result count, and tags the request source", async () => {
+		delete process.env.EXA_API_KEY;
+		let headers: Headers | undefined;
+		const fetchMock: FetchImpl = (_url, init) => {
+			headers = new Headers(init?.headers);
+			const request = parsePostedMcpRequest(init?.body);
+			capturedRequestBody = request;
+			return Promise.resolve(
+				new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: makeMockExaResponse() }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+			);
+		};
+
+		await searchExa({
+			query: "vector databases",
+			num_results: 4,
+			include_domains: [" qdrant.tech "],
+			exclude_domains: ["spam.example"],
+			start_published_date: "2024-01-01",
+			end_published_date: "2025-01-01",
+			fetch: fetchMock,
+		});
+
+		expect(headers?.get("x-exa-source")).toBe("oh-my-pi");
+		expect(capturedRequestBody?.params).toEqual({
+			name: "web_search_exa",
+			arguments: {
+				query: "vector databases site:qdrant.tech -site:spam.example after:2024-01-01 before:2025-01-01",
+				numResults: 4,
+			},
+		});
+	});
+
+	it("explains how to escape the keyless MCP rate limit", async () => {
+		delete process.env.EXA_API_KEY;
+		const fetchMock: FetchImpl = () =>
+			Promise.resolve(new Response("too many requests", { status: 429, statusText: "Too Many Requests" }));
+
+		await expect(searchExa({ query: "rate limited", fetch: fetchMock })).rejects.toThrow(
+			"exa: MCP rate limit reached (429); configure an Exa API key for higher limits",
+		);
+	});
+
+	it("surfaces MCP tool-level errors", async () => {
+		delete process.env.EXA_API_KEY;
+		const fetchMock: FetchImpl = (_url, init) => {
+			const request = parsePostedMcpRequest(init?.body);
 			return Promise.resolve(
 				new Response(
 					JSON.stringify({
 						jsonrpc: "2.0",
-						id: "mcp-text",
+						id: request.id,
+						result: { isError: true, content: [{ type: "text", text: "tool quota exceeded" }] },
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			);
+		};
+
+		await expect(searchExa({ query: "tool error", fetch: fetchMock })).rejects.toThrow("tool quota exceeded");
+	});
+
+	it("parses Exa MCP plain-text payloads when API key is missing", async () => {
+		delete process.env.EXA_API_KEY;
+		const fetchMock: FetchImpl = (_url, init) => {
+			const request = parsePostedMcpRequest(init?.body);
+			return Promise.resolve(
+				new Response(
+					JSON.stringify({
+						jsonrpc: "2.0",
+						id: request.id,
 						result: {
 							content: [
 								{

@@ -16,9 +16,10 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { CompactionPreparation, CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantRetryRecovery, ImageContent, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import type { Rule } from "../capability/rule";
-import type { Goal, GoalModeState } from "../goals/state";
+import type { Goal } from "@oh-my-pi/pi-tui/tools/goal";
+import type { GoalModeState } from "../goals/state";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry } from "../session/session-entries";
-import type { TodoItem } from "../tools/todo";
+import type { TodoItem } from "@oh-my-pi/pi-tui/tools/todo";
 
 // ============================================================================
 // Session Events
@@ -33,7 +34,7 @@ export interface SessionStartEvent {
 export interface SessionBeforeSwitchEvent {
 	type: "session_before_switch";
 	/** Reason for the switch */
-	reason: "new" | "resume" | "fork" | "handoff";
+	reason: "new" | "resume" | "fork";
 	/** Session file we're switching to (only for "resume") */
 	targetSessionFile?: string;
 }
@@ -42,7 +43,7 @@ export interface SessionBeforeSwitchEvent {
 export interface SessionSwitchEvent {
 	type: "session_switch";
 	/** Reason for the switch */
-	reason: "new" | "resume" | "fork" | "handoff";
+	reason: "new" | "resume" | "fork";
 	/** Session file we came from */
 	previousSessionFile: string | undefined;
 }
@@ -224,13 +225,13 @@ export interface TurnEndEvent {
 export interface AutoCompactionStartEvent {
 	type: "auto_compaction_start";
 	reason: "threshold" | "overflow" | "idle" | "incomplete";
-	action: "context-full" | "handoff" | "shake" | "snapcompact";
+	action: "context-full" | "remote" | "handoff" | "shake" | "snapcompact";
 }
 
 /** Fired when auto-compaction ends */
 export interface AutoCompactionEndEvent {
 	type: "auto_compaction_end";
-	action: "context-full" | "handoff" | "shake" | "snapcompact";
+	action: "context-full" | "remote" | "handoff" | "shake" | "snapcompact";
 	result: CompactionResult | undefined;
 	aborted: boolean;
 	willRetry: boolean;
@@ -249,7 +250,8 @@ export interface AutoRetryStartEvent {
 	errorId?: number;
 }
 
-export interface RecoveredRetryError {
+/** Persisted retry error whose transcript presentation changed when the retry saga settled. */
+export interface RetryErrorUpdate {
 	entryId: string;
 	persistenceKey?: string;
 	note: string;
@@ -262,7 +264,22 @@ export interface AutoRetryEndEvent {
 	success: boolean;
 	attempt: number;
 	finalError?: string;
-	recoveredErrors?: RecoveredRetryError[];
+	retryErrors?: RetryErrorUpdate[];
+}
+
+/** Fired when auto-retry switches to a configured fallback model/provider. */
+export interface RetryFallbackAppliedEvent {
+	type: "retry_fallback_applied";
+	from: string;
+	to: string;
+	role: string;
+}
+
+/** Fired when a request succeeds on the fallback model applied by auto-retry. */
+export interface RetryFallbackSucceededEvent {
+	type: "retry_fallback_succeeded";
+	model: string;
+	role: string;
 }
 
 // ============================================================================

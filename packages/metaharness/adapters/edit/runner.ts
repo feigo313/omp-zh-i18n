@@ -7,12 +7,7 @@
 /// <reference types="./bun-imports.d.ts" />
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-	type BlockTarget as HashlineBlockTarget,
-	formatHashlineHeader,
-	InMemorySnapshotStore,
-	Tokenizer as HashlineTokenizer,
-} from "@oh-my-pi/hashline";
+import { EditStore, hashlineCountOps, hashlineFormatHeader } from "@oh-my-pi/pi-natives";
 import type { AgentMessage, ResolvedThinkingLevel, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model, ToolExample } from "@oh-my-pi/pi-ai";
 import { formatSessionDumpText, RpcClient } from "@oh-my-pi/pi-coding-agent";
@@ -198,8 +193,13 @@ function splitLines(value: string): string[] {
 
 function getEditPathFromArgs(args: unknown): string | null {
 	if (!args || typeof args !== "object") return null;
-	const pathValue = (args as { path?: unknown }).path;
-	return typeof pathValue === "string" && pathValue.length > 0 ? pathValue : null;
+	if ("path" in args && typeof args.path === "string" && args.path.length > 0) return args.path;
+	// Sloppy payloads name the file in a leading `[path]` header instead of an argument.
+	if ("input" in args && typeof args.input === "string") {
+		const header = /^\[([^\]\n]+)\]/.exec(args.input);
+		if (header?.[1]) return header[1];
+	}
+	return null;
 }
 
 function getEditPayloadFromArgs(args: unknown): string {
@@ -278,66 +278,18 @@ function isMutationTool(toolName: unknown): boolean {
 	return isEditTool(toolName) || toolName === "write";
 }
 
-// Pure classification — single shared tokenizer is safe.
-const HASHLINE_OP_TOKENIZER = new HashlineTokenizer();
-
-/** Display label for a hashline op header, e.g. `SWAP.BLK` or `PASTE.POST`. */
-function hashlineOpLabel(target: HashlineBlockTarget): string {
-	switch (target.kind) {
-		case "replace":
-			return "SWAP";
-		case "block":
-			return "SWAP.BLK";
-		case "insert_before":
-			return "INS.PRE";
-		case "insert_after":
-			return "INS.POST";
-		case "bof":
-			return "INS.HEAD";
-		case "eof":
-			return "INS.TAIL";
-		case "insert_after_block":
-			return "INS.BLK.POST";
-		case "cut":
-			return "CUT";
-		case "cut_block":
-			return "CUT.BLK";
-		case "paste":
-			switch (target.cursor.kind) {
-				case "before_anchor":
-					return "PASTE.PRE";
-				case "after_anchor":
-					return "PASTE.POST";
-				case "bof":
-					return "PASTE.HEAD";
-				case "eof":
-					return "PASTE.TAIL";
-			}
-		case "paste_after_block":
-			return "PASTE.BLK.POST";
-		case "rem":
-			return "REM";
-		case "move":
-			return "MV";
-	}
-}
-
 /**
- * Count hashline op headers (`SWAP`, `CUT.BLK`, `PASTE.POST`, …) in an
- * edit call's patch input. Returns `null` when the args carry no hashline
- * patch — non-hashline edit variants and malformed calls contribute nothing.
+ * Count canonical hashline op header shapes (`PUT N.=M:`, `CUT N*`,
+ * `PUT >N @reg`, …) in an edit call's patch input. Returns `null` when
+ * the args carry no hashline patch; non-hashline variants contribute nothing.
  */
 function countHashlineOps(args: unknown): Record<string, number> | null {
 	if (!args || typeof args !== "object" || !("input" in args)) return null;
 	const input = args.input;
 	if (typeof input !== "string" || input.length === 0) return null;
-	const counts: Record<string, number> = {};
-	for (const token of HASHLINE_OP_TOKENIZER.tokenizeAll(input)) {
-		if (token.kind !== "op-block") continue;
-		const label = hashlineOpLabel(token.target);
-		counts[label] = (counts[label] ?? 0) + 1;
-	}
-	return Object.keys(counts).length > 0 ? counts : null;
+	const entries = hashlineCountOps(input);
+	if (entries.length === 0) return null;
+	return Object.fromEntries(entries.map(entry => [entry.label, entry.count]));
 }
 
 async function collectOriginalFileContents(cwd: string, files: string[]): Promise<Map<string, string>> {
@@ -667,9 +619,9 @@ function buildGuidedHashlinePatch(file: string, actual: string, expected: string
 
 	if (ops.length === 0) return null;
 	const normalizedActual = actual.replace(/\r\n?/g, "\n");
-	const snapshots = new InMemorySnapshotStore();
-	const tag = snapshots.record(file, normalizedActual);
-	const header = formatHashlineHeader(file, tag);
+	const snapshots = new EditStore();
+	const tag = snapshots.recordSnapshot(file, normalizedActual);
+	const header = hashlineFormatHeader(file, tag);
 	return `${header}\n${ops.join("\n")}`;
 }
 
@@ -878,7 +830,7 @@ export interface TaskRunResult {
 	editFailures: EditFailure[];
 	editWarnings: string[];
 	editAutocorrectCount: number;
-	/** Hashline op counts (`SWAP`, `CUT.BLK`, `PASTE.POST`, …) — present when edit calls carried hashline patches. */
+	/** Canonical hashline op-shape counts (`PUT N.=M:`, `CUT N*`, `PUT >N @reg`, …). */
 	hashlineEditSubtypes?: Record<string, number>;
 	mutationIntentMatched?: boolean;
 	mutationIntentReason?: string;
@@ -994,7 +946,7 @@ export interface BenchmarkSummary {
 	mutationIntentMatchRate?: number;
 	/** Edit failure categories across all runs. */
 	editFailureCategories: Record<EditFailureCategory, number>;
-	/** Hashline op totals across all runs — present when any run's edit calls carried hashline patches. */
+	/** Canonical hashline op totals across all runs when edit calls carried hashline patches. */
 	hashlineEditSubtypes?: Record<string, number>;
 }
 
@@ -1988,7 +1940,7 @@ export function buildBenchmarkResult(params: {
 	// Op counts aggregate every attempted edit call across ALL runs (retries and
 	// failed calls included) — deliberately: the mix shows what the model reaches
 	// for, not just what landed. Best-run-only would hide exactly the flailing
-	// (failed SWAPs before a successful retry) this table exists to expose.
+	// (failed operations before a successful retry) this table exists to expose.
 	const hashlineEditSubtypeTotals: Record<string, number> = {};
 	for (const run of allRuns) {
 		const runOps = run.hashlineEditSubtypes;

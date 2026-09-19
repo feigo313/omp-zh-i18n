@@ -2,7 +2,7 @@
 
 The auth broker and auth gateway are two cooperating HTTP services that move OAuth refresh tokens and provider access tokens off developer laptops and into a single broker host.
 
-- **`omp auth-broker serve`** holds the canonical SQLite credential vault, performs OAuth refreshes, and exposes a small REST API (`/v1/snapshot`, `/v1/snapshot/stream`, `/v1/credential/:id/refresh`, `/v1/credential/:id/disable`, `/v1/credential`, `/v1/usage`, `/v1/healthz`).
+- **`omp auth-broker serve`** holds the canonical SQLite credential vault, performs OAuth refreshes, and exposes snapshot, credential, block, usage, and health APIs under `/v1`.
 - **`omp auth-gateway serve`** is a forward-proxy. It accepts OpenAI Chat Completions, Anthropic Messages, OpenAI Responses, and pi-native stream requests, resolves the broker-backed credential, and dispatches through `pi-ai` provider logic. Clients (containerised omp, llm-git, the macOS usage widget, …) never see the access token.
 
 Transport security between operator, broker, and gateway is delegated to the operator (Tailscale / Wireguard / reverse proxy + TLS). Every endpoint except `/v1/healthz` (broker) and `/healthz` (gateway) requires a bearer token.
@@ -58,7 +58,7 @@ omp auth-broker status    [--json]
 
 - `serve` opens the local SQLite store at `getAgentDbPath()` and binds an HTTP listener (default `127.0.0.1:8765`). On startup a token is ensured at `<config-dir>/auth-broker.token` (mode `0600`, `0700` parent dir). The background refresher refreshes any OAuth credential whose `expires - Date.now() < refreshSkewMs` (default 5 min) every `refreshIntervalMs` (default 60 s).
 - `token` prints the cached bearer or generates a new one. `--regenerate` rotates it.
-- `login [<provider>]` runs the per-provider OAuth flow locally — when no provider is supplied, it falls back to an interactive numbered picker. With `--via=user@host` it shells out `ssh -L <callback-port>:127.0.0.1:<callback-port> user@host omp auth-broker login <provider>` so the OAuth callback hits the local browser but the credential is written on the broker host (`--via` requires `<provider>`). Built-in callback ports: `anthropic:54545`, `openai-codex:1455`, `google-gemini-cli:8085`, `google-antigravity:51121`, `gitlab-duo:8080`. The OAuth dance is driven in-process via `AuthStorage.login()` — there is no longer a `pi-ai` bin to spawn.
+- `login [<provider>]` runs the per-provider OAuth flow locally — when no provider is supplied, it falls back to an interactive numbered picker. With `--via=user@host` it shells out `ssh -L <callback-port>:127.0.0.1:<callback-port> user@host omp auth-broker login <provider>` so the OAuth callback hits the local browser but the credential is written on the broker host (`--via` requires `<provider>`). Built-in callback ports: `anthropic:54545`, `openai-codex:1455`, `google-gemini-cli:8085`, `google-antigravity:51121`, `gitlab-duo:8080`, `devin:59653`, `gitlab-duo-agent:8080`, `zai-coding-plan:9999`. The OAuth dance is driven in-process via `AuthStorage.login()` — there is no longer a `pi-ai` bin to spawn.
 - `logout [<provider>]` deletes every credential row for `<provider>`. With no argument it shows an interactive numbered picker of currently-stored providers.
 - `list` enumerates every registered OAuth provider id/name (the union of built-ins + `registerOAuthProvider` custom providers). `--json` emits a machine-readable array.
 - `import <file|dir>` imports CLIProxyAPI-style JSON credentials into the local SQLite store. Maps `type` field → omp provider (`claude → anthropic`, `codex → openai-codex`, `gemini → google-gemini-cli`, `antigravity → google-antigravity`, `gemini-cli → google-gemini-cli`).
@@ -67,17 +67,45 @@ omp auth-broker status    [--json]
 
 ### Endpoints
 
-| Method | Path                         | Auth   | Purpose                                                 |
-| ------ | ---------------------------- | ------ | ------------------------------------------------------- |
-| `GET`  | `/v1/healthz`                | none   | Liveness + version                                      |
-| `GET`  | `/v1/snapshot`               | bearer | Redacted snapshot (refresh tokens replaced by sentinel) |
-| `GET`  | `/v1/snapshot/stream`        | bearer | SSE snapshot stream with delta events and keepalives    |
-| `POST` | `/v1/credential`             | bearer | Upsert one OAuth or API-key credential                  |
-| `POST` | `/v1/credential/:id/refresh` | bearer | Force-refresh one OAuth credential                      |
-| `POST` | `/v1/credential/:id/disable` | bearer | Disable one credential with a recorded cause            |
-| `GET`  | `/v1/usage`                  | bearer | Aggregate `UsageReport[]` across credentials            |
+| Method   | Path                         | Auth   | Purpose                                                            |
+| -------- | ---------------------------- | ------ | ------------------------------------------------------------------ |
+| `GET`    | `/v1/healthz`                | none   | Liveness + version                                                 |
+| `GET`    | `/v1/snapshot`               | bearer | Redacted snapshot (refresh tokens replaced by sentinel)            |
+| `GET`    | `/v1/snapshot/stream`        | bearer | SSE snapshot stream with delta events and keepalives               |
+| `POST`   | `/v1/credential`             | bearer | Upsert one OAuth or API-key credential                             |
+| `POST`   | `/v1/credential/:id/refresh` | bearer | Force-refresh one OAuth credential                                 |
+| `POST`   | `/v1/credential/:id/disable` | bearer | Disable one credential with a recorded cause                       |
+| `GET`    | `/v1/credentials/disabled`   | bearer | List disabled credentials; optional `provider` query filter        |
+| `POST`   | `/v1/credential/:id/block`   | bearer | Upsert a provider/scope rate-limit block                           |
+| `DELETE` | `/v1/credential/:id/blocks`  | bearer | Delete all rate-limit blocks for a credential                      |
+| `GET`    | `/v1/usage`                  | bearer | Aggregate current `UsageReport[]` across credentials               |
+| `GET`    | `/v1/usage/history`          | bearer | Persisted usage history; optional `sinceMs` and `provider` filters |
+| `POST`   | `/v1/usage/observed`         | bearer | Record usage observed by a broker client                           |
+| `GET`    | `/v1/usage/clients`          | bearer | Summarize client-observed usage since optional `sinceMs`           |
+| `POST`   | `/v1/usage/stale`            | bearer | Invalidate the broker's current usage cache                        |
 
 Requests use `Authorization: Bearer <token>`. The server compares against an in-memory token allow-list; the gateway’s implementation uses a timing-safe comparison.
+
+#### Conditional snapshot long polling
+
+`GET /v1/snapshot?wait=<ms>` supports generation-based conditional polling.
+Send the generation from a previous response in `If-None-Match`. The broker
+accepts a non-negative integer generation as a bare tag, a quoted tag such as
+`"42"`, or a weak quoted tag such as `W/"42"`.
+
+`wait` is parsed as a number, truncated to whole milliseconds, and clamped to
+the range 0–30,000 ms; an absent or non-numeric value behaves as `0`. The
+response state machine is:
+
+- If the tag is absent/invalid, differs from the current generation, or
+  `wait <= 0`, return the current redacted snapshot immediately with `200`.
+- If the tag matches and `wait > 0`, wait for the generation to change. Return
+  the new snapshot with `200` when it changes, an empty `304` when the wait
+  expires unchanged, or an empty `499` when the caller disconnects.
+
+Every `200`, `304`, and `499` snapshot response carries the current generation
+as a quoted `ETag`, plus `Cache-Control: no-store` and
+`Vary: OMP-Auth-Broker-Capabilities`.
 
 ### Codex block-scope compatibility
 
@@ -188,13 +216,13 @@ The broker is **off** unless `OMP_AUTH_BROKER_URL` (or `auth.broker.url` in `con
 
 ### Environment variables
 
-| Variable                | Purpose                                                                                                                                            | Required when                                                                                                             |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `OMP_AUTH_BROKER_URL`   | Base URL of the remote auth-broker (e.g. `https://broker.tailnet:8765`). Selecting this puts the client in broker mode — local SQLite is bypassed. | Any time the omp client should resolve credentials through a broker (and required by `omp auth-gateway serve`).           |
-| `OMP_AUTH_BROKER_TOKEN` | Bearer token used for every broker endpoint except `/v1/healthz`.                                                                                  | When `OMP_AUTH_BROKER_URL` is set and no token is available from `auth.broker.token` or `<config-dir>/auth-broker.token`. |
-| `OMP_AUTH_BROKER_SNAPSHOT_TTL_MS` | Freshness window for the encrypted local snapshot cache. Default `3600000` (1 h); `0` disables cache reads and writes. | Optional in broker mode. |
-| `OMP_AUTH_BROKER_SNAPSHOT_CACHE`  | Path override for the encrypted local snapshot cache. Default `~/.omp/cache/auth-broker-snapshot.enc` (or XDG cache equivalent). | Optional in broker mode. |
-| `OMP_AUTH_BROKER_ACCOUNT_POOL_FILE` | JSON file mapping provider IDs to OAuth `identityKey` values visible to this trusted client. Parsed once; invalid files abort initialization. API keys are unaffected. | Optional in broker mode. |
+| Variable                            | Purpose                                                                                                                                                                | Required when                                                                                                             |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `OMP_AUTH_BROKER_URL`               | Base URL of the remote auth-broker (e.g. `https://broker.tailnet:8765`). Selecting this puts the client in broker mode — local SQLite is bypassed.                     | Any time the omp client should resolve credentials through a broker (and required by `omp auth-gateway serve`).           |
+| `OMP_AUTH_BROKER_TOKEN`             | Bearer token used for every broker endpoint except `/v1/healthz`.                                                                                                      | When `OMP_AUTH_BROKER_URL` is set and no token is available from `auth.broker.token` or `<config-dir>/auth-broker.token`. |
+| `OMP_AUTH_BROKER_SNAPSHOT_TTL_MS`   | Freshness window for the encrypted local snapshot cache. Default `3600000` (1 h); `0` disables cache reads and writes.                                                 | Optional in broker mode.                                                                                                  |
+| `OMP_AUTH_BROKER_SNAPSHOT_CACHE`    | Path override for the encrypted local snapshot cache. Default `~/.omp/cache/auth-broker-snapshot.enc` (or XDG cache equivalent).                                       | Optional in broker mode.                                                                                                  |
+| `OMP_AUTH_BROKER_ACCOUNT_POOL_FILE` | JSON file mapping provider IDs to OAuth `identityKey` values visible to this trusted client. Parsed once; invalid files abort initialization. API keys are unaffected. | Optional in broker mode.                                                                                                  |
 
 Resolution order in `resolveAuthBrokerConfig()`:
 

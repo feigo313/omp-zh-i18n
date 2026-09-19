@@ -39,6 +39,7 @@ async function runScenario(scenario: string): Promise<ScenarioResult> {
 	const primaryDir = path.join(root, "primary");
 	const secondaryDir = path.join(root, "secondary");
 	const resultPath = path.join(root, "result.json");
+	const stdoutPath = path.join(root, "stdout.log");
 	await Promise.all([fs.mkdir(primaryDir), fs.mkdir(secondaryDir)]);
 	const proc = Bun.spawn(
 		[process.execPath, "--preload", preloadPath, probePath, scenario, primaryDir, secondaryDir, resultPath],
@@ -47,6 +48,9 @@ async function runScenario(scenario: string): Promise<ScenarioResult> {
 			env: {
 				...process.env,
 				HOME: primaryDir,
+				// os.homedir() on Windows reads USERPROFILE, not HOME: without
+				// this the default-file scenario logs into the real profile.
+				USERPROFILE: primaryDir,
 				PI_CONFIG_DIR: ".omp",
 				OMP_PROFILE: "",
 				PI_PROFILE: "",
@@ -59,16 +63,13 @@ async function runScenario(scenario: string): Promise<ScenarioResult> {
 				OMP_LOGGER_TEST_NOW: fixedNow,
 				TZ: "Etc/GMT+5",
 			},
-			stdout: "pipe",
+			stdout: Bun.file(stdoutPath),
 			stderr: "pipe",
 		},
 	);
-	const [stdout, stderr, exitCode] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
+	const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
 	expect(exitCode, stderr).toBe(0);
+	const stdout = await fs.readFile(stdoutPath, "utf8");
 	return { pid: proc.pid, root, primaryDir, secondaryDir, resultPath, stdout, stderr };
 }
 

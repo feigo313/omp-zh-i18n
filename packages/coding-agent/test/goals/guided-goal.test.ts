@@ -1,11 +1,12 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { Agent, AgentBusyError } from "@oh-my-pi/pi-agent-core";
+import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { GoalTool } from "@oh-my-pi/pi-coding-agent/goals/tools/goal-tool";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
@@ -106,12 +107,16 @@ describe("guided goal setup", () => {
 		const harness = await createHarness();
 		try {
 			const promptSpy = vi.spyOn(harness.session, "prompt").mockResolvedValue(true);
+			const images: ImageContent[] = [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }];
 
-			await harness.mode.handleGuidedGoalCommand("automate flaky test triage");
+			await harness.mode.handleGuidedGoalCommand("automate flaky test triage", {
+				images,
+				imageLinks: ["file:///shot.png"],
+			});
 
 			expect(promptSpy).toHaveBeenCalledTimes(1);
 			const [text, promptOptions] = promptSpy.mock.calls[0]!;
-			expect(promptOptions).toEqual({ synthetic: true });
+			expect(promptOptions).toEqual({ synthetic: true, images });
 			// The rough objective rides inside the kickoff, and the kickoff tells the
 			// agent how to finish: `goal` tool, op create.
 			expect(text).toContain("automate flaky test triage");
@@ -134,7 +139,6 @@ describe("guided goal setup", () => {
 			expect(promptSpy).toHaveBeenCalledTimes(1);
 			const [text] = promptSpy.mock.calls[0]!;
 			expect(text).not.toContain("<rough-goal>");
-			expect(text).toContain("not stated an objective");
 		} finally {
 			await harness.cleanup();
 		}

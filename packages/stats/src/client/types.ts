@@ -54,16 +54,13 @@ export interface MessageStats {
 	stopReason: string;
 	errorMessage: string | null;
 	usage: Usage;
+	/** Ingest found no tariff to price this request from; its zero is unknown spend. */
+	costUnpriced?: boolean;
 }
 
 export interface RequestDetails extends MessageStats {
 	messages: unknown[];
 	output: unknown;
-}
-
-export interface PaginatedResult<T> {
-	items: T[];
-	total: number;
 }
 
 export type TimeRange = "1h" | "24h" | "7d" | "30d" | "90d" | "all";

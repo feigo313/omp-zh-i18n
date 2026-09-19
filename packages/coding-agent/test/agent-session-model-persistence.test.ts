@@ -11,7 +11,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { getRestorableSessionModels } from "@oh-my-pi/pi-coding-agent/session/session-context";
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { AUTO_THINKING } from "@oh-my-pi/pi-coding-agent/thinking";
+import { AUTO_THINKING } from "@oh-my-pi/pi-tui/thinking";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 describe("AgentSession model persistence", () => {
@@ -209,12 +209,8 @@ describe("AgentSession model persistence", () => {
 
 		const targetWindow = nextModel.contextWindow ?? 0;
 		expect(targetWindow).toBeGreaterThan(0);
-		const overflowTokens = targetWindow + 1;
 
-		const result = await created.session.setModel(nextModel, "default", {
-			persist: true,
-			currentContextTokens: overflowTokens,
-		});
+		const result = await created.session.setModel(nextModel, "default", { persist: true });
 
 		expect(result).toEqual({ switched: true });
 		expect(created.session.model?.id).toBe(nextModel.id);

@@ -56,6 +56,17 @@ describe("matchesKey", () => {
 		expect(matchesKey(dvorakCtrlSlash, "ctrl+[")).toBe(false);
 		setKittyProtocolActive(false);
 	});
+
+	it("matches non-Latin shortcuts by their base-layout key", () => {
+		setKittyProtocolActive(true);
+		try {
+			expect(matchesKey("\x1b[1089::99;5u", "ctrl+c")).toBe(true);
+			expect(matchesKey("\x1b[1079::112;5u", "ctrl+p")).toBe(true);
+			expect(matchesKey("\x1b[1057::99;6u", "ctrl+shift+c")).toBe(true);
+		} finally {
+			setKittyProtocolActive(false);
+		}
+	});
 	it("ignores Kitty release events while still matching repeats", () => {
 		setKittyProtocolActive(true);
 		expect(matchesKey("\x1b[127u", "backspace")).toBe(true);
@@ -194,10 +205,16 @@ describe("Raw 0x08 backspace disambiguation", () => {
 		"TMUX",
 		"STY",
 		"ZELLIJ",
+		"HERDR_ENV",
+		"HERDR_PANE_ID",
+		"HERDR_TAB_ID",
+		"HERDR_WORKSPACE_ID",
 		"TERM",
 		"CMUX_WORKSPACE_ID",
 		"CMUX_SURFACE_ID",
 		"CMUX_REMOTE_TRANSPORT",
+		"WMUX",
+		"WMUX_SURFACE_ID",
 	] as const;
 	function withEnv(overrides: Partial<Record<(typeof envKeys)[number], string>>, run: () => void): void {
 		const saved: Record<string, string | undefined> = {};

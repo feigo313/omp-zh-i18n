@@ -37,7 +37,9 @@ async function pingComputerWorker(
 		argv,
 	});
 	const response = Promise.withResolvers<unknown>();
-	worker.addEventListener("message", event => response.resolve(event.data));
+	worker.addEventListener("message", event => {
+		if (event.data?.type === "pong" && event.data.id === id) response.resolve(event.data);
+	});
 	worker.addEventListener("error", event => response.reject(event.error ?? new Error(event.message)));
 	worker.postMessage({ type: "ping", id });
 	try {
@@ -60,7 +62,9 @@ it("starts ordinary CLI paths without loading the native computer addon", async 
 		const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
 		expect(exitCode, `${args.at(-1)}: ${stderr}`).toBe(0);
 	}
-});
+	// Two cold CLI spawns (`--version`, `--help`) per run; the assertion is the exit
+	// code, not the wall time.
+}, 30_000);
 
 it("dispatches the computer worker through the CLI host selector in a child process", async () => {
 	const fixture = path.resolve(import.meta.dir, "../fixtures/computer-worker-cli-selector.ts");
@@ -84,25 +88,23 @@ it("loads the computer worker module directly outside a declared CLI host", asyn
 });
 
 it("dispatches the computer worker from a single npm-style host bundle", async () => {
+	using outDir = TempDir.createSync("@omp-computer-worker-bundle-");
 	const packageDir = path.resolve(import.meta.dir, "../..");
-	const outDir = fs.mkdtempSync(path.join(packageDir, ".computer-worker-bundle-"));
-	try {
-		const output = await Bun.build({
-			entrypoints: [path.join(packageDir, "test/fixtures/computer-worker-bundled-host.ts")],
-			outdir: outDir,
-			naming: "cli.js",
-			target: "bun",
-			external: ["@oh-my-pi/pi-natives"],
-			define: { "process.env.PI_BUNDLED": JSON.stringify("true") },
-			throw: false,
-		});
-		expect(output.logs).toEqual([]);
-		expect(output.outputs.map(file => path.basename(file.path))).toEqual(["cli.js"]);
-		const response = await pingComputerWorker(output.outputs[0]!.path, "computer-npm-bundle");
-		expect(response).toEqual({ type: "pong", id: "computer-npm-bundle" });
-	} finally {
-		fs.rmSync(outDir, { recursive: true, force: true });
-	}
+	const nodeModulesDir = path.resolve(packageDir, "../../node_modules");
+	fs.symlinkSync(nodeModulesDir, outDir.join("node_modules"), process.platform === "win32" ? "junction" : "dir");
+	const output = await Bun.build({
+		entrypoints: [path.join(packageDir, "test/fixtures/computer-worker-bundled-host.ts")],
+		outdir: outDir.path(),
+		naming: "cli.js",
+		target: "bun",
+		external: ["@oh-my-pi/pi-natives"],
+		define: { "process.env.PI_BUNDLED": JSON.stringify("true") },
+		throw: false,
+	});
+	expect(output.logs).toEqual([]);
+	expect(output.outputs.map(file => path.basename(file.path))).toEqual(["cli.js"]);
+	const response = await pingComputerWorker(output.outputs[0]!.path, "computer-npm-bundle");
+	expect(response).toEqual({ type: "pong", id: "computer-npm-bundle" });
 });
 
 it("keeps non-computer selectors isolated in a compiled single-entry worker host", async () => {
@@ -134,4 +136,6 @@ it("keeps non-computer selectors isolated in a compiled single-entry worker host
 	]);
 	expect(exitCode, stderr).toBe(0);
 	expect(stdout).toBe('{"ok":true,"kind":"pong"}\n');
-});
+	// Compiles a standalone binary with `bun build --compile` before running it, so
+	// this needs the same headroom as the other compile-backed tests.
+}, 60_000);

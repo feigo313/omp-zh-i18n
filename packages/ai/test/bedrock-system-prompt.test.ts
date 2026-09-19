@@ -37,6 +37,7 @@ async function capturePayload(systemPrompt: Context["systemPrompt"]): Promise<Pa
 	};
 	const { promise, resolve } = Promise.withResolvers<Payload | undefined>();
 	const stream = streamBedrock(model(), context, {
+		bearerToken: "test-token",
 		signal: abortedSignal(),
 		onPayload: payload => {
 			resolve(payload as Payload);

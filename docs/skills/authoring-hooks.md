@@ -21,7 +21,7 @@ export default function myHook(omp: HookAPI): void {
 }
 ```
 
-The default export must be a plain function (not async, not a class). It receives a `HookAPI` instance and must register all handlers synchronously during execution.
+The default export must be a function (not a class). It receives a `HookAPI` instance and should register handlers during factory execution; the loader awaits a returned promise, so asynchronous initialization is accepted.
 
 Alternatively, using `ExtensionAPI` (preferred):
 
@@ -95,9 +95,11 @@ omp.on("tool_call", async (event, ctx) => {
 Contract:
 
 - If **any** handler returns `{ block: true }`, execution stops immediately.
-- `reason` is returned to the LLM as the tool error text.
+- `reason` becomes the tool error text the LLM sees.
 - If a handler **throws**, the tool is also blocked (fail-closed).
-- Last non-blocking return wins for non-blocking results; first `block: true` short-circuits.
+- Last non-blocking return wins; first `block: true` short-circuits.
+- A non-blocking handler can return `input` to replace the raw arguments passed to the tool. Handlers do not see earlier input revisions.
+- Eval prelude calls such as `browser.open(...)`, direct `BrowserTab` helpers, `tab.run(...)`, direct `computer` helpers, and `computer.run(fnOrCode, options)` are not tool calls and do not emit these hooks.
 
 ## Post-tool override contract
 
@@ -185,7 +187,7 @@ import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
 const SECRET_PATTERNS = [
   /\b(sk|pk)-[a-zA-Z0-9]{20,}\b/g,
   /\bAKIA[A-Z0-9]{16}\b/g,
-  /\bgh(?:p)_[a-zA-Z0-9]{36}\b/g,
+  /\bghp_[a-zA-Z0-9]{36}\b/g,
   // Zhipu / GLM Coding Plan: `<id>.<secret>` (no `sk-` prefix).
   /\b[a-zA-Z0-9]{16,}\.[a-zA-Z0-9]{16,}\b/g,
   /\b[a-zA-Z0-9_-]{20,}\s*=\s*["']?[a-zA-Z0-9._/+=-]{20,}["']?/g,

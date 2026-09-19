@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Line } from "react-chartjs-2";
 import { getModelDashboardStats } from "../api";
-import { CHART_THEMES, MODEL_COLORS } from "../components/chart-shared";
+import { buildModelColorLookup, CHART_THEMES, MODEL_COLORS } from "../components/chart-shared";
 import {
 	DetailChartEmpty,
 	detailChartPlugins,
@@ -18,10 +18,9 @@ import {
 	TrendEmpty,
 } from "../components/models-table-shared";
 import { formatRangeTick, rangeMeta } from "../components/range-meta";
-import { formatCost } from "../data/formatters";
+import { formatEstimatedCost } from "../data/formatters";
 import { useResource } from "../data/useResource";
 import { buildModelPerformanceLookup } from "../data/view-models";
-import { useTranslation } from "../i18n";
 import type { ModelPerformancePoint, ModelStats, ModelTimeSeriesPoint, TimeRange } from "../types";
 import { AsyncBoundary, Panel } from "../ui";
 import { useSystemTheme } from "../useSystemTheme";
@@ -41,17 +40,23 @@ export function ModelsRoute({ active, range, refreshTrigger }: ModelsRouteProps)
 		pollMs: 30000,
 		enabled: active,
 	});
+	const modelColorLookup = useMemo(() => buildModelColorLookup(modelStats?.byModel ?? []), [modelStats?.byModel]);
 
 	return (
 		<div className="stats-route-container space-y-6">
 			<AsyncBoundary loading={loading} error={error} data={modelStats}>
 				{modelStats && (
 					<>
-						<ModelShareChart modelSeries={modelStats.modelSeries} timeRange={range} />
+						<ModelShareChart
+							modelSeries={modelStats.modelSeries}
+							timeRange={range}
+							colorLookup={modelColorLookup}
+						/>
 						<ModelsTable
 							models={modelStats.byModel}
 							performanceSeries={modelStats.modelPerformanceSeries}
 							timeRange={range}
+							colorLookup={modelColorLookup}
 						/>
 					</>
 				)}
@@ -60,30 +65,43 @@ export function ModelsRoute({ active, range, refreshTrigger }: ModelsRouteProps)
 	);
 }
 
-function ModelShareChart({ modelSeries, timeRange }: { modelSeries: ModelTimeSeriesPoint[]; timeRange: TimeRange }) {
-	const { t } = useTranslation();
+function ModelShareChart({
+	modelSeries,
+	timeRange,
+	colorLookup,
+}: {
+	modelSeries: ModelTimeSeriesPoint[];
+	timeRange: TimeRange;
+	colorLookup: ReadonlyMap<string, string>;
+}) {
 	const theme = useSystemTheme();
 	const chartTheme = CHART_THEMES[theme];
-	const meta = rangeMeta(timeRange, t);
+	const meta = rangeMeta(timeRange);
 
 	const chartData = useMemo(() => buildModelPreferenceSeries(modelSeries), [modelSeries]);
 
 	const data = useMemo(() => {
 		return {
 			labels: chartData.data.map(d => formatRangeTick(d.timestamp, timeRange)),
-			datasets: chartData.series.map((seriesName, index) => ({
-				label: seriesName,
-				data: chartData.data.map(d => d[seriesName] ?? 0),
-				borderColor: MODEL_COLORS[index % MODEL_COLORS.length],
-				backgroundColor: `${MODEL_COLORS[index % MODEL_COLORS.length]}20`,
-				fill: true,
-				tension: 0.4,
-				pointRadius: 0,
-				pointHoverRadius: 4,
-				borderWidth: 2,
-			})),
+			datasets: chartData.series.map((series, index) => {
+				const fallbackColor = MODEL_COLORS[index % MODEL_COLORS.length];
+				const color = series.key ? (colorLookup.get(series.key) ?? fallbackColor) : fallbackColor;
+				const dataKey = series.key ?? series.label;
+
+				return {
+					label: series.label,
+					data: chartData.data.map(d => d[dataKey] ?? 0),
+					borderColor: color,
+					backgroundColor: `${color}20`,
+					fill: true,
+					tension: 0.4,
+					pointRadius: 0,
+					pointHoverRadius: 4,
+					borderWidth: 2,
+				};
+			}),
 		};
-	}, [chartData, timeRange]);
+	}, [chartData, colorLookup, timeRange]);
 
 	const options = useMemo(() => {
 		return {
@@ -151,15 +169,10 @@ function ModelShareChart({ modelSeries, timeRange }: { modelSeries: ModelTimeSer
 	}, [chartTheme]);
 
 	return (
-		<Panel
-			title={t("models.shareChart-title")}
-			subtitle={t("models.shareChart-subtitle", { window: meta.windowLabel })}
-		>
+		<Panel title="Model Preference" subtitle={`Share of requests over ${meta.windowLabel}`}>
 			<div className="h-[280px]">
 				{chartData.data.length === 0 ? (
-					<div className="h-full flex items-center justify-center text-stats-muted text-sm">
-						{t("models.shareChart-noData")}
-					</div>
+					<div className="h-full flex items-center justify-center text-stats-muted text-sm">No data available</div>
 				) : (
 					<Line data={data} options={options} />
 				)}
@@ -173,7 +186,7 @@ function buildModelPreferenceSeries(
 	topN = 5,
 ): {
 	data: Array<Record<string, number>>;
-	series: string[];
+	series: Array<{ key?: string; label: string }>;
 } {
 	if (points.length === 0) return { data: [], series: [] };
 
@@ -216,22 +229,26 @@ function buildModelPreferenceSeries(
 			total: 0,
 		};
 		bucket.total += point.requests;
-		const seriesLabel = topKeys.has(key) ? (labelByKey.get(key) ?? point.model) : "Other";
-		bucket[seriesLabel] = (bucket[seriesLabel] ?? 0) + point.requests;
+		const seriesKey = topKeys.has(key) ? key : "Other";
+		bucket[seriesKey] = (bucket[seriesKey] ?? 0) + point.requests;
 		dataMap.set(point.timestamp, bucket);
 	}
 
-	const series = topEntries.map(entry => labelByKey.get(entry.key) ?? entry.model);
+	const series: Array<{ key?: string; label: string }> = topEntries.map(entry => ({
+		key: entry.key,
+		label: labelByKey.get(entry.key) ?? entry.model,
+	}));
 	if ([...dataMap.values()].some(row => (row.Other ?? 0) > 0)) {
-		series.push("Other");
+		series.push({ label: "Other" });
 	}
 
 	const data = [...dataMap.values()]
 		.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))
 		.map(row => {
 			const total = row.total ?? 0;
-			for (const key of series) {
-				row[key] = total > 0 ? ((row[key] ?? 0) / total) * 100 : 0;
+			for (const seriesItem of series) {
+				const seriesKey = seriesItem.key ?? seriesItem.label;
+				row[seriesKey] = total > 0 ? ((row[seriesKey] ?? 0) / total) * 100 : 0;
 			}
 			return row;
 		});
@@ -245,14 +262,15 @@ function ModelsTable({
 	models,
 	performanceSeries,
 	timeRange,
+	colorLookup,
 }: {
 	models: ModelStats[];
 	performanceSeries: ModelPerformancePoint[];
 	timeRange: TimeRange;
+	colorLookup: ReadonlyMap<string, string>;
 }) {
 	const [expandedKey, setExpandedKey] = useState<string | null>(null);
-	const { t, locale } = useTranslation();
-	const meta = rangeMeta(timeRange, t);
+	const meta = rangeMeta(timeRange);
 
 	const performanceSeriesByKey = useMemo(
 		() => buildModelPerformanceLookup(performanceSeries, timeRange),
@@ -269,16 +287,16 @@ function ModelsTable({
 	}, [models]);
 
 	return (
-		<ModelTableShell title={t("models.table.title")}>
+		<ModelTableShell title="Model Statistics">
 			<ModelTableHeader
 				gridTemplate={GRID_TEMPLATE}
 				columns={[
-					{ label: t("models.table.columns.model") },
-					{ label: t("models.table.columns.requests"), align: "right" },
-					{ label: t("models.table.columns.cost"), align: "right" },
-					{ label: t("models.table.columns.tokens"), align: "right" },
-					{ label: t("models.table.columns.tokensPerSec"), align: "right" },
-					{ label: t("models.table.columns.ttft"), align: "right" },
+					{ label: "Model" },
+					{ label: "Requests", align: "right" },
+					{ label: "API-equivalent estimate", align: "right" },
+					{ label: "Tokens", align: "right" },
+					{ label: "Tokens/s", align: "right" },
+					{ label: "TTFT", align: "right" },
 					{ label: meta.trendLabel, align: "center" },
 				]}
 			/>
@@ -288,7 +306,7 @@ function ModelsTable({
 					const key = `${model.model}::${model.provider}`;
 					const performance = performanceSeriesByKey.get(key);
 					const trendData = performance?.data ?? [];
-					const trendColor = MODEL_COLORS[index % MODEL_COLORS.length];
+					const trendColor = colorLookup.get(key) ?? MODEL_COLORS[index % MODEL_COLORS.length];
 					const isExpanded = expandedKey === key;
 					const errorRate = model.errorRate * 100;
 
@@ -304,7 +322,7 @@ function ModelsTable({
 									{model.totalRequests.toLocaleString()}
 								</div>,
 								<div key="cost" className="text-right text-[var(--text-secondary)] font-mono text-sm">
-									{formatCost(model.totalCost, undefined, locale)}
+									{formatEstimatedCost(model.totalCost, model.unpricedRequests)}
 								</div>,
 								<div key="tokens" className="text-right text-[var(--text-secondary)] font-mono text-sm">
 									{(model.totalInputTokens + model.totalOutputTokens).toLocaleString()}
@@ -331,12 +349,10 @@ function ModelsTable({
 								<div className="grid gap-4" style={{ gridTemplateColumns: "200px 1fr" }}>
 									<div className="space-y-4 text-sm">
 										<div>
-											<div className="text-[var(--text-primary)] font-medium mb-2">
-												{t("models.expanded-quality")}
-											</div>
+											<div className="text-[var(--text-primary)] font-medium mb-2">Efficiency</div>
 											<div className="space-y-1 text-[var(--text-secondary)]">
 												<div className="flex items-center justify-between">
-													<span>{t("models.expanded-errorRate")}</span>
+													<span>Error rate</span>
 													<span
 														className={
 															errorRate > 5 ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]"
@@ -346,26 +362,34 @@ function ModelsTable({
 													</span>
 												</div>
 												<div className="flex items-center justify-between">
-													<span>{t("models.expanded-cacheRate")}</span>
-													<span className="text-[var(--accent-cyan)]">
-														{(model.cacheRate * 100).toFixed(1)}%
+													<span>Cache rate</span>
+													<span className="font-mono">{(model.cacheRate * 100).toFixed(1)}%</span>
+												</div>
+												<div className="flex items-center justify-between">
+													<span>Cache savings</span>
+													<span
+														className={
+															model.cacheSavings < 0
+																? "text-[var(--accent-red)]"
+																: "text-[var(--accent-green)]"
+														}
+													>
+														{(model.cacheSavings * 100).toFixed(1)}%
 													</span>
 												</div>
 											</div>
 										</div>
 										<div>
-											<div className="text-[var(--text-primary)] font-medium mb-2">
-												{t("models.expanded-latency")}
-											</div>
+											<div className="text-[var(--text-primary)] font-medium mb-2">Latency</div>
 											<div className="space-y-1 text-[var(--text-secondary)]">
 												<div className="flex items-center justify-between">
-													<span>{t("models.expanded-avgDuration")}</span>
+													<span>Avg duration</span>
 													<span className="font-mono">
 														{model.avgDuration ? `${(model.avgDuration / 1000).toFixed(2)}s` : "-"}
 													</span>
 												</div>
 												<div className="flex items-center justify-between">
-													<span>{t("models.expanded-avgTTFT")}</span>
+													<span>Avg TTFT</span>
 													<span className="font-mono">
 														{model.avgTtft ? `${(model.avgTtft / 1000).toFixed(2)}s` : "-"}
 													</span>
@@ -410,26 +434,25 @@ function PerformanceChart({
 	chartTheme: TableChartTheme;
 	timeRange: TimeRange;
 }) {
-	const { t } = useTranslation();
 	const chartData = useMemo(() => {
 		return {
 			labels: data.map(d => formatRangeTick(d.timestamp, timeRange)),
 			datasets: [
 				{
-					label: t("models.ttft"),
+					label: "TTFT",
 					data: data.map(d => d.avgTtftSeconds ?? null),
 					...lineSeriesStyle("#5ad8e6"),
 					yAxisID: "y" as const,
 				},
 				{
-					label: t("models.tokensPerSec"),
+					label: "Tokens/s",
 					data: data.map(d => d.avgTokensPerSecond ?? null),
 					...lineSeriesStyle(color),
 					yAxisID: "y1" as const,
 				},
 			],
 		};
-	}, [data, color, timeRange, t]);
+	}, [data, color, timeRange]);
 
 	const options = useMemo(() => {
 		return {

@@ -2,7 +2,7 @@
  * Registry read/write operations for the marketplace plugin system.
  *
  * Two registries:
- *   - marketplaces.json under getConfigRootDir() — which catalogs the user has added
+ *   - marketplaces.json at getMarketplacesRegistryPath() — which catalogs the user has added
  *   - installed_plugins.json under getPluginsDir() — which plugins are installed
  *
  * Read/write functions accept explicit file paths so callers control the
@@ -15,7 +15,9 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import { getConfigRootDir, getPluginsDir, isEnoent, logger, tryParseJson } from "@oh-my-pi/pi-utils";
+import { getPluginsDir, isEnoent, logger, tryParseJson } from "@oh-my-pi/pi-utils";
+
+export { getMarketplacesRegistryPath } from "@oh-my-pi/pi-utils";
 
 import type {
 	InstalledPluginEntry,
@@ -23,12 +25,7 @@ import type {
 	MarketplaceRegistryEntry,
 	MarketplacesRegistry,
 } from "./types";
-
-// ── Path helpers ─────────────────────────────────────────────────────
-
-export function getMarketplacesRegistryPath(): string {
-	return path.join(getConfigRootDir(), "marketplaces.json");
-}
+import { nameSegmentCollisionKey } from "./types";
 
 export function getInstalledPluginsRegistryPath(): string {
 	return path.join(getPluginsDir(), "installed_plugins.json");
@@ -136,8 +133,15 @@ export async function writeInstalledPluginsRegistry(filePath: string, reg: Insta
 // reading, mutating, and writing back.
 
 export function addMarketplaceEntry(reg: MarketplacesRegistry, entry: MarketplaceRegistryEntry): MarketplacesRegistry {
-	if (reg.marketplaces.some(m => m.name === entry.name)) {
-		throw new Error(`Marketplace "${entry.name}" already exists`);
+	const key = nameSegmentCollisionKey(entry.name);
+	const existing = reg.marketplaces.find(m => nameSegmentCollisionKey(m.name) === key);
+	if (existing) {
+		if (existing.name === entry.name) {
+			throw new Error(`Marketplace "${entry.name}" already exists`);
+		}
+		throw new Error(
+			`Marketplace "${entry.name}" conflicts with existing marketplace "${existing.name}" on case-insensitive filesystems`,
+		);
 	}
 	return { ...reg, marketplaces: [...reg.marketplaces, entry] };
 }

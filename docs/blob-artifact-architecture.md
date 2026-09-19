@@ -23,8 +23,8 @@ They are intentionally separate:
 Blob file naming:
 
 - file path: `<blobsDir>/<sha256-hex>`
-- canonical file has no extension; when an extension is supplied (image MIME type), a typed sidecar `<sha256-hex>.<ext>` is hardlinked (or copied) next to it so OS openers can type-detect
-- reference string stored in entries: `blob:sha256:<sha256-hex>`
+- canonical file has no extension; when a valid extension is supplied (image MIME type), a typed sidecar `<sha256-hex>.<ext>` is hardlinked or copied next to it so OS openers can type-detect
+- reference string stored in entries: `blob:sha256:<sha256-hex>`, where the hash must be exactly 64 lowercase hexadecimal characters
 
 Implications:
 
@@ -62,22 +62,22 @@ No session-local counter is used.
 
 ### Artifact IDs: session-local monotonic integer
 
-`ArtifactManager` scans existing `*.log` artifact files on first directory-backed allocation to find max existing numeric ID and sets `nextId = max + 1`.
+`ArtifactManager` creates the directory lazily and scans existing `*.log` files on first directory-backed allocation to find the maximum numeric ID, setting `nextId = max + 1`. Concurrent first allocations share the same initialization promise so they cannot reseed the counter and hand out duplicates.
 
 Allocation behavior:
 
-- file format: `{id}.{toolType}.log`
+- file format: `{id}.{sanitizedToolType}.log`
+- tool types collapse characters outside `[A-Za-z0-9_-]` to `_`, trim surrounding underscores, cap at 64 characters, and fall back to `tool`
 - IDs are sequential strings (`"0"`, `"1"`, ...)
 - resume does not overwrite existing artifacts because scan happens before allocation
-- the directory is created lazily on first save/allocation
 
-If the artifact directory is missing, scanning yields an empty list and allocation starts from `0`.
+If the artifact directory is missing, initialization creates it and allocation starts from `0`.
 
 Non-persistent sessions without an adopted manager can store `saveArtifact(...)` content in memory under numeric IDs, but `artifact://` resolution is file-backed through registered artifact directories.
 
 ### Agent output IDs (`agent://`)
 
-`AgentOutputManager` allocates IDs for subagent outputs from the requested name, used verbatim the first time and suffixed (`-2`, `-3`, …) only when the same name repeats (e.g. `Anna`, `Anna-2`). Nested outputs are grouped under the parent prefix (e.g. `Parent.Child`). It scans existing `.md` files on initialization so a resumed session never reuses a name that would clobber a prior output.
+`AgentOutputManager` allocates IDs from the requested name, used verbatim the first time and suffixed (`-2`, `-3`, …) only when repeated. Nested outputs use a dot-qualified parent prefix (for example `Parent.Child`). Initialization scans both `.md` outputs and `.jsonl` child-session files so resume cannot clobber either; the reserved advisor transcript stem is never allocated unchanged.
 
 ## Persistence dataflow
 
@@ -127,29 +127,37 @@ Behavior:
 4. When the in-memory tail buffer would exceed spill threshold (`DEFAULT_MAX_BYTES`, 50KB), sink marks output truncated and starts artifact mirroring if an artifact path is available.
 5. If a file sink is opened, it first writes the current buffer, then all queued/subsequent sanitized chunks.
 6. In-memory buffer is trimmed to a tail window, or to head + elision marker + tail when head retention is configured.
-7. `dump()` returns summary including `artifactId` only when file sink creation succeeded.
+7. `dump()` finalizes the capture and returns `artifactId` only when no artifact I/O failure was observed. `artifactError` records the first failed operation (`open`, `write`, `flush`, or `end`) without persisting raw filesystem error text.
 
 Practical effect:
 
 - UI/tool return shows bounded output,
 - full sanitized output is preserved in artifact file and referenced as `artifact://<id>` when file-backed artifact mirroring succeeded.
 
-If file sink creation fails (I/O error, missing path, etc.), sink falls back to in-memory truncation only; full output is not persisted.
+If artifact I/O fails, the sink stops further capture attempts, retains the existing bounded inline output, and still closes its writer. The tool's execution result is unchanged; its output metadata and terminal warning state that full output was not saved completely, without advertising the incomplete artifact as a full recovery source. `dump()` and `dispose()` share completion so concurrent finalization cannot publish success before an asynchronous write or close failure settles. The streaming sink does not enable a disk cap or retry failed capture.
+
+The capture warning also survives background job delivery, `hub jobs`/`wait` recovery, cancellation, and transcript rebuilds. Capture failures belong to individual jobs, not the aggregate report. Oversized snapshots can persist the complete annotated report, including healthy jobs' results, and advertise it as a "full report" rather than a full original command log. Each source capture warning appears once in model-facing text and once on its own live or rebuilt terminal row. Individual incomplete captures are still not re-spilled and advertised as full original output.
+
+Transcript rebuilds also read capture errors from historical per-job fields. A historical aggregate warning is retained when no job identifies its source; it is not repeated when a row already carries the same failure.
 
 ## URL access model
 
 ### `blob:` references
 
-`blob:sha256:<hash>` is a persistence reference inside session entry payloads, not an internal URL scheme handled by the router. Resolution is done by `SessionManager` during session load.
+`blob:sha256:<hash>` is a persistence reference inside session entry payloads, not an internal URL scheme handled by the router. `SessionManager` resolves it during load. Malformed suffixes are rejected by `parseBlobRef()` before any path join, logged, and left unchanged rather than being read from the blob directory.
 
 ### `artifact://<id>`
 
 Handled by `ArtifactProtocolHandler` over registered active session artifact directories:
 
-- requires a numeric ID,
-- searches each registered artifacts directory for filename prefix `<id>.`,
-- returns raw text (`text/plain`) from the matched `.log` file,
-- when missing, error includes available numeric artifact IDs from existing artifact files.
+- requires a numeric ID
+- prefers the calling session's pinned artifacts directory before other registered sessions, because numeric IDs are session-local
+- searches for filename prefix `<id>.`
+- returns raw `text/plain` for inline resolution
+- when missing, reports available numeric artifact IDs
+- refuses to materialize a full artifact larger than 8 MiB; use bounded `read` selectors or the reported backing path for search/copy workflows
+
+Path-only consumers can resolve the backing file at any size without loading its bytes.
 
 Failure behavior:
 
@@ -161,10 +169,12 @@ Failure behavior:
 
 Handled by `AgentProtocolHandler` over registered active session artifact directories and `<artifactsDir>/<id>.md`:
 
-- plain form returns markdown text,
-- `/path` or `?q=` forms perform JSON extraction,
-- path and query extraction cannot be combined,
-- if extraction requested, file content must parse as JSON.
+- `agent://<id>` returns markdown text
+- `agent://Parent/Child` first tries the nested output `Parent.Child.md`
+- only when no nested output matches does a slash path fall back to JSON extraction from the base output
+- `?q=` always performs JSON extraction
+- path and query extraction cannot be combined
+- extraction requires valid JSON and returns `application/json`
 
 Failure behavior:
 
@@ -174,15 +184,15 @@ Failure behavior:
 
 Read tool integration:
 
-- `read` supports offset/limit pagination for non-extraction internal URL reads,
-- rejects offset/limit when `agent://` extraction is used.
+- `read` supports line-range and raw selectors for non-extraction internal URL reads
+- line selectors are rejected when an `agent://` URL contains path or query extraction syntax; extraction returns directly without pagination
 
 ## Resume, fork, and move semantics
 
 ### Resume
 
-- `ArtifactManager` scans existing `{id}.*.log` files on first allocation and continues numbering.
-- `AgentOutputManager` scans existing `.md` output IDs and continues numbering.
+- `ArtifactManager` scans existing `{id}.*.log` files once on first allocation and continues numbering.
+- `AgentOutputManager` scans existing `.md` and child `.jsonl` IDs and continues name suffixing.
 - `SessionManager` rehydrates blob refs to base64/data URLs on load.
 
 ### Fork
@@ -207,20 +217,24 @@ Blob implications after fork:
 
 `SessionManager.moveTo()` renames both session file and artifact directory to the new default session directory, with rollback logic if a later step fails. This preserves artifact identity while relocating session scope.
 
+When the destination artifact directory already exists — a session returning to a project it lived in before, whose old artifact path a subagent or eval subprocess kept writing to — the two directories are merged instead: entries move across, directories present on both sides merge recursively, and an entry whose name is already taken at the destination stays at the source (artifact IDs resolve by `<id>.` prefix, so neither copy is overwritten or renamed). A merged move is not rolled back by renaming the directory back; only the session-file rename is.
+
 ## Failure handling and fallback paths
 
-| Case                                                      | Behavior                                                             |
-| --------------------------------------------------------- | -------------------------------------------------------------------- |
-| Blob file missing during image-block rehydration          | Warn and keep `blob:sha256:` ref string in memory                    |
-| Blob file missing during provider `image_url` rehydration | Warn and keep `blob:sha256:` ref string in memory                    |
-| Blob read ENOENT via `BlobStore.get`                      | Returns `null`                                                       |
-| Artifact directory missing (`ArtifactManager.listFiles`)  | Returns empty list (allocation can start fresh)                      |
-| No registered artifact dirs (`artifact://`)               | Throws `No session - artifacts unavailable`                          |
-| No registered artifact dirs (`agent://`)                  | Throws `No session - agent outputs unavailable`                      |
-| Registered artifact dirs missing on disk                  | Throws explicit `No artifacts directory found`                       |
-| Artifact ID not found                                     | Throws with available IDs listing                                    |
-| OutputSink artifact writer init fails                     | Continues with bounded in-memory output only                         |
-| Non-persistent `saveArtifact`                             | Stores text in `SessionManager` memory map; not file-backed URL data |
+| Case                                                      | Behavior                                                                               |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Blob file missing during image-block rehydration          | Warn and keep `blob:sha256:` ref string in memory                                      |
+| Blob file missing during provider `image_url` rehydration | Warn and keep `blob:sha256:` ref string in memory                                      |
+| Blob read ENOENT via `BlobStore.get`                      | Returns `null`                                                                         |
+| Artifact directory missing (`ArtifactManager.listFiles`)  | Returns empty list (allocation can start fresh)                                        |
+| No registered artifact dirs (`artifact://`)               | Throws `No session - artifacts unavailable`                                            |
+| No registered artifact dirs (`agent://`)                  | Throws `No session - agent outputs unavailable`                                        |
+| Registered artifact dirs missing on disk                  | Throws explicit `No artifacts directory found`                                         |
+| Artifact ID not found                                     | Throws with available IDs listing                                                      |
+| Full `artifact://` resolution exceeds 8 MiB               | Rejects inline materialization; bounded selectors/path-only workflows remain available |
+| OutputSink artifact writer init fails                     | Continues with bounded in-memory output only                                           |
+| Non-persistent `saveArtifact`                             | Stores text in `SessionManager` memory map; not file-backed URL data                   |
+| Artifact directory already exists at the move destination | Directories merged; an entry whose name or artifact id is taken stays at the source and is logged (warn) |
 
 ## Binary blob externalization vs text-output artifacts
 

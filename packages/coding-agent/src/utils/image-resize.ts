@@ -1,4 +1,5 @@
 import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
 
 export interface ImageResizeOptions {
 	maxWidth?: number;
@@ -167,7 +168,9 @@ export async function resizeImage(img: ImageContent, options?: ImageResizeOption
 
 	try {
 		const { width: originalWidth, height: originalHeight, format } = await new Bun.Image(inputBuffer).metadata();
-		const sourceMime = img.mimeType ?? `image/${format}`;
+		// Trust decoded bytes over caller metadata. A mislabeled WebP must not take
+		// the fast path when the target decoder explicitly excludes WebP.
+		const sourceMime = format ? `image/${format}` : img.mimeType;
 
 		// Fast path: already within dimensions AND well under budget.
 		// Threshold is 1/4 of budget — if already that compact, don't re-encode.
@@ -417,4 +420,34 @@ export function formatDimensionNote(result: ResizedImage): string | undefined {
 	}
 	const scale = result.originalWidth / result.width;
 	return `[Image: original ${result.originalWidth}x${result.originalHeight}, displayed at ${result.width}x${result.height}. Multiply coordinates by ${scale.toFixed(2)} to map to original image.]`;
+}
+
+/** Format screenshot metadata and coordinate mapping for tool output. */
+export function formatScreenshot(opts: {
+	saveFullRes: boolean;
+	savedMimeType: string;
+	savedByteLength: number;
+	dest: string;
+	resized: ResizedImage;
+}): string[] {
+	const lines = ["Screenshot captured"];
+	if (opts.saveFullRes) {
+		lines.push(
+			`Saved: ${opts.savedMimeType} (${(opts.savedByteLength / 1024).toFixed(2)} KB) to ${shortenPath(opts.dest)}`,
+		);
+		lines.push(
+			`Model: ${opts.resized.mimeType} (${(opts.resized.buffer.length / 1024).toFixed(2)} KB, ${opts.resized.width}x${opts.resized.height})`,
+		);
+	} else {
+		lines.push(`Format: ${opts.resized.mimeType} (${(opts.resized.buffer.length / 1024).toFixed(2)} KB)`);
+		lines.push(`Dimensions: ${opts.resized.width}x${opts.resized.height}`);
+	}
+	if (opts.resized.decodeFailed) {
+		lines.push("Resize: image decoder failed; using original image bytes");
+	}
+	const dimensionNote = formatDimensionNote(opts.resized);
+	if (dimensionNote) {
+		lines.push(dimensionNote);
+	}
+	return lines;
 }

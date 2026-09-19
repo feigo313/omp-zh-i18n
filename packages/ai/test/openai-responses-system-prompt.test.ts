@@ -92,7 +92,7 @@ describe("openai-responses system prompt routing", () => {
 
 		it("redacts sensitive credentials in instructions", async () => {
 			const context: Context = {
-				systemPrompt: [["Token: ", "gh", "o_************************************"].join("")],
+				systemPrompt: ["Token: gho_************************************"],
 				messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
 			};
 			const body = await captureRequestBody(gpt4oMiniModel, context);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	getGitHubCopilotBaseUrl,
+	normalizeCopilotIntegrationId,
 	normalizeGitHubCopilotApiEndpoint,
 	normalizeGitHubCopilotEnterpriseDomain,
 	parseGitHubCopilotApiKey,
@@ -30,15 +31,25 @@ describe("GitHub Copilot OAuth helpers", () => {
 		expect(
 			parseGitHubCopilotApiKey(
 				JSON.stringify({
-					token: "gh" + "u_test_token",
+					token: "ghu_test_token",
 					enterpriseUrl: "https://ghe.example.com",
 					apiEndpoint: "https://api.business.githubcopilot.com/",
 				}),
 			),
 		).toEqual({
-			accessToken: "gh" + "u_test_token",
+			accessToken: "ghu_test_token",
 			enterpriseUrl: "ghe.example.com",
 			apiEndpoint: "https://api.business.githubcopilot.com",
 		});
+	});
+
+	it("validates Copilot integration-id overrides", () => {
+		expect(normalizeCopilotIntegrationId("copilot-chat")).toBe("copilot-chat");
+		expect(normalizeCopilotIntegrationId("  vscode-chat  ")).toBe("vscode-chat");
+		expect(normalizeCopilotIntegrationId(undefined)).toBeUndefined();
+		expect(normalizeCopilotIntegrationId("")).toBeUndefined();
+		expect(normalizeCopilotIntegrationId("   ")).toBeUndefined();
+		expect(normalizeCopilotIntegrationId("chat\r\nX-Injected: 1")).toBeUndefined();
+		expect(normalizeCopilotIntegrationId(42)).toBeUndefined();
 	});
 });

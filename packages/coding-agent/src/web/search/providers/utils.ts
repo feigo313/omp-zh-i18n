@@ -1,5 +1,6 @@
 import type { AgentStorage } from "../../../session/agent-storage";
-import { SearchProviderError, type SearchProviderId, type SearchSource } from "../../../web/search/types";
+import { DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS, SearchProviderError } from "../../../web/search/types";
+import { SEARCH_PROVIDER_LABELS, type SearchProviderId, type SearchSource } from "@oh-my-pi/pi-tui/tools/web-search";
 import { dateToAgeSeconds } from "../utils";
 
 /**
@@ -44,16 +45,13 @@ export function findCredential(
 }
 
 /**
- * Default hard ceiling for a single web-search round-trip. 60s tolerates
- * legitimate slow LLM-mediated responses (anthropic web_search_20250305,
- * perplexity, gemini, codex) while still guaranteeing the session unfreezes
- * within a minute if Bun's `AbortSignal` fails to propagate on Windows.
- *
- * Pure search APIs (brave, exa, jina, tavily, searxng, synthetic, zai)
- * settle far faster in practice; reusing the same ceiling keeps the wiring
- * uniform without compromising correctness.
+ * The 60-second default tolerates legitimate slow LLM-mediated responses
+ * (Anthropic web_search_20250305, Perplexity, Gemini, Codex) while bounding
+ * Windows stalls when Bun's `AbortSignal` fails to propagate. Callers may
+ * configure a longer provider deadline, capped at five minutes by the
+ * dispatcher; pure search APIs typically settle far faster.
  */
-export const SEARCH_HARD_TIMEOUT_MS = 60_000;
+export const SEARCH_HARD_TIMEOUT_MS = DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS * 1_000;
 
 /**
  * Compose a caller-supplied {@link AbortSignal} with a hard timeout so an
@@ -125,4 +123,61 @@ export function classifyProviderHttpError(
 		return new SearchProviderError(provider, `${provider}: 403 forbidden`, status);
 	}
 	return null;
+}
+
+/**
+ * Collapse runs of whitespace in a loosely-typed provider field, returning
+ * `undefined` for missing/non-string/blank values. Shared so tab/newline
+ * folding cannot drift between providers.
+ */
+export function normalizeSearchText(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const text = value.replace(/\s+/g, " ").trim();
+	return text.length > 0 ? text : undefined;
+}
+
+/**
+ * Read a provider response body up to a byte cap, truncating or throwing when
+ * the limit is exceeded. Shared so streaming-cap fixes land in one place.
+ */
+export async function readLimitedText(
+	response: Response,
+	provider: SearchProviderId,
+	maxBytes: number,
+	truncate = false,
+): Promise<string> {
+	if (!response.body) return "";
+	const reader = response.body.getReader();
+	let buffer = new Uint8Array(Math.min(maxBytes, 64 * 1024));
+	let bytes = 0;
+
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const accepted = Math.min(value.byteLength, maxBytes - bytes);
+			const nextBytes = bytes + accepted;
+			if (nextBytes > buffer.byteLength) {
+				const grown = new Uint8Array(Math.min(maxBytes, Math.max(nextBytes, buffer.byteLength * 2)));
+				grown.set(buffer.subarray(0, bytes));
+				buffer = grown;
+			}
+			buffer.set(value.subarray(0, accepted), bytes);
+			bytes = nextBytes;
+			if (accepted < value.byteLength) {
+				await reader.cancel().catch(() => undefined);
+				if (!truncate)
+					throw new SearchProviderError(
+						provider,
+						`${SEARCH_PROVIDER_LABELS[provider]} API response exceeded 2 MiB`,
+						500,
+					);
+				break;
+			}
+		}
+	} finally {
+		reader.releaseLock();
+	}
+
+	return new TextDecoder().decode(buffer.subarray(0, bytes));
 }

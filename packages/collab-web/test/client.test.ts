@@ -192,6 +192,34 @@ describe("GuestClient frame apply", () => {
 		client.applyFrameForTest({ t: "state", state: { ...STATE, isStreaming: false } });
 		expect(client.getSnapshot().working).toBe(false);
 	});
+	it("a state frame recovers a stuck-idle guest when agent_start was dropped", () => {
+		// The host begins streaming mid-turn, but the matching `agent_start`
+		// never arrived (e.g. dropped on a reconnect). Before the fix nothing
+		// set `working` true except `agent_start`, so the guest stayed idle.
+		const client = liveClient();
+		expect(client.getSnapshot().working).toBe(false);
+		client.applyFrameForTest({ t: "state", state: { ...STATE, isStreaming: true } });
+		expect(client.getSnapshot().working).toBe(true);
+	});
+
+	it("an idle state frame clears a pinned tool card when tool_execution_end was dropped", () => {
+		// Host reports idle, but the matching `tool_execution_end` was dropped,
+		// leaving a stuck tool card. The authoritative idle signal must clear it.
+		const client = liveClient();
+		client.applyFrameForTest({
+			t: "event",
+			event: {
+				type: "tool_execution_start",
+				toolCallId: "tc1",
+				toolName: "bash",
+				args: { command: "ls" },
+				intent: "Listing",
+			},
+		});
+		expect(client.getSnapshot().activeTools.size).toBe(1);
+		client.applyFrameForTest({ t: "state", state: { ...STATE, isStreaming: false } });
+		expect(client.getSnapshot().activeTools.size).toBe(0);
+	});
 
 	it("bus progress frames update the progress map", () => {
 		const client = liveClient();
@@ -316,6 +344,26 @@ describe("GuestClient frame apply", () => {
 		const after = client.getSnapshot();
 		expect(after).not.toBe(before);
 		expect(after.agents).not.toBe(before.agents);
+		// Non-entry frames must not invalidate entry identity: Transcript's
+		// memo and useSyncExternalStore skip their O(n) scans per token.
 		expect(after.entries).toBe(before.entries);
+	});
+
+	it("replaces the entries reference when entry frames arrive", () => {
+		const client = liveClient();
+		const before = client.getSnapshot();
+		client.applyFrameForTest({
+			t: "entry",
+			entry: {
+				type: "message",
+				id: "m-new",
+				parentId: null,
+				timestamp: "2026-06-12T00:00:02Z",
+				message: { role: "user", content: "hi", timestamp: 2 },
+			},
+		});
+		const after = client.getSnapshot();
+		expect(after.entries).not.toBe(before.entries);
+		expect(after.entries).toHaveLength(before.entries.length + 1);
 	});
 });

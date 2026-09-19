@@ -1,10 +1,16 @@
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Message } from "@oh-my-pi/pi-ai";
-import { getAgentDir as getDefaultAgentDir, logger, parseJsonlLenient, toError } from "@oh-my-pi/pi-utils";
-import { LRUCache } from "lru-cache/raw";
+import { textContent } from "@oh-my-pi/pi-tui/chat/transcript-entry";
+import { getSessionsDir } from "@oh-my-pi/pi-utils/dirs";
+import * as logger from "@oh-my-pi/pi-utils/logger";
+import { LRUCache } from "@oh-my-pi/pi-utils/lru";
+import { parseJsonlLenient } from "@oh-my-pi/pi-utils/stream";
+import { toError } from "@oh-my-pi/pi-utils/type-guards";
 import { computeDefaultSessionDir } from "./session-paths";
 import { FileSessionStorage, type SessionStorage, type SessionStorageStat } from "./session-storage";
+import { lookupSessionTitle, recordSessionTitle } from "./title-index";
 
 /**
  * Coarse lifecycle status of a session, derived from its last persisted message.
@@ -143,15 +149,6 @@ function sessionDisplayName(info: SessionInfo): string {
 	const date = new Date(ts);
 	const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 	return `Untitled · ${time}`;
-}
-
-function extractTextFromContent(content: Message["content"]): string {
-	if (typeof content === "string") return content;
-	const text: string[] = [];
-	for (const block of content) {
-		if (block.type === "text") text.push(block.text);
-	}
-	return text.join(" ");
 }
 
 /**
@@ -393,10 +390,11 @@ async function scanSessionFile(
 	file: string,
 	storage: SessionStorage,
 	withStatus: boolean,
+	knownStat?: SessionStorageStat,
 ): Promise<SessionInfo | undefined> {
 	let stat: SessionStorageStat;
 	try {
-		stat = storage.statSync(file);
+		stat = knownStat ?? storage.statSync(file);
 	} catch {
 		// Missing/unstatable file: no stat identity to cache under.
 		return undefined;
@@ -441,13 +439,13 @@ async function scanSessionFile(
 				parsedMessageCount++;
 
 				if (entry.message.role === "user" || entry.message.role === "assistant") {
-					const textContent = extractTextFromContent(entry.message.content);
+					const messageText = textContent(entry.message.content, " ");
 
-					if (textContent) {
-						allMessages.push(textContent);
+					if (messageText) {
+						allMessages.push(messageText);
 
 						if (!firstMessage && entry.message.role === "user") {
-							firstMessage = textContent;
+							firstMessage = messageText;
 						}
 					}
 				}
@@ -513,7 +511,12 @@ async function collectSessionsFromFiles(
 					)
 				).flat();
 
-	sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+	sessions.sort(
+		(a, b) =>
+			b.modified.getTime() - a.modified.getTime() ||
+			b.created.getTime() - a.created.getTime() ||
+			b.path.localeCompare(a.path),
+	);
 	return sessions;
 }
 
@@ -618,8 +621,10 @@ export function listSessionsReadOnly(sessionDir: string, storage: SessionStorage
 }
 
 /** List all sessions across all project directories (newest first). */
-export async function listAllSessions(storage: SessionStorage = new FileSessionStorage()): Promise<SessionInfo[]> {
-	const sessionsRoot = path.join(getDefaultAgentDir(), "sessions");
+export async function listAllSessions(
+	storage: SessionStorage = new FileSessionStorage(),
+	sessionsRoot: string = getSessionsDir(),
+): Promise<SessionInfo[]> {
 	try {
 		const files = await Array.fromAsync(new Bun.Glob("*/*.jsonl").scan(sessionsRoot), name =>
 			path.join(sessionsRoot, name),
@@ -639,17 +644,82 @@ export async function findMostRecentSession(
 	return sessions[0]?.path ?? null;
 }
 
-/** Get recent sessions for display in the welcome screen. */
+/** Session id embedded in a `<file-safe-timestamp>_<id>.jsonl` filename, if present. */
+function sessionIdFromSessionPath(file: string): string | undefined {
+	const base = path.basename(file);
+	if (!base.endsWith(".jsonl")) return undefined;
+	const sep = base.lastIndexOf("_");
+	if (sep <= 0) return undefined;
+	return base.slice(sep + 1, -".jsonl".length) || undefined;
+}
+
+/**
+ * Get recent sessions for display in the welcome screen.
+ *
+ * Deliberately avoids {@link scanSessionDir}'s full-directory content scan
+ * (multi-hundred-ms with thousands of sessions): lists files, sorts by mtime,
+ * and resolves names for the newest `limit` files from the history.db title
+ * index. Files without an indexed title (legacy sessions, branch/fork copies)
+ * fall back to a per-file header scan whose title — when present — is
+ * backfilled into the index so the next launch skips the read.
+ */
 export async function getRecentSessions(
 	sessionDir: string,
 	limit = 4,
 	storage: SessionStorage = new FileSessionStorage(),
 ): Promise<RecentSessionInfo[]> {
-	const sessions = await scanSessionDir(sessionDir, storage, false);
+	let files: string[];
+	try {
+		files =
+			storage instanceof FileSessionStorage
+				? await Array.fromAsync(new Bun.Glob("*.jsonl").scan(sessionDir), name => path.join(sessionDir, name))
+				: storage.listFilesSync(sessionDir, "*.jsonl");
+	} catch {
+		return [];
+	}
+	const byMtime: Array<{ file: string; stat: SessionStorageStat }> = [];
+	if (storage instanceof FileSessionStorage) {
+		const stats = await Promise.all(
+			files.map(async file => {
+				try {
+					return { file, stat: await fs.promises.stat(file) };
+				} catch {
+					// Vanished between discovery and stat; skip.
+					return undefined;
+				}
+			}),
+		);
+		for (const entry of stats) {
+			if (entry) byMtime.push(entry);
+		}
+	} else {
+		for (const file of files) {
+			try {
+				byMtime.push({ file, stat: storage.statSync(file) });
+			} catch {
+				// Vanished between discovery and stat; skip.
+			}
+		}
+	}
+	byMtime.sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
+
+	// The index is keyed by real session ids; in-memory test storages must not
+	// touch the process-wide history.db.
+	const useIndex = storage instanceof FileSessionStorage;
 	const recent: RecentSessionInfo[] = [];
-	for (let i = 0; i < sessions.length && i < limit; i++) {
-		const info = sessions[i];
-		recent.push({ path: info.path, name: sessionDisplayName(info), timeAgo: formatTimeAgo(info.modified) });
+	for (const { file, stat } of byMtime) {
+		if (recent.length >= limit) break;
+		const id = useIndex ? sessionIdFromSessionPath(file) : undefined;
+		const indexed = id ? lookupSessionTitle(id) : undefined;
+		if (indexed) {
+			recent.push({ path: file, name: indexed, timeAgo: formatTimeAgo(stat.mtime) });
+			continue;
+		}
+		const info = await scanSessionFile(file, storage, false, stat);
+		if (!info) continue;
+		const title = sanitizeSessionName(info.title);
+		if (useIndex && title && info.id) recordSessionTitle(info.id, title);
+		recent.push({ path: file, name: sessionDisplayName(info), timeAgo: formatTimeAgo(info.modified) });
 	}
 	return recent;
 }

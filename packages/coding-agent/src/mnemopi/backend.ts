@@ -1,8 +1,9 @@
 import { rm } from "node:fs/promises";
 import * as path from "node:path";
-import { type ApiKeyResolver, completeSimple } from "@oh-my-pi/pi-ai";
+import { type ApiKeyResolver, completeSimple, retryTransientCompletion } from "@oh-my-pi/pi-ai";
 import { hostMatchesUrl } from "@oh-my-pi/pi-catalog/hosts";
 import type { Mnemopi } from "@oh-my-pi/pi-mnemopi";
+import type { MnemopiLlmCompleteOptions } from "@oh-my-pi/pi-mnemopi/core/runtime-options";
 import type * as MnemopiDiagnoseNs from "@oh-my-pi/pi-mnemopi/diagnose";
 import type { DiagnosticSummary } from "@oh-my-pi/pi-mnemopi/diagnose";
 import { logger } from "@oh-my-pi/pi-utils";
@@ -14,13 +15,14 @@ import type {
 	MemoryBackendSearchItem,
 	MemoryBackendStartOptions,
 	MemoryBackendStatus,
+	MemoryPromptPreparation,
 } from "../memory-backend/types";
 import memoryConsolidationPrompt from "../prompts/system/memory-consolidation-system.md" with { type: "text" };
 import memoryExtractionPrompt from "../prompts/system/memory-extraction-system.md" with { type: "text" };
 import type { AgentSession } from "../session/agent-session";
 import { isTinyMemoryLocalModelKey, ONLINE_MEMORY_MODEL_KEY } from "../tiny/models";
 import { tinyModelClient } from "../tiny/title-client";
-import { shortenPath } from "../tools/render-utils";
+import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
 import {
 	loadMnemopiConfig,
 	type MnemopiBackendConfig,
@@ -62,12 +64,36 @@ const STATIC_INSTRUCTIONS = [
 	"",
 ].join("\n");
 
+/** Prompt turns for one Mnemopi completion. */
+export interface MemoryCompletionInput {
+	prompt: string;
+	systemPrompt?: string;
+}
+
+/** Maps a Mnemopi completion into instruction and input turns.
+ *
+ *  Extraction is the only task with its own instructions, and it always supplies
+ *  the raw text, so the instructions become the system turn and the text becomes
+ *  the user turn. Every other task keeps the prompt Mnemopi rendered. */
+export function resolveMemoryCompletionInput(
+	prompt: string,
+	options?: MnemopiLlmCompleteOptions,
+): MemoryCompletionInput {
+	if (options?.task?.kind === "memory-extraction") {
+		return { prompt: options.task.input, systemPrompt: memoryExtractionPrompt };
+	}
+	return { prompt };
+}
+
 async function installMnemopiState(session: AgentSession, config: MnemopiBackendConfig): Promise<MnemopiSessionState> {
 	const state = new MnemopiSessionState({ sessionId: session.sessionId, config, session });
 	const previous = setMnemopiSessionState(session, state);
 	await previous?.dispose();
 	try {
 		state.attachSessionListeners();
+		// Promote age-eligible working memory to episodic before the session's
+		// first write can TTL-trim unconsolidated retain/learn rows (#10770).
+		state.promoteEligibleWorkingMemory();
 		return state;
 	} catch (error) {
 		setMnemopiSessionState(session, undefined);
@@ -120,9 +146,23 @@ export const mnemopiBackend: MemoryBackend = {
 		return truncateApproxTokens(rendered, settings.get("mnemopi.injectionTokenLimit"));
 	},
 
-	async beforeAgentStartPrompt(session, promptText): Promise<string | undefined> {
+	async beforeAgentStartPrompt(session, promptText): Promise<MemoryPromptPreparation | undefined> {
 		const state = getMnemopiSessionState(session);
-		return await state?.beforeAgentStartPrompt(promptText);
+		const preparation = await state?.beforeAgentStartPrompt(promptText);
+		if (!preparation) return undefined;
+		if (preparation.context) {
+			// Match the canonical memory block's budget while the recall is staged
+			// separately from its static instructions. Commit still caches the full snippet.
+			const rendered = [STATIC_INSTRUCTIONS, preparation.context].join("\n\n").trim();
+			preparation.context =
+				truncateApproxTokens(rendered, session.settings.get("mnemopi.injectionTokenLimit"))
+					.slice(STATIC_INSTRUCTIONS.length)
+					.trim() || undefined;
+		}
+		return {
+			context: preparation.context,
+			commit: () => getMnemopiSessionState(session) === state && preparation.commit(),
+		};
 	},
 
 	async clear(agentDir, _cwd, session): Promise<void> {
@@ -162,7 +202,7 @@ export const mnemopiBackend: MemoryBackend = {
 				await Promise.all([loadMnemopi(), loadMnemopiCore()]);
 				state = await installMnemopiState(session, config);
 			}
-			await state?.consolidate({ full: true });
+			await state?.consolidate({ full: true, retain: true });
 		} catch (error) {
 			logger.warn("Mnemopi: enqueue failed.", { error: String(error) });
 		}
@@ -506,8 +546,16 @@ async function resolveMnemopiProviderOptions(
 		return {
 			...base,
 			llm: {
-				complete: (prompt, opts) => tinyModelClient.complete(memoryModel, prompt, { maxTokens: opts?.maxTokens }),
-				extractionPrompt: memoryExtractionPrompt,
+				complete: (prompt, opts) => {
+					const request = resolveMemoryCompletionInput(prompt, opts);
+					return tinyModelClient.complete(memoryModel, request.prompt, {
+						maxTokens: opts?.maxTokens,
+						systemPrompt: request.systemPrompt,
+					});
+				},
+				// No `extractionPrompt`: resolveMemoryCompletionInput supplies the
+				// instructions as a system turn for every extraction call, so anything
+				// rendered here would be built in code and then discarded.
 				consolidationPrompt: memoryConsolidationPrompt,
 			},
 		};
@@ -537,6 +585,7 @@ async function resolveMnemopiProviderOptions(
 		return {
 			...base,
 			llm: async (prompt, opts) => {
+				const request = resolveMemoryCompletionInput(prompt, opts);
 				const hasApiKey = await modelRegistry.getApiKey(model, sessionId);
 				if (!hasApiKey) {
 					logger.warn("Mnemopi: smol completion requested but no current API key is available.", {
@@ -545,16 +594,22 @@ async function resolveMnemopiProviderOptions(
 					});
 					return null;
 				}
-				const message = await completeSimple(
-					model,
-					{
-						messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-					},
-					{
-						apiKey: modelRegistry.resolver(model, sessionId),
-						maxTokens: opts?.maxTokens,
-						temperature: opts?.temperature,
-					},
+				const message = await retryTransientCompletion(
+					() =>
+						completeSimple(
+							model,
+							{
+								...(request.systemPrompt ? { systemPrompt: [request.systemPrompt] } : {}),
+								messages: [{ role: "user", content: request.prompt, timestamp: Date.now() }],
+							},
+							{
+								apiKey: modelRegistry.resolver(model, sessionId),
+								sessionId,
+								maxTokens: opts?.maxTokens,
+								temperature: opts?.temperature,
+							},
+						),
+					{ provider: model.provider },
 				);
 				return message.content
 					.filter(

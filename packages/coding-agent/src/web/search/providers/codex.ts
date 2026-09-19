@@ -4,32 +4,20 @@
  * Uses the configured Codex Responses transport for proxy/API-key setups and
  * the official ChatGPT backend for OAuth logins.
  */
-import * as os from "node:os";
-import {
-	type AuthStorage,
-	type FetchImpl,
-	type Model,
-	type OAuthAccess,
-	withAuth,
-	withOAuthAccess,
-} from "@oh-my-pi/pi-ai";
-import { applyCodexResponsesLiteShape } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
-import {
-	createOpenAICodexCompatibilityMetadata,
-	resolveCodexResponsesUrl,
-} from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
+import { type AuthStorage, type FetchImpl, type Model, withAuth, withOAuthAccess } from "@oh-my-pi/pi-ai";
+import { resolveCodexResponsesUrl } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import {
+	applyCodexResidencyHeader,
 	CODEX_BASE_URL,
 	CODEX_CLIENT_VERSION,
 	getCodexAccountId,
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
 } from "@oh-my-pi/pi-catalog/wire/codex";
-import { $env, readSseJson } from "@oh-my-pi/pi-utils";
-import packageJson from "../../../../package.json" with { type: "json" };
+import { $env, readSseJson, USER_AGENT } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../../../config/model-registry";
-import type { SearchResponse, SearchSource } from "../../../web/search/types";
+import type { SearchResponse, SearchSource } from "@oh-my-pi/pi-tui/tools/web-search";
 import { SearchProviderError } from "../../../web/search/types";
 import { formatQuery, GOOGLE_QUERY_SYNTAX, parseSearchQuery } from "../query";
 import type { SearchParams } from "./base";
@@ -145,6 +133,7 @@ function shouldRetryWithNextDefaultModel(error: unknown): boolean {
 
 export interface CodexSearchParams {
 	signal?: AbortSignal;
+	timeoutMs?: number;
 	fetch?: FetchImpl;
 	query: string;
 	system_prompt?: string;
@@ -154,6 +143,13 @@ export interface CodexSearchParams {
 }
 
 /** Codex API response structure */
+interface CodexWebSearchSource {
+	url?: string;
+	source_website_url?: string;
+	title?: string;
+	caption?: string;
+}
+
 interface CodexResponseItem {
 	type: string;
 	id?: string;
@@ -164,6 +160,9 @@ interface CodexResponseItem {
 	arguments?: string;
 	content?: CodexContentPart[];
 	summary?: Array<{ type: string; text: string }>;
+	action?: { sources?: CodexWebSearchSource[] };
+	sources?: CodexWebSearchSource[];
+	results?: CodexWebSearchSource[];
 }
 
 interface CodexContentPart {
@@ -224,10 +223,43 @@ function isImagePlaceholderAnswer(text: string): boolean {
 	return IMAGE_PLACEHOLDER_ANSWERS.has(normalized);
 }
 
-function addSource(sources: SearchSource[], source: SearchSource): void {
-	if (!sources.some(existing => existing.url === source.url)) {
-		sources.push(source);
+function cleanSourceUrl(rawUrl: string): string {
+	try {
+		const url = new URL(rawUrl);
+		if (url.searchParams.get("utm_source") === "openai") {
+			url.searchParams.delete("utm_source");
+		}
+		return url.toString();
+	} catch {
+		return rawUrl.replace(/[?&]utm_source=openai$/u, "");
 	}
+}
+
+function addSource(sources: SearchSource[], source: SearchSource): void {
+	const normalizedSource = { ...source, url: cleanSourceUrl(source.url) };
+	const existing = sources.find(candidate => candidate.url === normalizedSource.url);
+	if (!existing) {
+		sources.push(normalizedSource);
+		return;
+	}
+	if (existing.title === existing.url && normalizedSource.title !== normalizedSource.url) {
+		existing.title = normalizedSource.title;
+	}
+	if (!existing.snippet && normalizedSource.snippet) {
+		existing.snippet = normalizedSource.snippet;
+	}
+}
+
+function extractCitationSnippet(text: string, start: number | undefined, end: number | undefined): string | undefined {
+	if (start === undefined || end === undefined || !text) return undefined;
+	const before = Math.max(0, start - 100);
+	const after = Math.min(text.length, end + 100);
+	const snippet = text
+		.slice(before, after)
+		.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+		.trim();
+	if (!snippet) return undefined;
+	return snippet.length > 300 ? `${snippet.slice(0, 297)}...` : snippet;
 }
 
 function countCharacter(text: string, target: string): number {
@@ -343,25 +375,10 @@ function extractTextSources(text: string): SearchSource[] {
 	return sources;
 }
 
-/**
- * Resolve a Codex bearer + accountId through {@link AuthStorage} — the single
- * refresh authority. Returns `null` when no OAuth credential is configured,
- * when the credential cannot be refreshed (broker error, revoked token, etc.),
- * or when the access token carries no `chatgpt_account_id` claim.
- */
-async function findCodexAuth(
-	authStorage: AuthStorage,
-	sessionId: string | undefined,
-	signal: AbortSignal | undefined,
-): Promise<{ access: OAuthAccess; accountId: string } | null> {
-	const access = await authStorage.getOAuthAccess("openai-codex", sessionId, { signal });
-	if (!access) return null;
-	const accountId = access.accountId ?? getCodexAccountId(access.accessToken);
-	if (!accountId) return null;
-	return { access, accountId };
-}
-
-function resolveCodexSearchTransport(modelRegistry: ModelRegistry | undefined, modelId: string): CodexSearchTransport {
+async function resolveCodexSearchTransport(
+	modelRegistry: ModelRegistry | undefined,
+	modelId: string,
+): Promise<CodexSearchTransport> {
 	const registryModel = modelRegistry?.find("openai-codex", modelId);
 	const bundledModel = getBundledCodexModels().find(model => model.id === modelId);
 	const providerBaseUrl = modelRegistry?.getProviderBaseUrl("openai-codex");
@@ -371,13 +388,14 @@ function resolveCodexSearchTransport(modelRegistry: ModelRegistry | undefined, m
 	}
 
 	const url = resolveCodexResponsesUrl(baseUrl);
+	const headers =
+		modelRegistry && registryModel
+			? await modelRegistry.resolveModelHeaders(registryModel)
+			: await modelRegistry?.getProviderHeaders("openai-codex");
 	return {
 		baseUrl,
 		url,
-		headers: {
-			...(modelRegistry?.getProviderHeaders("openai-codex") ?? {}),
-			...(registryModel?.headers ?? {}),
-		},
+		headers: { ...headers },
 		customEndpoint: url !== resolveCodexResponsesUrl(CODEX_BASE_URL),
 	};
 }
@@ -398,13 +416,47 @@ function buildCodexHeaders(
 	} else {
 		headers.delete(OPENAI_HEADERS.ACCOUNT_ID);
 	}
+	applyCodexResidencyHeader(headers, accessToken);
 	headers.set(OPENAI_HEADERS.BETA, OPENAI_HEADER_VALUES.BETA_RESPONSES);
 	headers.set(OPENAI_HEADERS.ORIGINATOR, OPENAI_HEADER_VALUES.ORIGINATOR_CODEX);
 	headers.set(OPENAI_HEADERS.VERSION, CODEX_CLIENT_VERSION);
-	headers.set("User-Agent", `pi/${packageJson.version} (${os.platform()} ${os.release()}; ${os.arch()})`);
+	headers.set("User-Agent", USER_AGENT);
 	headers.set("Accept", "text/event-stream");
 	headers.set("Content-Type", "application/json");
 	return headers;
+}
+
+/**
+ * Extracts a backend error `{code, message}` from a Codex SSE event, tolerating
+ * the envelope shapes the ChatGPT Codex backend emits: top-level `{code,message}`,
+ * a nested `error` object, and a `response.error` object (as in `response.failed`).
+ * Without this the nested shapes collapse to `Codex error (): Unknown error`,
+ * discarding the backend diagnostic — e.g. a regional/model-snapshot rejection (#7200).
+ */
+function extractCodexSseError(rawEvent: Record<string, unknown>): { code: string; message: string } {
+	const candidates: unknown[] = [
+		rawEvent,
+		rawEvent.error,
+		(rawEvent.response as { error?: unknown } | undefined)?.error,
+	];
+	let code = "";
+	let message = "";
+	for (const candidate of candidates) {
+		if (!candidate || typeof candidate !== "object") continue;
+		const record = candidate as Record<string, unknown>;
+		if (!code && typeof record.code === "string" && record.code) code = record.code;
+		if (!message && typeof record.message === "string" && record.message) message = record.message;
+	}
+	return { code, message };
+}
+
+function classifyCodexSseErrorStatus(code: string, message: string): number {
+	const detail = `${code} ${message}`.toLowerCase();
+	if (/rate[- ]?limit|too many requests|quota|\b429\b/u.test(detail)) return 429;
+	if (/unauthori[sz]ed|\b401\b/u.test(detail)) return 401;
+	if (/forbidden|\b403\b/u.test(detail)) return 403;
+	if (/timeout|timed out/u.test(detail)) return 504;
+	return 500;
 }
 
 /**
@@ -418,10 +470,10 @@ async function callCodexSearch(
 	query: string,
 	options: {
 		signal?: AbortSignal;
+		timeoutMs?: number;
 		systemPrompt?: string;
 		searchContextSize?: "low" | "medium" | "high";
 		model: CodexModelCandidate;
-		sessionId?: string;
 		fetch?: FetchImpl;
 		transport: CodexSearchTransport;
 	},
@@ -429,12 +481,13 @@ async function callCodexSearch(
 	const headers = buildCodexHeaders(auth.accessToken, auth.accountId, options.transport.headers);
 
 	const requestedModel = options.model.modelId;
-	const usesResponsesLite = options.model.catalogModel?.useResponsesLite === true;
 
 	const body: Record<string, unknown> = {
 		model: requestedModel,
 		stream: true,
 		store: false,
+		include: ["web_search_call.action.sources"],
+		parallel_tool_calls: true,
 		input: [
 			{
 				type: "message",
@@ -451,28 +504,13 @@ async function callCodexSearch(
 		tool_choice: { type: "web_search" },
 		instructions: options.systemPrompt ?? DEFAULT_INSTRUCTIONS,
 	};
-	if (usesResponsesLite) {
-		const metadata = createOpenAICodexCompatibilityMetadata({
-			sessionId: options.sessionId,
-			requestKind: "turn",
-			startNewTurn: true,
-		});
-		for (const name in metadata.headers) {
-			const value = metadata.headers[name];
-			if (value !== undefined) headers.set(name, value);
-		}
-		headers.set(OPENAI_HEADERS.RESPONSES_LITE, "true");
-		body.client_metadata = metadata.clientMetadata;
-		body.reasoning = { context: "all_turns" };
-		applyCodexResponsesLiteShape(body);
-	}
 
 	const fetchImpl = options.fetch ?? fetch;
 	const response = await fetchImpl(options.transport.url, {
 		method: "POST",
 		headers,
 		body: JSON.stringify(body),
-		signal: withHardTimeout(options.signal),
+		signal: withHardTimeout(options.signal, options.timeoutMs),
 	});
 
 	if (!response.ok) {
@@ -493,9 +531,8 @@ async function callCodexSearch(
 	let model = requestedModel;
 	let requestId = "";
 	let usage: { inputTokens: number; outputTokens: number; totalTokens: number } | undefined;
-	// Evidence that the hosted web_search tool actually ran. Lite models get
-	// `tool_choice: "auto"` and may answer without searching (#6988); a search
-	// command must reject that rather than return a non-search completion.
+	// A search command must reject a completion that did not invoke the hosted
+	// tool rather than returning an answer from the model's own knowledge (#6988).
 	let webSearchInvoked = false;
 
 	for await (const rawEvent of readSseJson<Record<string, unknown>>(response.body, options.signal)) {
@@ -506,7 +543,11 @@ async function callCodexSearch(
 			webSearchInvoked = true;
 		}
 
-		if (eventType === "response.output_text.delta") {
+		if (eventType === "response.created") {
+			const resp = (rawEvent as { response?: CodexResponse }).response;
+			if (resp?.id) requestId = resp.id;
+			if (resp?.model) model = resp.model;
+		} else if (eventType === "response.output_text.delta") {
 			const delta = typeof rawEvent.delta === "string" ? rawEvent.delta : "";
 			if (delta) {
 				streamedAnswerParts.push(delta);
@@ -514,7 +555,20 @@ async function callCodexSearch(
 		} else if (eventType === "response.output_item.done") {
 			const item = rawEvent.item as CodexResponseItem | undefined;
 			if (!item) continue;
-			if (item.type === "web_search_call") webSearchInvoked = true;
+			if (item.type === "web_search_call") {
+				webSearchInvoked = true;
+				const sourceGroups = [item.action?.sources, item.sources, item.results];
+				for (const group of sourceGroups) {
+					for (const source of group ?? []) {
+						const url = source.url ?? source.source_website_url;
+						if (!url) continue;
+						addSource(sources, {
+							title: source.title ?? source.caption ?? url,
+							url,
+						});
+					}
+				}
+			}
 
 			// Handle text message content and extract sources from annotations
 			if (item.type === "message" && item.content) {
@@ -526,8 +580,11 @@ async function callCodexSearch(
 						if (part.annotations) {
 							for (const annotation of part.annotations) {
 								if (annotation.type === "url_citation" && annotation.url) {
-									// Deduplicate by URL
-									addSource(sources, { title: annotation.title ?? annotation.url, url: annotation.url });
+									addSource(sources, {
+										title: annotation.title ?? annotation.url,
+										url: annotation.url,
+										snippet: extractCitationSnippet(part.text, annotation.start_index, annotation.end_index),
+									});
 								}
 							}
 						}
@@ -558,13 +615,18 @@ async function callCodexSearch(
 				}
 			}
 		} else if (eventType === "error") {
-			const code = (rawEvent as { code?: string }).code ?? "";
-			const message = (rawEvent as { message?: string }).message ?? "Unknown error";
-			throw new SearchProviderError("codex", `Codex error (${code}): ${message}`, 500);
+			const { code, message } = extractCodexSseError(rawEvent);
+			throw new SearchProviderError(
+				"codex",
+				`Codex error (${code}): ${message || "Unknown error"}`,
+				classifyCodexSseErrorStatus(code, message),
+			);
 		} else if (eventType === "response.failed") {
-			const resp = (rawEvent as { response?: { error?: { message?: string } } }).response;
-			const errorMessage = resp?.error?.message ?? "Request failed";
-			throw new SearchProviderError("codex", `Codex request failed: ${errorMessage}`, 500);
+			const { code, message } = extractCodexSseError(rawEvent);
+			const detail = code
+				? `Codex request failed (${code}): ${message || "Request failed"}`
+				: `Codex request failed: ${message || "Request failed"}`;
+			throw new SearchProviderError("codex", detail, classifyCodexSseErrorStatus(code, message));
 		}
 	}
 
@@ -620,10 +682,10 @@ async function runCodexSearchCandidates(options: {
 		try {
 			return await callCodexSearch(options.auth, options.query, {
 				signal: options.params.signal,
+				timeoutMs: options.params.timeoutMs,
 				systemPrompt: options.params.systemPrompt,
 				searchContextSize: "high",
 				model: candidate,
-				sessionId: options.params.sessionId,
 				fetch: options.params.fetch,
 				transport: options.transport,
 			});
@@ -657,7 +719,7 @@ export async function searchCodex(params: SearchParams): Promise<SearchResponse>
 	if (!firstCandidate) {
 		throw new SearchProviderError("codex", "No Codex web search model is configured.");
 	}
-	const transport = resolveCodexSearchTransport(params.modelRegistry, firstCandidate.modelId);
+	const transport = await resolveCodexSearchTransport(params.modelRegistry, firstCandidate.modelId);
 	// The ChatGPT-backend Codex endpoint speaks the undocumented codex-rs
 	// request shape (responses-lite moves tools into an `additional_tools`
 	// developer item), so the documented `web_search.filters.allowed_domains`
@@ -693,22 +755,26 @@ export async function searchCodex(params: SearchParams): Promise<SearchResponse>
 			: params.authStorage.resolver("openai-codex", resolverOptions);
 		result = await withAuth(
 			keyOrResolver,
-			accessToken =>
-				runCodexSearchCandidates({
+			async accessToken => {
+				const requestTransport = await resolveCodexSearchTransport(params.modelRegistry, firstCandidate.modelId);
+				return runCodexSearchCandidates({
 					auth: { accessToken },
 					params,
 					query,
 					modelCandidates,
 					modelWasConfigured: configuredModel !== undefined,
-					transport,
-				}),
+					transport: requestTransport,
+				});
+			},
 			{
 				signal: params.signal,
 				missingKeyMessage: 'Codex credentials not found. Configure an API key for provider "openai-codex".',
 			},
 		);
 	} else {
-		const seed = await findCodexAuth(params.authStorage, params.sessionId, params.signal);
+		const seed = await params.authStorage.getOAuthAccess("openai-codex", params.sessionId, {
+			signal: params.signal,
+		});
 		if (!seed) {
 			throw new Error(
 				"No Codex OAuth credentials found. Login with 'omp /login openai-codex' to enable Codex web search.",
@@ -718,23 +784,21 @@ export async function searchCodex(params: SearchParams): Promise<SearchResponse>
 		result = await withOAuthAccess(
 			params.authStorage,
 			"openai-codex",
-			access => {
+			async access => {
 				// A refreshed/rotated credential can carry a different bearer and
 				// ChatGPT account id than the seed used to select the first attempt.
 				const accountId = access.accountId ?? getCodexAccountId(access.accessToken);
-				if (!accountId) {
-					throw new Error("Codex OAuth credential is missing a ChatGPT account id");
-				}
+				const requestTransport = await resolveCodexSearchTransport(params.modelRegistry, firstCandidate.modelId);
 				return runCodexSearchCandidates({
 					auth: { accessToken: access.accessToken, accountId },
 					params,
 					query,
 					modelCandidates,
 					modelWasConfigured: configuredModel !== undefined,
-					transport,
+					transport: requestTransport,
 				});
 			},
-			{ sessionId: params.sessionId, signal: params.signal, seed: seed.access },
+			{ sessionId: params.sessionId, signal: params.signal, seed },
 		);
 	}
 

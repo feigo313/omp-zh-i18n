@@ -2,6 +2,329 @@
 
 ## [Unreleased]
 
+## [18.2.1] - 2026-09-15
+
+### Added
+
+- Added `maxBytes` to `VcsGitRepo.diffText` options: rendering stops and the call rejects with an `OutputTooLarge` VcsError once the patch crosses the cap, so callers can bound the memory a large change set may consume ([#11454](https://github.com/can1357/oh-my-pi/pull/11454) by [@sjawhar](https://github.com/sjawhar)).
+- Native addon embedding now rejects stale release binaries before standalone builds can package them ([#11831](https://github.com/can1357/oh-my-pi/issues/11831)).
+- Fixed git repository discovery treating an unpopulated `.git` directory (no `HEAD`) as a checkout, which made `/wt` and isolated tasks fail with a raw "No such file or directory (os error 2)" instead of reporting that no Git repository was found. Discovery now skips such entries and keeps walking toward the root, matching `git rev-parse`.
+- Added `vcsDiscoverForDisplay` (`repoForDisplay`): like repository discovery, but equal-root jj+git ties prefer Jujutsu for the status line and footer. Git-safe automation must keep using `vcsDiscover` ([#11071](https://github.com/can1357/oh-my-pi/issues/11071), [#11325](https://github.com/can1357/oh-my-pi/pull/11325) by [@boazy](https://github.com/boazy)).
+- Shell and PTY command output on Windows now falls back from UTF-8 to the system ANSI code page (e.g. GBK on Chinese locales) instead of emitting replacement characters.
+
+### Changed
+
+- Workspace startup scans skip excluded build directories and retain a bounded set of entries and directory rules.
+- Limited newest-file searches use less memory on large directory trees when scan caching is disabled.
+
+### Fixed
+
+- Bounded filesystem scan cache memory and prevented stale scans from repopulating the cache after file changes. ([#11240](https://github.com/can1357/oh-my-pi/pull/11240) by [@iliaal](https://github.com/iliaal))
+- Fixed the embedded shell and PTY sessions inheriting `GIT_DIR`, `GIT_WORK_TREE`, and related repo-location overrides from the host process, which made `git` run in a secondary worktree mutate the primary one ([#11082](https://github.com/can1357/oh-my-pi/issues/11082)).
+- Added a vendored Astro grammar so `.astro` files highlight the `---` TypeScript frontmatter and `{…}` template expressions instead of falling back to plain HTML ([#11164](https://github.com/can1357/oh-my-pi/pull/11164) by [@byigitt](https://github.com/byigitt)).
+- Fixed the TUI sometimes stopping repainting while the agent continued running.
+- Fixed native Darwin OAuth helper compilation under sandboxed and custom build environments by respecting `$CC` ([#11869](https://github.com/can1357/oh-my-pi/pull/11869) by [@Malix-Labs](https://github.com/Malix-Labs)).
+
+## [18.1.17] - 2026-09-10
+
+### Fixed
+
+- Fixed Wayland computer-use clicks landing in the wrong place on scaled monitors by mapping captures through the portal's logical monitor geometry ([#11540](https://github.com/can1357/oh-my-pi/issues/11540)).
+
+## [18.1.15] - 2026-09-08
+
+### Fixed
+
+- Fixed C++ language inference excluding CUDA header (`.cuh`) files ([#10782](https://github.com/can1357/oh-my-pi/pull/10782) by [@alphastorm](https://github.com/alphastorm)).
+
+## [18.1.9] - 2026-09-04
+
+### Added
+
+- Added native Sixel-to-PNG decoding for terminal graphics returned by shell commands.
+- Added transactional native OAuth callback registration with one-shot callback delivery on macOS, Linux desktops, and Windows.
+
+### Fixed
+
+- Fixed native version-control cleanup to respect ignore rules and path boundaries while safely handling symlinks, nested repositories, and submodules.
+
+## [18.1.7] - 2026-09-03
+
+### Added
+
+- Added Windows ARM64 native addon support, including platform-specific npm packages.
+
+## [18.1.6] - 2026-09-03
+
+### Breaking Changes
+
+- Renamed `MacOSPowerAssertion` to `PowerAssertion` and `MacOSPowerAssertionOptions` to `PowerAssertionOptions`; the options and handle shapes are unchanged.
+
+### Added
+
+- Added edit-session and edit-store types and utilities for managing edit states, snapshots, hashline operations, edit modes, edit descriptions, editable notebook text, and inline sloppy regions.
+- Added cross-platform sleep inhibition to `PowerAssertion` on Linux and Windows.
+
+### Changed
+
+- `PowerAssertion.start` now reports acquisition failures on Linux and Windows instead of returning a handle that silently does nothing; platforms without an implementation continue to receive a no-op handle.
+
+### Fixed
+
+- Fixed native `git add` so staging an empty file list no longer stages macOS filename-normalization duplicates of tracked paths or files ignored only by a nested `.gitignore`.
+
+## [18.1.5] - 2026-09-03
+
+### Changed
+
+- Updated `worktreeAdd` to support additional worktree creation options, including preserving uncommitted changes.
+
+## [18.1.3] - 2026-09-02
+
+### Fixed
+
+- Fixed `grep` and `sed` treating basic regular expressions as extended ones, which silently matched every line for patterns like `^+` or `s/^\+/` and swapped the meanings of `+` and `\+` ([#10298](https://github.com/can1357/oh-my-pi/pull/10298) by [@mruangutai](https://github.com/mruangutai)).
+
+## [18.1.0] - 2026-09-01
+
+### Fixed
+
+- Fixed TTY output backpressure reporting so pending write progress is accurately reflected during large writes.
+
+## [18.0.11] - 2026-08-29
+
+### Fixed
+
+- Fixed staging and committing files through a reused Git repository handle, ensuring newly staged changes are correctly included in commits even on filesystems with coarse timestamp resolution.
+
+## [18.0.10] - 2026-08-28
+
+### Added
+
+- Added native process replacement support for the CLI’s `/restart` command.
+- Added `VcsGitRepo.mergeBase(a, b)` to find the best common ancestor of two Git revisions, returning `null` when the histories are unrelated.
+
+## [18.0.9] - 2026-08-28
+
+### Breaking Changes
+
+- Replaced the Git-specific `watchHead` and `headWatchTarget` API with the backend-neutral `watch` and `VcsRepo.watchTarget` APIs.
+
+### Added
+
+- Added portable repository discovery and read operations through `VcsRepo`, `repo()`, and `require()`, with support for Git and Jujutsu and explicit capability checks for staged and revision diffs.
+- Added the `Vcs*` API for repository operations across Git and Jujutsu, including repository discovery, refs and status, diffs, staging, commits, branches, worktrees, patch application, stash, cherry-pick, and CLI-backed push, fetch, and clone operations with cancellation support.
+
+### Fixed
+
+- Fixed Git intent-to-add files so they appear correctly as unstaged additions in `statusPorcelain` and are handled correctly when staging or applying patches.
+
+## [18.0.8] - 2026-08-27
+
+### Fixed
+
+- Large session histories no longer leave macOS Terminal unresponsive during repaint.
+- Bounded the interactive PTY reader→JS queue (64 × ≤64 KiB) and forward chunks through a separate `call_async` pump so a fast child plus a stalled JS consumer cannot accumulate unbounded output in-process, without freezing PTY input/resize/kill. After a finite child exit, wait until accepted output reaches `on_chunk`; only a permanently open slave skips that wait. Cancel, timeout, and that stuck-open path abort the pump before `start()` resolves. Same defect class as the non-PTY bash bridge (#4078).
+
+## [18.0.6] - 2026-08-26
+
+### Fixed
+
+- Improved TypeScript and TSX syntax highlighting, including correct handling of type annotations and template literals.
+
+## [18.0.5] - 2026-08-25
+
+### Added
+
+- Added asynchronous, size-bounded SVG-to-PNG rasterization for terminal media previews.
+- Added the `DiffStream` API for processing text and byte input incrementally, opening files asynchronously, reporting stable-prefix progress, generating exact unified diffs, and warming syntax grammars asynchronously.
+
+## [18.0.3] - 2026-08-23
+
+### Fixed
+
+- `macOSCheckSpelling` no longer reports the whole checked string as misspelled: automatic language identification returns an orthography result spanning the entire text, which leaked through as a typo range overlapping the real word span (doubling editor text under the undercurl and drifting the cursor).
+
+## [18.0.1] - 2026-08-23
+
+### Fixed
+
+- Native macOS spellchecker now honors all active system dictionaries: misspelling detection uses automatic language identification and completions/guesses/corrections select the per-word language, so non-English text (e.g. Russian) is checked instead of only the shared checker's current language ([#9334](https://github.com/can1357/oh-my-pi/issues/9334)).
+- Fixed PTY command cancellation leaking zombie child processes: a race where cancellation after spawn only attempted a single non-blocking reap could miss processes still being reaped by the kernel, and an early heartbeat check that bailed out without killing or reaping the child. On Unix, cancellation now polls for the child briefly and hands any straggler to a detached reaper, so the process is always waited on without an unbounded wait.
+- Fixed installed CLIs losing desktop capture when the resolved prebuilt addon still exposes the pre-parity `DesktopSession` ABI. That ABI is now adapted behind the current session contract, legacy error codes are translated, and the adapter ships in the published native core package.
+
+## [18.0.0] - 2026-08-22
+
+### Added
+
+- Added native macOS spellchecker APIs (`macOSAutocorrectWord`, `macOSCheckSpelling`, `macOSCompleteWord`, `macOSSpellingGuesses`, and `macOSSpellCheckerAvailable`) that run asynchronously without blocking the JavaScript thread.
+- Added `HighlightStream`, a stateful incremental syntax highlighter that supports chunked highlighting while maintaining parser state.
+- Added `TtyWriter`, an off-thread terminal output writer that performs non-blocking writes and tracks backlog metrics for renderer frame skipping.
+
+### Changed
+
+- Word completion now automatically appends a space unless followed by punctuation or whitespace.
+
+## [17.4.1] - 2026-08-21
+
+### Changed
+
+- `bun run build:native` now builds through the local cargo/napi-rs backend by default, with Bazel available as an opt-in via `OMP_NATIVE_BUILD_BACKEND=bazel` or extra Bazel arguments after `--`.
+
+## [17.4.0] - 2026-08-20
+
+### Added
+
+- Added offline `countTokens` support for Anthropic Claude families (`ClaudeV3`, `ClaudeV47`, `ClaudeV5`) via a high-performance native port of `ctok`.
+- Added exact offline token counting support for Qwen (3.5+, 3.6+, 3.8), DeepSeek (V3, V4, R1), Kimi (K2, K3), and GLM-5 models alongside rebuilt OpenAI encodings, with optimized zero-allocation string passing from JavaScript.
+- Added `nodeChainAt` native API to retrieve innermost-first tree-sitter node chains with grammar kinds and line spans for structural syntax analysis.
+
+### Changed
+
+- Improved shell builtins (`grep`, `rg`, `sed`, `cat`, `head`, `tail`, `jq`, `ls`, etc.) to stream output progressively with destination-aware line buffering for pipes, terminals, and live TUI output, while maintaining block buffering for file writes.
+- Updated compound blocks (`{ ...; }`, `(...)`) and shell-function pipeline stages to run concurrently with other pipeline stages, preventing head-of-line blocking and pipe buffer deadlocks.
+
+### Fixed
+
+- Fixed the shell output minimizer dropping failure details from non-TTY `bun test` runs: the `(fail)` line, code frame, `error:` assertion, and stack trace are now kept instead of collapsing a failing run to bare pass/fail counts; unrecognized failing test formats now fall back to head/tail instead of counts-only output.
+
+## [17.3.8] - 2026-08-19
+
+### Changed
+
+- `enclosingBlockBoundaries` and `blockRangeAt` now reuse a parsed tree-sitter tree when the same source and language were parsed before, and skip subtrees whose line span holds no visible line. Together these cut the block-context work the `read` tool performs on every non-raw read: for an 81KB TypeScript source with a mid-file window, 13.4ms to 4.45ms on a first parse and to 0.149ms once the tree is cached; for a 1.06MB source, 188.1ms to 55.8ms and to 0.440ms. The tree cache is bounded (12 entries, 4MiB of retained source) and verifies content byte-for-byte on every hit, so a hash collision can only cost a re-parse. The subtree skip is proven equivalent by differential comparison against the exhaustive walk across 4827 repository files and 38,616 window comparisons.
+
+## [17.3.5] - 2026-08-16
+
+### Fixed
+
+- Fixed the native `xargs` builtin panicking in `-I`/`-i` replace mode when stdin is empty; it now exits successfully without running the command, matching GNU behavior.
+- Fixed inline-code foreground color incorrectly carrying into plain text when a Markdown codespan ended exactly at a soft-wrap boundary.
+- Fixed `wrapTextWithAnsi` leaving a trailing space plus a stray underline open/close pair on the line above a soft wrap when a style opened immediately after that space (e.g. `read this thread <underline>https://…`), a regression from the codespan color-bleed fix: only sequences that follow visible content now ride along with the current token, while sequences after whitespace still wait for the token they style.
+
+## [17.3.4] - 2026-08-14
+
+### Added
+
+- Added the async `pdfToMarkdown` native API backed by `pdf-inspector`, with page numbering, page-count, OCR-needed-page, and encoding-issue metadata.
+
+### Changed
+
+- Docker images (`Dockerfile`, `scripts/install-tests/*.dockerfile`) build the native addon through the cargo/napi-rs backend (`OMP_NATIVE_BUILD_BACKEND=cargo`) instead of Bazel: a single fixed host target gains nothing from hermetic cross toolchains, and none of those images shipped bazelisk. `OMP_NATIVE_CARGO_PROFILE` picks the profile for that path (images use `ci`, local default stays `local`).
+
+### Fixed
+
+- Fixed the root Cargo workspace failing to load when a stale directory exists under `crates/` — e.g. a deleted crate whose directory survived `git reset --hard`. `members` no longer globs `crates/pi-*`, so a directory without a `Cargo.toml` can no longer break every cargo and Bazel build.
+- Fixed Docker build contexts shipping nested build output: `.dockerignore` patterns are anchored at the context root, so bare `target/` and `dist/` matched neither `go-port/*/target` (~1.4 GB) nor `packages/*/dist` (~600 MB).
+- Fixed `deviceCheckGenerateToken` aborting the whole process with `SIGTRAP` when called from a macOS session without GUI/graphic access (SSH, a launchd `LaunchDaemon`, a CI runner, a service account, a sandbox), which made every `openai-codex/*` OAuth model unusable for such accounts. `-[DCDevice isSupported]` synchronously opens an XPC connection to the per-user DeviceCheck metadata daemon, which exists only in an interactive GUI login session; without one the connection setup hits `_xpc_api_misuse` and traps before any completion handler runs, so the promise never rejects. The binding now checks the caller's security session for the `sessionHasGraphicAccess` attribute first and resolves `{ supported: false, error: … }` instead of touching DeviceCheck when it is absent ([#8353](https://github.com/can1357/oh-my-pi/issues/8353)).
+
+## [17.3.1] - 2026-08-13
+
+### Fixed
+
+- Fixed `omp` failing to start on a clean Windows install with `Failed to load pi_natives native addon for win32-x64 ... The specified module could not be found` (LoadLibrary error 126). The shipped win32-x64 addon linked the dynamic MSVC CRT (`/MD`) and imported `VCRUNTIME140.dll` from the Visual C++ Redistributable, which is absent on a fresh Windows install. The addon now statically links the CRT (`+crt-static` for rustc plus the `static_link_msvcrt` cc feature for its C dependencies), so the `.node` imports only core Windows system DLLs ([#8439](https://github.com/can1357/oh-my-pi/issues/8439)).
+
+## [17.3.0] - 2026-08-13
+
+### Fixed
+
+- Fixed an issue where shell-internal background jobs (such as `yes >/dev/null &`) could survive a one-shot shell session and consume CPU indefinitely after the command returned.
+
+## [17.2.12] - 2026-08-08
+
+### Changed
+
+- Consolidated every shell builtin into one crate, `crates/pi-builtins` (the renamed and de-vendored `brush-builtins` fork), with one module per command. The 46 `crates/vendor/uu-*` crates, `crates/vendor/jaq`, `crates/pi-uu-grep`, `crates/pi-uu-diff`, and everything that had accumulated inline in `pi-shell` (`fd`, `cmp`, `which`, the moreutils set, and the `ps`/`top`/`pgrep`/`pkill`/`pidwait`/`kill`/`sleep`/`timeout`/`nohup` process builtins) now live beside the bash builtins they sit next to at runtime, and register through `pi_builtins::utility_builtins()` and `pi_builtins::process_builtins()`. `pi-shell/src/shell.rs` shrank by ~4,200 lines.
+
+### Fixed
+
+- Fixed `sort --compress-program` spawning its compressor and decompressor without the shell's working directory or exported environment, so a program installed only on the shell's `PATH` was not found, and with stderr inherited from the host process, where its diagnostics could corrupt the TUI. Both children now launch through the shell's child context and their stderr is forwarded to the command's own file descriptor.
+- Fixed `realpath -q` exiting 0 after a failed operand; it suppresses the diagnostic but now reports failure, matching GNU.
+
+### Removed
+
+- Removed `crates/pi-uutils-ctx`. Utility builtins previously reached their stdio, working directory, and environment through a thread-local context installed around each invocation; they now receive an explicit `Host` value (`pi-builtins/src/host.rs`) carrying the command's file descriptors, the shell working directory, the exported environment, cancellation, and the accumulated exit status. The uutils entry-point plumbing (`uumain`, `UResult`/`UError`, `set_exit_code`, `crate_version!`) went with it; each utility is now an ordinary brush builtin implementing `host::Utility`.
+
+## [17.2.11] - 2026-08-07
+
+### Added
+
+- Added support for Windows hosts in `bun run build`, enabling local N-API builds against VS Build Tools without requiring a pre-configured vcvars prompt.
+
+### Changed
+
+- Replaced the miniaudio (`maudio`) dependency with in-house platform audio backends for `AudioCapture`/`AudioPlayback`: CoreAudio AudioQueue on macOS, shared-mode WASAPI on Windows, and PulseAudio (ALSA fallback) loaded via `dlopen` on Linux. Removes the bindgen/libclang requirement and the Windows rustc-ICE workaround from the native build.
+
+### Fixed
+
+- Fixed CPU feature detection (AVX2) on Windows hosts, resolving an issue where the native addon loader and local builds incorrectly fell back to the baseline variant, while improving startup performance by ~270ms.
+- Fixed `bun run build:bindings` failing on Windows due to incorrect resolution of the `@napi-rs/cli` entry point.
+- Fixed a compiler crash (rustc ICE) when building the `maudio` package for Windows.
+- Fixed synthesized macOS keyboard and pointer events suppressing physical user input.
+- Fixed several Wayland input and capture issues, including preventing read-only calls from acquiring persistent input control, fixing GNOME Wayland pointer input initialization, and resolving conflicts between `libei` input and PipeWire screen capture.
+- Fixed compilation of the `wayland-pipewire` Cargo feature.
+- Improved security on Wayland by cleaning up orphaned world-readable RemoteDesktop restore tokens on startup.
+
+## [17.2.10] - 2026-08-06
+
+### Fixed
+
+- Fixed per-window capture failing on Wayland with `InvalidTarget` errors for window IDs returned by `desktop.windows()`.
+- Fixed `desktop.capabilities()` incorrectly reporting `capture: true` on Wayland builds compiled without the `wayland-pipewire` feature.
+
+## [17.2.9] - 2026-08-05
+
+### Changed
+
+- Bounded fuzzy-find scored-match retention to the top-K results (worst-first heap) instead of collecting and fully sorting every hit; ranking and totals are unchanged ([#7415](https://github.com/can1357/oh-my-pi/issues/7415)).
+
+### Fixed
+
+- Fixed newer OMP versions deleting a freshly created older native addon cache directory during concurrent startup, which could interrupt extraction with `ENOENT`.
+
+## [17.2.7] - 2026-08-03
+
+### Added
+
+- Added missing procps/BSD output format specifiers and aliases to the in-process `ps` shell builtin, including support for columns like `tpgid`, `pri`, `flags`, `wchan`, and various user/group/time fields.
+- Updated `ps -j` to include the TPGID column, `ps -l` to display the single-character S column, and the STAT column to support the `+` foreground process group flag.
+
+## [17.2.6] - 2026-08-03
+
+### Added
+
+- Added non-blocking, process-owned `FileLock` bindings using abstract Unix sockets on Linux, named mutexes on Windows, and persistent `flock(2)` sidecars on other Unix platforms.
+
+## [17.2.5] - 2026-08-03
+
+### Breaking Changes
+
+- Replaced DesktopSession.execute(actions, window) and action batches with dedicated per-operation methods for capture, pointer, keyboard, window, and accessibility. Capture capabilities now apply per call, and coordinate input requires a prior frame for the same target.
+
+### Added
+
+- Added a cross-platform, in-process ps shell builtin supporting BSD/procps selection forms, custom output columns, sorting, process metrics, and header suppression.
+- Added unified desktop backends for macOS, Win32, X11, and Wayland behind a single session API, featuring capture-free window discovery, isolated capture, explicit background/foreground delivery, native accessibility trees (AX/UIA/AT-SPI) with generational references, and structured errors for unsupported background input.
+
+### Fixed
+
+- Fixed accessibility snapshots incorrectly marking a window root as focused based on its app-local AXFocused attribute when another application held global focus; the root annotation now correctly reflects the global window-roster focus flag.
+- Improved coordinate-frame error messages for pointer input before capture, out-of-frame coordinates, and between-display points to clearly explain the capture-frame contract and remedy instead of throwing a generic bounds check.
+- Fixed duplicated characters in AppKit targets on macOS caused by background keyboard events being posted through both CoreGraphics and SkyLight; events are now delivered once via the authenticated SkyLight route.
+
+## [17.2.2] - 2026-07-31
+
+### Changed
+
+- Updated native HTML-to-Markdown rendering to html-to-markdown-rs 3.9.2 defaults, which may result in formatting differences (such as fenced code blocks and cycling nested-list bullets) compared to version 2.30.0.
+
+### Fixed
+
+- Fixed a heap corruption crash when opening PulseAudio on Linux ARM64 by shipping target-specific miniaudio Rust layouts for GNU and musl native addons.
+- Fixed local Bazel addon builds on NixOS by exposing system CMake tools to sandboxed build scripts and correctly bundling Opus.
+- Fixed workspace native addon loading to correctly prefer the workspace build over an installed leaf package.
+- Fixed process crashes caused by pathological HTML inputs; conversions that exceed the native-stack DOM depth limit now reject instead of returning silently truncated Markdown.
+
 ## [17.2.1] - 2026-07-30
 
 ### Fixed

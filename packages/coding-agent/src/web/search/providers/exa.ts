@@ -7,10 +7,11 @@
  * them into a combined `answer` string on the SearchResponse.
  */
 import { type ApiKey, type AuthStorage, type FetchImpl, getEnvApiKey, withAuth } from "@oh-my-pi/pi-ai";
+import { isRecord } from "@oh-my-pi/pi-utils";
 import { getDefault, settings } from "../../../config/settings";
 import { findApiKey, isSearchResponse } from "../../../exa/mcp-client";
-import { parseSSE } from "../../../mcp/json-rpc";
-import type { SearchResponse, SearchSource } from "../../../web/search/types";
+import { readMcpJsonRpcResponse } from "../../../mcp/json-rpc";
+import type { SearchResponse, SearchSource } from "@oh-my-pi/pi-tui/tools/web-search";
 import { SearchProviderError } from "../../../web/search/types";
 import { formatQuery, parseSearchQuery, type StructuredQuery } from "../query";
 import { dateToAgeSeconds } from "../utils";
@@ -19,6 +20,9 @@ import { SearchProvider } from "./base";
 import { classifyProviderHttpError, withHardTimeout } from "./utils";
 
 const EXA_API_URL = "https://api.exa.ai/search";
+const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
+const EXA_MCP_SOURCE = "oh-my-pi";
+const MAX_EXA_SNIPPET_CHARS = 500;
 const DEFAULT_EXA_SEARCH_DELAY_MS = getDefault("exa.searchDelayMs");
 
 let nextExaSearchRequestAt = 0;
@@ -115,6 +119,7 @@ export interface ExaSearchParams {
 	start_published_date?: string;
 	end_published_date?: string;
 	signal?: AbortSignal;
+	timeoutMs?: number;
 	fetch?: FetchImpl;
 	/**
 	 * Credential source. Resolved before falling back to `EXA_API_KEY` so
@@ -142,13 +147,13 @@ interface ExaSearchResponse {
 	searchTime?: number;
 }
 function asRecord(value: unknown): Record<string, unknown> | null {
-	if (typeof value !== "object" || value === null) return null;
-	return value as Record<string, unknown>;
+	return isRecord(value) ? value : null;
 }
 
 function parseJsonContent(text: string): unknown | null {
 	try {
-		return JSON.parse(text) as unknown;
+		const parsed: unknown = JSON.parse(text);
+		return parsed;
 	} catch {
 		return null;
 	}
@@ -315,7 +320,7 @@ async function callExaSearch(apiKey: string, params: ExaSearchParams): Promise<E
 			"x-api-key": apiKey,
 		},
 		body: JSON.stringify(body),
-		signal: withHardTimeout(params.signal),
+		signal: withHardTimeout(params.signal, params.timeoutMs),
 	});
 
 	if (!response.ok) {
@@ -328,13 +333,20 @@ async function callExaSearch(apiKey: string, params: ExaSearchParams): Promise<E
 	return response.json() as Promise<ExaSearchResponse>;
 }
 function buildExaMcpArgs(params: ExaSearchParams): Record<string, unknown> {
-	const args: Record<string, unknown> = { query: params.query };
-	if (params.num_results !== undefined) args.num_results = params.num_results;
-	if (params.type !== undefined) args.type = params.type;
-	if (params.include_domains !== undefined) args.include_domains = params.include_domains;
-	if (params.exclude_domains !== undefined) args.exclude_domains = params.exclude_domains;
-	if (params.start_published_date !== undefined) args.start_published_date = params.start_published_date;
-	if (params.end_published_date !== undefined) args.end_published_date = params.end_published_date;
+	const queryParts = [params.query];
+	for (const domain of params.include_domains ?? []) {
+		const trimmed = domain.trim();
+		if (trimmed) queryParts.push(`site:${trimmed}`);
+	}
+	for (const domain of params.exclude_domains ?? []) {
+		const trimmed = domain.trim();
+		if (trimmed) queryParts.push(`-site:${trimmed}`);
+	}
+	if (params.start_published_date) queryParts.push(`after:${params.start_published_date}`);
+	if (params.end_published_date) queryParts.push(`before:${params.end_published_date}`);
+
+	const args: Record<string, unknown> = { query: queryParts.join(" ") };
+	if (params.num_results !== undefined) args.numResults = params.num_results;
 	return args;
 }
 
@@ -345,44 +357,64 @@ async function callExaMcpSearch(params: ExaSearchParams): Promise<ExaSearchRespo
 	query.set("tools", "web_search_exa");
 	const fetchImpl = params.fetch ?? fetch;
 	await waitForExaSearchSlot(params.signal);
-	const response = await fetchImpl(`https://mcp.exa.ai/mcp?${query.toString()}`, {
+	const requestId = Math.random().toString(36).slice(2);
+	const signal = withHardTimeout(params.signal, params.timeoutMs);
+	const response = await fetchImpl(`${EXA_MCP_URL}?${query.toString()}`, {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
 			Accept: "application/json, text/event-stream",
+			"x-exa-source": EXA_MCP_SOURCE,
 		},
 		body: JSON.stringify({
 			jsonrpc: "2.0",
-			id: Math.random().toString(36).slice(2),
+			id: requestId,
 			method: "tools/call",
 			params: {
 				name: "web_search_exa",
 				arguments: buildExaMcpArgs(params),
 			},
 		}),
-		signal: withHardTimeout(params.signal),
+		signal,
 	});
 	if (!response.ok) {
-		throw new Error(`MCP request failed: ${response.status} ${response.statusText}`);
+		const errorText = await response.text();
+		const classified = classifyProviderHttpError("exa", response.status, errorText);
+		if (classified) throw classified;
+		if (response.status === 429) {
+			throw new SearchProviderError(
+				"exa",
+				"exa: MCP rate limit reached (429); configure an Exa API key for higher limits",
+				response.status,
+			);
+		}
+		throw new SearchProviderError(
+			"exa",
+			`Exa MCP request failed (${response.status}): ${errorText}`,
+			response.status,
+		);
 	}
-	const mcpResponse = parseSSE(await response.text()) as {
-		result?: {
-			content?: Array<{ type: string; text?: string }>;
-		};
-		error?: {
-			code: number;
-			message: string;
-		};
-	} | null;
-	if (!mcpResponse) {
-		throw new Error("Failed to parse MCP response");
-	}
+	const mcpResponse = await readMcpJsonRpcResponse(response, requestId, signal);
 	if (mcpResponse.error) {
 		throw new Error(`MCP error: ${mcpResponse.error.message}`);
 	}
+	const mcpResult = asRecord(mcpResponse.result);
+	if (mcpResult?.isError === true) {
+		let message: string | undefined;
+		if (Array.isArray(mcpResult.content)) {
+			for (const item of mcpResult.content) {
+				const part = asRecord(item);
+				if (part?.type === "text" && typeof part.text === "string") {
+					message = part.text.trim();
+					break;
+				}
+			}
+		}
+		throw new SearchProviderError("exa", message || "Exa MCP returned an error");
+	}
 	const responsePayload = normalizeExaMcpPayload(mcpResponse.result);
 	if (isSearchResponse(responsePayload)) {
-		return responsePayload as ExaSearchResponse;
+		return responsePayload;
 	}
 
 	const parsed = parseExaMcpTextPayload(responsePayload);
@@ -418,7 +450,10 @@ export async function searchExa(params: ExaSearchParams): Promise<SearchResponse
 			sources.push({
 				title: result.title ?? result.url,
 				url: result.url,
-				snippet: result.summary || result.text || result.highlights?.join(" ") || undefined,
+				snippet: (result.summary || result.text || result.highlights?.join(" ") || undefined)?.slice(
+					0,
+					MAX_EXA_SNIPPET_CHARS,
+				),
 				publishedDate: result.publishedDate ?? undefined,
 				ageSeconds: dateToAgeSeconds(result.publishedDate ?? undefined),
 				author: result.author ?? undefined,
@@ -457,13 +492,13 @@ export class ExaProvider extends SearchProvider {
 	 * still uses {@link isAvailable} so an unrelated configured provider
 	 * keeps priority over the public fallback.
 	 */
-	isExplicitlyAvailable(_authStorage: AuthStorage): boolean {
+	override isExplicitlyAvailable(_authStorage: AuthStorage): boolean {
 		return this.#settingsAllowSearch();
 	}
 
 	#settingsAllowSearch(): boolean {
 		try {
-			if (settings.get("exa.enabled") === false || settings.get("exa.enableSearch") === false) {
+			if (settings.get("exa.enabled") === false) {
 				return false;
 			}
 		} catch {
@@ -478,6 +513,7 @@ export class ExaProvider extends SearchProvider {
 			...directiveParams(parsed),
 			num_results: params.numSearchResults ?? params.limit,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 			authStorage: params.authStorage,
 			sessionId: params.sessionId,
 			fetch: params.fetch,

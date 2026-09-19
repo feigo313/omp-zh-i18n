@@ -1,14 +1,7 @@
+import { type } from "@oh-my-pi/omptype";
 import { once } from "@oh-my-pi/pi-utils";
-import { scope } from "arktype";
 
 export const getModelsConfigSchemaBundle = once(() => {
-	// Config schemas validate at most a handful of times per process (on config
-	// load), so the eager JIT codegen ArkType runs at definition time is pure
-	// startup tax. A local jitless scope skips that codegen and falls back to
-	// interpreted traversal — ~65% cheaper to construct, validation correctness
-	// unchanged. (No `name`: duplicate module instances would collide.)
-	const { type } = scope({}, { jitless: true });
-
 	const OpenRouterRoutingSchema = type({
 		"only?": "string[]",
 		"order?": "string[]",
@@ -48,7 +41,9 @@ export const getModelsConfigSchemaBundle = once(() => {
 		"supportsForcedToolChoice?": "boolean",
 		"disableReasoningOnForcedToolChoice?": "boolean",
 		"disableReasoningOnToolChoice?": "boolean",
+		"disableReasoningWithTools?": "boolean",
 		"thinkingFormat?": '"openai" | "openrouter" | "zai" | "qwen" | "qwen-chat-template"',
+		"qwenTemplateReasoningEffort?": "boolean",
 		"openRouterRouting?": OpenRouterRoutingSchema,
 		"vercelGatewayRouting?": VercelGatewayRoutingSchema,
 		"extraBody?": { "[string]": "unknown" },
@@ -56,12 +51,17 @@ export const getModelsConfigSchemaBundle = once(() => {
 		"supportsStrictMode?": "boolean",
 		"toolStrictMode?": '"all_strict" | "none"',
 		"streamIdleTimeoutMs?": "number >= 0",
+		"streamMarkupHealingPattern?": '"kimi" | "dsml" | "qwen" | "thinking"',
 		"supportsLongPromptCacheRetention?": "boolean",
 		"supportsReasoningParams?": "boolean",
+		"supportsReasoningSummary?": "boolean",
 		"alwaysSendMaxTokens?": "boolean",
 		"strictResponsesPairing?": "boolean",
 		"supportsImageDetailOriginal?": "boolean",
+		"supportsConfigurationUpdate?": "boolean",
+		"stripImageInput?": "boolean",
 		// anthropic-messages compat flags (same `compat` slot, per-api interpretation)
+		"supportsContextManagement?": "boolean",
 		"supportsEagerToolInputStreaming?": "boolean",
 		"allowAnthropicHeaderOverrides?": "boolean",
 		"requiresToolResultId?": "boolean",
@@ -110,6 +110,7 @@ export const getModelsConfigSchemaBundle = once(() => {
 		"defaultLevel?": EffortSchema,
 		"effortMap?": ReasoningEffortMapSchema,
 		"supportsDisplay?": "boolean",
+		"requiresEffort?": "boolean",
 		// Legacy range vocabulary (pre-efforts configs).
 		"minLevel?": EffortSchema,
 		"maxLevel?": EffortSchema,
@@ -135,8 +136,13 @@ export const getModelsConfigSchemaBundle = once(() => {
 				...(value.defaultLevel !== undefined && { defaultLevel: value.defaultLevel }),
 				...(value.effortMap !== undefined && { effortMap: value.effortMap }),
 				...(value.supportsDisplay !== undefined && { supportsDisplay: value.supportsDisplay }),
+				...(value.requiresEffort !== undefined && { requiresEffort: value.requiresEffort }),
 			};
 		});
+
+	const ModelTokenizerSchema = type(
+		'"claude-v3" | "claude-v47" | "claude-v5" | "claude-v5-sonnet" | "qwen3" | "deepseek-v3" | "kimi-k2" | "glm5"',
+	);
 
 	const RemoteCompactionSchema = type({
 		"enabled?": "boolean",
@@ -174,6 +180,8 @@ export const getModelsConfigSchemaBundle = once(() => {
 		"reasoning?": "boolean",
 		"thinking?": ModelThinkingSchema,
 		"input?": '("text" | "image")[]',
+		"imageInputDecoder?": '"stb"',
+		"tokenizer?": ModelTokenizerSchema,
 		"supportsTools?": "boolean",
 		"cost?": {
 			input: "number",
@@ -185,6 +193,7 @@ export const getModelsConfigSchemaBundle = once(() => {
 		"contextWindow?": "number",
 		"maxTokens?": "number",
 		"omitMaxOutputTokens?": "boolean",
+		"preferWebsockets?": "boolean",
 		"headers?": { "[string]": "string" },
 		"compat?": ApiCompatSchema,
 		"contextPromotionTarget?": "string",
@@ -223,6 +232,8 @@ export const getModelsConfigSchemaBundle = once(() => {
 		"reasoning?": "boolean",
 		"thinking?": ModelThinkingSchema,
 		"input?": '("text" | "image")[]',
+		"imageInputDecoder?": '"stb"',
+		"tokenizer?": ModelTokenizerSchema,
 		"supportsTools?": "boolean",
 		"cost?": {
 			"input?": "number",
@@ -234,6 +245,7 @@ export const getModelsConfigSchemaBundle = once(() => {
 		"contextWindow?": "number",
 		"maxTokens?": "number",
 		"omitMaxOutputTokens?": "boolean",
+		"preferWebsockets?": "boolean",
 		"headers?": { "[string]": "string" },
 		"compat?": ApiCompatSchema,
 		"contextPromotionTarget?": "string",
@@ -262,6 +274,26 @@ export const getModelsConfigSchemaBundle = once(() => {
 
 	const ProviderDiscoverySchema = type({
 		type: '"ollama" | "llama.cpp" | "lm-studio" | "openai-models-list" | "proxy" | "litellm"',
+		"timeoutMs?": "number",
+		/**
+		 * Defaults to `true`. Set `false` to fetch the model list from
+		 * `{baseUrl}/models` without injecting `/v1` — for gateways that root
+		 * their OpenAI-compatible surface at a versioned path (e.g.
+		 * `https://api.opper.ai/v3/compat`) where the forced `/v1/models`
+		 * returns a different, smaller model list.
+		 */
+		"injectV1?": "boolean",
+	}).narrow((value, ctx) => {
+		if (value.injectV1 !== undefined && value.type !== "openai-models-list") {
+			return ctx.mustBe("injectV1 only on openai-models-list discovery");
+		}
+		if (
+			value.timeoutMs !== undefined &&
+			(typeof value.timeoutMs !== "number" || value.timeoutMs <= 0 || !Number.isFinite(value.timeoutMs))
+		) {
+			return ctx.mustBe("timeoutMs a positive finite number");
+		}
+		return true;
 	});
 
 	const ProviderAuthSchema = type('"apiKey" | "none" | "oauth"');
@@ -279,6 +311,21 @@ export const getModelsConfigSchemaBundle = once(() => {
 		"models?": ModelDefinitionSchema.array(),
 		"modelOverrides?": { "[string]": ModelOverrideSchema },
 		"disableStrictTools?": "boolean",
+		/**
+		 * Amazon Bedrock Guardrail id or ARN attached to every Converse request under
+		 * this provider. Required by accounts that gate `bedrock:InvokeModel*` on the
+		 * `bedrock:GuardrailIdentifier` condition key.
+		 */
+		"guardrailIdentifier?": "string",
+		/** Bedrock guardrail version (defaults to `"DRAFT"` when a guardrail is set). */
+		"guardrailVersion?": "string",
+		/** Bedrock guardrail trace verbosity. */
+		"guardrailTrace?": '"enabled" | "disabled" | "enabled_full"',
+		/**
+		 * Bedrock invocation-log tags attached to every Converse request under this
+		 * provider (max 16 entries; keys/values limited to `[a-zA-Z0-9\s:_@$#=/+,-.]`).
+		 */
+		"requestMetadata?": { "[string]": "string" },
 		/**
 		 * Streaming transport override. When set to `"pi-native"`, omp dispatches
 		 * every model under this provider via the auth-gateway's

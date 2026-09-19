@@ -19,22 +19,27 @@ import type {
 	ToolChoice,
 } from "@oh-my-pi/pi-ai";
 import type { postmortem } from "@oh-my-pi/pi-utils";
-import type { AdvisorConfig } from "../advisor";
+import type { AdvisorConfig } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import type { AsyncJob, AsyncJobDeliveryState, AsyncJobManager } from "../async";
+import type { EffectiveExtensionRoots } from "../capability/types";
 import type { ModelRegistry } from "../config/model-registry";
 import type { PromptTemplate } from "../config/prompt-templates";
 import type { Settings, SkillsSettings } from "../config/settings";
 import type { CursorMcpResourceAdapter } from "../cursor";
-import type { RawSseDebugBuffer } from "../debug/raw-sse-buffer";
+import type { RawSseDebugBuffer } from "@oh-my-pi/pi-tui/apps/debug/raw-sse-buffer";
+import type { EvalPreludeDefinition } from "../eval/preludes";
 import type { TtsrManager } from "../export/ttsr";
 import type { LoadedCustomCommand } from "../extensibility/custom-commands";
-import type { ExtensionRunner } from "../extensibility/extensions";
+import type { CustomTool } from "../extensibility/custom-tools/types";
+import type { ExtensionRunner, PreparedExtension } from "../extensibility/extensions";
 import type { ContextUsage } from "../extensibility/extensions/types";
 import type { Skill, SkillWarning } from "../extensibility/skills";
 import type { FileSlashCommand } from "../extensibility/slash-commands";
 import type { SecretObfuscator } from "../secrets/obfuscator";
-import type { ConfiguredThinkingLevel } from "../thinking";
+import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import type { ToolSession } from "../tools";
 import type { XdevState } from "../tools/xdev";
+import type { CodexAutoRedeemCoordinator } from "./codex-auto-reset";
 import type { SessionManager } from "./session-manager";
 
 /** Maximum time the interactive shutdown path waits for Mnemopi consolidation. */
@@ -43,6 +48,12 @@ export const SHUTDOWN_CONSOLIDATE_BUDGET_MS = 1_500;
 /** Options controlling session disposal. */
 export interface AgentSessionDisposeOptions {
 	mnemopiConsolidateTimeoutMs?: number;
+	/**
+	 * Deadline for the settle/drain wait before the terminal memory release
+	 * (default 5s). The bounded-teardown paths (signal handlers, tests) may
+	 * shorten it; late event handlers are still finalized after they settle.
+	 */
+	drainTimeoutMs?: number;
 	/**
 	 * Postmortem reason that triggered this dispose (signal/fatal teardown
 	 * paths). When set, the persisted `session_exit` diagnostic records it
@@ -55,7 +66,7 @@ export interface AgentSessionDisposeOptions {
 /** Listener notified when command metadata changes. */
 export type CommandMetadataChangedListener = () => void | Promise<void>;
 /** Public summary of an asynchronous job. */
-export type AsyncJobSnapshotItem = Pick<AsyncJob, "id" | "type" | "status" | "label" | "startTime">;
+export type AsyncJobSnapshotItem = Pick<AsyncJob, "id" | "type" | "status" | "label" | "startTime" | "agentId">;
 
 /** Snapshot of running, recent, and pending-delivery asynchronous jobs. */
 export interface AsyncJobSnapshot {
@@ -91,6 +102,14 @@ export interface UsageFallbackConfirmation {
 	remainingPercent: number | undefined;
 }
 
+/**
+ * Confirms whether a reserve-triggered model fallback may proceed.
+ *
+ * Interactive callers use the confirmation details to present the pending
+ * route change; aborting `signal` cancels that pending confirmation.
+ */
+export type UsageFallbackConfirmer = (confirmation: UsageFallbackConfirmation, signal: AbortSignal) => Promise<boolean>;
+
 /** Identifies a retry fallback chain already entered during startup model resolution. */
 export interface InitialRetryFallbackState {
 	/** Role whose configured primary was unavailable. */
@@ -106,8 +125,36 @@ export interface InitialRetryFallbackState {
 /** Dependencies and initial state used to construct an AgentSession. */
 export interface AgentSessionConfig {
 	agent: Agent;
+	/** Shared with the provider stream wrapper: current Codex Code Mode tool exposure snapshot for turn metadata. */
+	codeModeState?: { namespacesInfo?: unknown };
 	sessionManager: SessionManager;
 	settings: Settings;
+	/**
+	 * Live extension-root policy inherited from the owning session. Subagents use
+	 * this provider so explicit roots, discovery mode, configured roots, and
+	 * provenance survive recursive task discovery.
+	 */
+	extensionRoots?: () => EffectiveExtensionRoots;
+	/**
+	 * Parent-imported extension factories rebound to this session's own
+	 * ExtensionAPI. Forwarded by session forks (e.g. `/tan`) so the child
+	 * re-registers the parent's runtime providers before the SDK's
+	 * `syncExtensionSources` prune runs against the shared model registry.
+	 */
+	preparedExtensions?: readonly PreparedExtension[];
+	/**
+	 * Source paths of the parent's loaded extensions. Forwarded alongside
+	 * {@link preparedExtensions} as the fallback the child rebinds from when a
+	 * parent construction path produced no prepared factories (mirrors the task
+	 * subagent forward) — keeps the child from building an empty extension set.
+	 */
+	extensionPaths?: readonly string[];
+	/** Raw SDK `additionalExtensionPaths`; used when no inherited root provider exists. */
+	additionalExtensionPaths?: readonly string[];
+	/** Mirror of `disableExtensionDiscovery`; used when no inherited root provider exists. */
+	disableExtensionDiscovery?: boolean;
+	/** Whether the session spawn policy permits the read-only `scout` subagent. Defaults to true. */
+	scoutAllowedBySpawnPolicy?: boolean;
 	/** Whether the caller explicitly requested yolo/auto-approve behavior for this session. */
 	autoApprove?: boolean;
 	/** Models to cycle through with Ctrl+P (from --models flag). */
@@ -130,6 +177,10 @@ export interface AgentSessionConfig {
 	slashCommands?: FileSlashCommand[];
 	/** Extension runner created with wrapped tools. */
 	extensionRunner?: ExtensionRunner;
+	/** Returns the current enabled eval prelude definitions. */
+	getEvalPreludes?: () => readonly EvalPreludeDefinition[];
+	/** Tool bridge context used by user-initiated Python cells to project enabled eval preludes. */
+	evalToolSession?: ToolSession;
 	/** Loaded skills already discovered by the SDK. */
 	skills?: Skill[];
 	/** Skill loading warnings already captured by the SDK. */
@@ -139,28 +190,42 @@ export interface AgentSessionConfig {
 	/** Custom TypeScript slash commands. */
 	customCommands?: LoadedCustomCommand[];
 	skillsSettings?: SkillsSettings;
+	/** Whether this session may start memory backends. Defaults to true. */
+	memoryEnabled?: boolean;
 	/** Agent directory used when changing memory backends in a live session. */
 	memoryAgentDir?: string;
 	/** Recursion depth used to suppress live backend replacement in subagents. */
 	memoryTaskDepth?: number;
 	/** Creates built-in memory tools for the current backend. */
 	createMemoryTools?: () => Promise<AgentTool[]>;
-	/** Creates the built-in `computer` tool for session-scoped runtime enablement (see {@link AgentSession.setComputerToolEnabled}). */
-	createComputerTool?: () => Promise<AgentTool | null>;
-	/** Creates the built-in `inspect_image` tool for session-scoped runtime enablement (see {@link AgentSession.setInspectImageMode}). */
-	createInspectImageTool?: () => Promise<AgentTool | null>;
+	/** Creates the private `think` scratchpad tool for runtime setting changes. */
+	createThinkTool?: () => Promise<AgentTool | null>;
 	/** Model registry for API key resolution and model discovery. */
 	modelRegistry: ModelRegistry;
+	/** Whether the startup model may be replaced by refreshed same-selector registry metadata. */
+	rebindModelAfterDiscovery?: boolean;
 	/** Tool registry for LSP and settings. */
 	toolRegistry?: Map<string, AgentTool>;
 	/** Creates tools registered only while vibe mode is active. */
 	createVibeTools?: () => AgentTool[];
 	/** Names whose current registry entry is the built-in implementation. */
 	builtInToolNames?: Iterable<string>;
+	/** MCP names whose initial registry entries came from the manager snapshot. */
+	mcpManagerToolNames?: Iterable<string>;
+	/** Reconcile browser MCP connections after browser prelude availability changes. */
+	reconcileBrowserMcpFilter?: (enabled: boolean) => Promise<CustomTool[]>;
 	/** Updates tool-session predicates from the live active tool set. */
 	setActiveToolNames?: (names: Iterable<string>) => void;
-	/** Registers the write transport when runtime xdev mounts first need it. */
+	/** Registers the built-in write transport when it is needed at runtime. */
 	ensureWriteRegistered?: () => Promise<boolean>;
+	/** Reports whether the registered write tool is currently transport-only. */
+	isDeviceOnlyWrite?: () => boolean;
+	/** Switches the registered write tool between transport-only and full access. */
+	setDeviceOnlyWrite?: (enabled: boolean) => void;
+	/** Previews the full-write description without changing execution access. */
+	setPendingFullWriteDescription?: (enabled: boolean) => void;
+	/** Registers the hidden `goal` tool when goal mode is enabled at runtime. */
+	ensureGoalRegistered?: () => Promise<boolean>;
 	/** Current session pre-LLM message transform pipeline. */
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => AgentMessage[] | Promise<AgentMessage[]>;
 	/** Provider request transform applied after message conversion. */
@@ -169,10 +234,10 @@ export interface AgentSessionConfig {
 	sideStreamFn?: StreamFn;
 	/** Stream wrapper for advisor requests. */
 	advisorStreamFn?: StreamFn;
-	/** Advisor spend already recorded for the session being opened, restored on resume. */
-	initialAdvisorCosts?: ReadonlyMap<string, number>;
 	/** Prefer websocket transport for OpenAI Codex requests when supported. */
 	preferWebsockets?: boolean;
+	/** Codex saved-reset coordinator; defaults to the process-wide singleton so concurrent sessions can't double-spend. Inject a fresh one in tests. */
+	codexResetCoordinator?: CodexAutoRedeemCoordinator;
 	/** Provider payload hook used by the active session request path. */
 	onPayload?: SimpleStreamOptions["onPayload"];
 	/** Provider response hook used by the active session request path. */
@@ -184,9 +249,10 @@ export interface AgentSessionConfig {
 	/** Current session message-to-LLM conversion pipeline. */
 	convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	/** System prompt builder that can consider tool availability. */
-	rebuildSystemPrompt?: (toolNames: string[], tools: Map<string, AgentTool>) => Promise<{ systemPrompt: string[] }>;
-	/** Local calendar date provider used by prompt-cache invalidation. */
-	getLocalCalendarDate?: () => string;
+	rebuildSystemPrompt?: (
+		toolNames: string[],
+		tools: Map<string, AgentTool>,
+	) => Promise<{ systemPrompt: string[]; xdevCatalogNames?: readonly string[] }>;
 	/** Tools mounted under `xd://`, for `/tools` display. */
 	getXdevToolEntries?: () => Array<{ name: string; summary: string }>;
 	/** `xd://` presentation state backed by the canonical tool map. */
@@ -226,7 +292,7 @@ export interface AgentSessionConfig {
 	/**
 	 * Build the `replace`-mode `edit` a Cursor `pi_edit` frame needs, against the
 	 * advisor-scoped tool session. The advisor's ordinary instance follows the
-	 * configured `edit.mode` and rejects the frame's `old_text`/`new_text` pairs.
+	 * configured `edit.mode` and rejects the frame's `old_string`/`new_string` args.
 	 */
 	advisorCreateEditTool?(): AgentTool | undefined;
 	/**
@@ -234,8 +300,8 @@ export interface AgentSessionConfig {
 	 *
 	 * `ExtensionToolWrapper` reads `tools.approvalMode`, per-tool
 	 * `tools.approval.<tool>` policies and `autoApprove` only from this context;
-	 * with none it defaults to `yolo` with empty policies, so a bridge tool would
-	 * run a native frame the user configured `ask` or `deny` for.
+	 * with none it fails closed to `always-ask` with empty policies (no user
+	 * grant), so a bridge tool that needs a prompt cannot run unattended.
 	 */
 	advisorGetToolContext?: () => AgentToolContext | undefined;
 	/**
@@ -250,10 +316,16 @@ export interface AgentSessionConfig {
 	advisorWatchdogPrompt?: string;
 	/** Shared advisor instructions loaded from WATCHDOG.yml. */
 	advisorSharedInstructions?: string;
+	/** Shared non-blocker budget from top-level WATCHDOG.yml maxNotesPerUpdate. */
+	advisorSharedMaxNotesPerUpdate?: number;
 	/** Project context rendered for advisor sessions. */
 	advisorContextPrompt?: string;
+	/** Memory backend developer instructions rendered for advisor sessions. */
+	advisorMemoryPrompt?: string;
 	/** Advisors discovered from WATCHDOG.yml. */
 	advisorConfigs?: AdvisorConfig[];
+	/** Config problems collected during WATCHDOG.yml discovery. */
+	advisorConfigWarnings?: string[];
 	/** Strip tool descriptions from provider-bound side-request tool specs. */
 	pruneToolDescriptions?: boolean;
 	/** Disconnect the MCP manager owned by this session during disposal. */
@@ -268,8 +340,10 @@ export interface PromptOptions {
 	expandPromptTemplates?: boolean;
 	/** Image attachments. */
 	images?: ImageContent[];
-	/** Queue behavior while streaming. */
-	streamingBehavior?: "steer" | "followUp";
+	/** Queue behavior while streaming. `"aside"` is non-interrupting — it does not steer/follow-up
+	 *  an in-flight tool batch, injecting at the next step boundary instead (see
+	 *  AgentSession.sendUserMessage's `deliverAs: "aside"`). */
+	streamingBehavior?: "steer" | "followUp" | "aside";
 	/** Optional tool choice override for the next LLM call. */
 	toolChoice?: ToolChoice;
 	/** Send as a developer/system message instead of user. */
@@ -282,12 +356,36 @@ export interface PromptOptions {
 	skipCompactionCheck?: boolean;
 }
 
+/** Payload for {@link AgentSession.setPromptDropped}: a user prompt cancelled
+ *  before it reached the agent (an abort or usage preflight denial raced turn
+ *  setup), so it was never persisted to the session. */
+export interface DroppedPrompt {
+	/** The prompt exactly as typed, before template/command expansion. */
+	text: string;
+	/** Image attachments submitted with the prompt. */
+	images?: ImageContent[];
+}
+
 /** Options for AgentSession.followUp(). */
 export interface FollowUpOptions {
 	/** Enqueue as a hidden developer message instead of a user follow-up. */
 	synthetic?: boolean;
 	/** Whether to expand file-based prompt templates (default: true). */
 	expandPromptTemplates?: boolean;
+	/** Explicit billing/initiator attribution. */
+	attribution?: MessageAttribution;
+}
+
+/** Options for AgentSession.steer(). */
+export interface SteerOptions {
+	/** Explicit billing/initiator attribution. */
+	attribution?: MessageAttribution;
+}
+
+/** Options for AgentSession.sendUserMessage(). */
+export interface SendUserMessageOptions {
+	/** Queue behavior; omitted starts a turn when idle and steers while streaming. */
+	deliverAs?: "steer" | "followUp" | "aside";
 	/** Explicit billing/initiator attribution. */
 	attribution?: MessageAttribution;
 }
@@ -302,7 +400,6 @@ export interface HandoffResult {
 export interface SessionHandoffOptions {
 	autoTriggered?: boolean;
 	signal?: AbortSignal;
-	onSwitchCancelled?: () => void;
 }
 
 /** Result from cycleModel(). */
@@ -320,13 +417,8 @@ export interface RoleModelCycleResult {
 	role: string;
 }
 
-/** A configured role resolved to a concrete model. */
-export interface ResolvedRoleModel {
-	role: string;
-	model: Model;
-	thinkingLevel?: ConfiguredThinkingLevel;
-	explicitThinkingLevel: boolean;
-}
+import type { ResolvedRoleModel } from "@oh-my-pi/pi-tui/overlays/model-picker";
+export type { ResolvedRoleModel } from "@oh-my-pi/pi-tui/overlays/model-picker";
 
 /** Resolvable role models and the currently active index. */
 export interface RoleModelCycle {
@@ -365,6 +457,13 @@ export interface SessionStats {
 	};
 	premiumRequests: number;
 	cost: number;
+	credits?: {
+		cost: number;
+		committedCost: number;
+		acuCost: number;
+	};
+	/** Concrete provider-routed model ids with finalized turn counts. */
+	routedModels?: Record<string, number>;
 	contextUsage?: ContextUsage;
 }
 
@@ -379,6 +478,12 @@ export interface FreshSessionResult {
 	previousSessionId: string;
 	sessionId: string;
 	closedProviderSessions: number;
+}
+
+/** Outcome of an in-place `/clear` conversation-context reset. */
+export interface ResetSessionContextResult {
+	/** Number of live messages dropped from the model's context. */
+	droppedCount: number;
 }
 
 /** Queued user content restored to the editor. */

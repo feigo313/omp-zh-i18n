@@ -16,6 +16,7 @@ function createMockManager(opts: {
 }) {
 	return {
 		getConnectedServers: () => opts.servers ?? [],
+		waitForPendingConnections: async () => {},
 		getServerResources: (name: string) => opts.resources?.get(name),
 		ensureServerResources: async (name: string) => opts.ensureResources?.(name),
 		readServerResource: async (_name: string, _uri: string) => {
@@ -104,6 +105,31 @@ describe("McpProtocolHandler", () => {
 		const resource = await router.resolve("mcp://test://doc");
 		expect(resource.content).toBe("hello world");
 		expect(resource.notes).toEqual(["MCP server: my-server"]);
+	});
+
+	it("preserves a literal semicolon in an exact MCP resource URI", async () => {
+		const uri = "catalog://items;active";
+		const resources = new Map<string, { resources: MCPResource[]; templates: MCPResourceTemplate[] }>();
+		resources.set("catalog", {
+			resources: [{ uri, name: "active-items" }],
+			templates: [],
+		});
+		const manager = createMockManager({
+			servers: ["catalog"],
+			resources,
+			readResult: { contents: [{ uri, text: "active items" }] },
+		});
+		MCPManager.setInstance(manager);
+
+		const result = await new ReadTool(createToolSession()).execute("read-semicolon-resource", {
+			path: `mcp://${uri}`,
+		});
+		const output = result.content.find(block => block.type === "text");
+
+		expect(output?.type).toBe("text");
+		if (output?.type !== "text") throw new Error("Expected text output");
+		expect(output.text).toContain("active items");
+		expect(output.text).not.toContain("interpreted as");
 	});
 
 	it("lets read consume a native URI advertised by an MCP server", async () => {

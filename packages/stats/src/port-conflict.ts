@@ -17,31 +17,42 @@ interface PortHolder {
 
 /** Header stamped on every dashboard response so reuse probes can identify us. */
 export const STATS_DASHBOARD_HEADER = "x-omp-stats-dashboard";
+/** Header recording the server's requested bind host so reuse cannot change its exposure scope. */
+export const STATS_DASHBOARD_HOSTNAME_HEADER = "x-omp-stats-hostname";
 
-async function probeStatsDashboard(port: number): Promise<boolean> {
+/** Identity-header value for dashboards enforcing an explicit bind host and same-origin access. */
+export const STATS_DASHBOARD_SECURITY_VERSION = "3";
+
+/** IPv4 loopback address shared by the dashboard server and reuse probe. */
+export const STATS_DASHBOARD_HOSTNAME = "127.0.0.1";
+
+type StatsDashboardProbe = "reusable" | "replaceable" | "occupied" | "unreachable";
+
+async function probeStatsDashboard(port: number, hostname: string): Promise<StatsDashboardProbe> {
+	const probeHostname = hostname === "0.0.0.0" ? STATS_DASHBOARD_HOSTNAME : hostname === "::" ? "::1" : hostname;
+	const urlHostname = probeHostname.includes(":") ? `[${probeHostname}]` : probeHostname;
 	try {
-		const response = await fetch(`http://localhost:${port}/api/stats/models`, {
+		const response = await fetch(`http://${urlHostname}:${port}/api/stats/models`, {
 			signal: AbortSignal.timeout(STATS_PROBE_TIMEOUT_MS),
 		});
-		if (response.status !== 200) {
-			await response.body?.cancel();
-			return false;
-		}
-		// A live omp-stats dashboard stamps this header on every response.
-		if (response.headers.get(STATS_DASHBOARD_HEADER)) {
-			await response.body?.cancel();
-			return true;
-		}
-		// Older dashboards predate the header; fall back to the response shape
-		// (`/api/stats/models` returns a JSON array) so we never reuse — or later
-		// kill — a foreign 200 responder such as an SPA dev server catch-all.
-		if (!(response.headers.get("content-type") ?? "").includes("application/json")) {
-			await response.body?.cancel();
-			return false;
-		}
-		return Array.isArray(await response.json());
+		const dashboardVersionHeader = response.headers.get(STATS_DASHBOARD_HEADER);
+		const dashboardVersion = dashboardVersionHeader === null ? Number.NaN : Number(dashboardVersionHeader);
+		// Never replace a newer dashboard: an older CLI must not downgrade it.
+		const replaceable =
+			response.status === 200 &&
+			Number.isSafeInteger(dashboardVersion) &&
+			dashboardVersion > 0 &&
+			dashboardVersion <= Number(STATS_DASHBOARD_SECURITY_VERSION);
+		const reusable =
+			response.status === 200 &&
+			dashboardVersionHeader === STATS_DASHBOARD_SECURITY_VERSION &&
+			response.headers.get(STATS_DASHBOARD_HOSTNAME_HEADER) === hostname &&
+			!response.headers.has("Access-Control-Allow-Origin");
+		await response.body?.cancel();
+		if (reusable) return "reusable";
+		return replaceable ? "replaceable" : "occupied";
 	} catch {
-		return false;
+		return "unreachable";
 	}
 }
 
@@ -216,10 +227,7 @@ async function terminatePortHolder(holder: PortHolder): Promise<void> {
 	await Bun.sleep(PROCESS_EXIT_POLL_MS);
 }
 
-/** Reuse a live stats dashboard or reclaim the port from a stale omp runtime. */
-export async function recoverStatsPort(port: number): Promise<"retry" | "reuse"> {
-	if (await probeStatsDashboard(port)) return "reuse";
-
+async function reclaimStatsPort(port: number, hasDashboardIdentity = false): Promise<"retry"> {
 	const holder = await findPortHolder(port);
 	if (!holder) {
 		throw new Error(`Port ${port} is in use, but the listening process could not be identified.`);
@@ -239,7 +247,7 @@ export async function recoverStatsPort(port: number): Promise<"retry" | "reuse">
 		/\/packages\/stats\/src\/index\.ts(?:["'\s]|$)/.test(normalizedCommand) ||
 		(normalizedImage === "omp" && /(?:^|\s)stats(?:\s|$)/.test(normalizedCommand)) ||
 		/(?:^|\/)omp(?:\.exe)?["'\s]+stats(?:["'\s]|$)/.test(normalizedCommand);
-	if (!STATS_RUNTIME_IMAGES[normalizedImage] || !hasStatsIdentity) {
+	if (!STATS_RUNTIME_IMAGES[normalizedImage] || (!hasStatsIdentity && !hasDashboardIdentity)) {
 		throw new Error(
 			`Port ${port} is in use by ${holder.image} (PID ${holder.pid}), which is not identifiable as an omp stats dashboard; refusing to stop it.`,
 		);
@@ -247,4 +255,25 @@ export async function recoverStatsPort(port: number): Promise<"retry" | "reuse">
 
 	await terminatePortHolder(holder);
 	return "retry";
+}
+
+/**
+ * Reuse a secure dashboard or reclaim an insecure HTTP dashboard before binding.
+ * The preflight is needed on platforms that permit wildcard and loopback-specific
+ * listeners to coexist on one port.
+ */
+export async function prepareStatsPort(port: number, hostname = STATS_DASHBOARD_HOSTNAME): Promise<"retry" | "reuse"> {
+	if (port === 0) return "retry";
+	const probe = await probeStatsDashboard(port, hostname);
+	if (probe === "reusable") return "reuse";
+	if (probe === "replaceable") return reclaimStatsPort(port, true);
+	if (probe === "occupied") return reclaimStatsPort(port);
+	return "retry";
+}
+
+/** Reuse or reclaim a listener found after the server bind reports EADDRINUSE. */
+export async function recoverStatsPort(port: number, hostname = STATS_DASHBOARD_HOSTNAME): Promise<"retry" | "reuse"> {
+	const probe = await probeStatsDashboard(port, hostname);
+	if (probe === "reusable") return "reuse";
+	return reclaimStatsPort(port, probe === "replaceable");
 }

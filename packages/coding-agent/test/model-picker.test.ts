@@ -1,12 +1,13 @@
+import { createModelBrowserSource } from "../src/modes/model-browser-source";
 import { beforeAll, describe, expect, type Mock, test, vi } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { ModelPickerComponent, type ModelPickerOptions } from "@oh-my-pi/pi-coding-agent/modes/components/model-picker";
-import { resolveSegmentPalette } from "@oh-my-pi/pi-coding-agent/modes/components/segment-track";
-import { getThemeByName, setThemeInstance, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { ModelPickerComponent, type ModelPickerOptions } from "@oh-my-pi/pi-tui/overlays/model-picker";
+import { resolveSegmentPalette } from "@oh-my-pi/pi-tui/chrome/segment-track";
+import { getThemeByName, setThemeInstance, theme } from "@oh-my-pi/pi-tui/theme";
 import type { ResolvedRoleModel } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { TUI } from "@oh-my-pi/pi-tui";
 
@@ -44,7 +45,7 @@ interface RegistryOverrides {
 
 interface PickerHarness {
 	picker: ModelPickerComponent;
-	onPick: Mock<(model: Model, selector: string) => void>;
+	onPick: Mock<(model: Model, selector: string, meta: { overContext: boolean }) => void>;
 	onPickRole: Mock<(entry: ResolvedRoleModel) => void>;
 	onCancel: Mock<() => void>;
 }
@@ -71,7 +72,7 @@ function createPicker(options: {
 	const onCancel = vi.fn();
 	const picker = new ModelPickerComponent(
 		ui,
-		settings,
+		createModelBrowserSource(settings),
 		registry,
 		options.scoped ? modelsFn().map(model => ({ model })) : [],
 		{ onPick, onPickRole, onCancel },
@@ -91,7 +92,7 @@ describe("ModelPicker", () => {
 		}
 	});
 
-	test("disables models below the current context size and picks the first enabled one", () => {
+	test("flags over-context models but keeps them selectable, reporting overContext on pick", () => {
 		const small = makeModel("test", "a-small", 4096);
 		const large = makeModel("test", "b-large", 128_000);
 		const { picker, onPick } = createPicker({
@@ -100,14 +101,33 @@ describe("ModelPicker", () => {
 			picker: { currentContextTokens: 6000 },
 		});
 
+		expect(normalize(picker.render(220))).toContain("Session-only switch");
+
+		picker.handleInput("small");
 		const rendered = normalize(picker.render(220));
-		expect(rendered).toContain("a-small");
 		expect(rendered).toContain("context>4.1k");
-		expect(rendered).toContain("Session-only switch");
+		expect(rendered).toContain("compacts with current model");
 
 		picker.handleInput("\n");
 		expect(onPick).toHaveBeenCalledTimes(1);
+		expect(onPick.mock.calls[0]?.[0]).toBe(small);
+		expect(onPick.mock.calls[0]?.[2]).toEqual({ overContext: true });
+	});
+
+	test("picking a model that fits reports overContext false", () => {
+		const small = makeModel("test", "a-small", 4096);
+		const large = makeModel("test", "b-large", 128_000);
+		const { picker, onPick } = createPicker({
+			models: [small, large],
+			scoped: true,
+			picker: { currentContextTokens: 6000 },
+		});
+
+		picker.handleInput("large");
+		picker.handleInput("\n");
+		expect(onPick).toHaveBeenCalledTimes(1);
 		expect(onPick.mock.calls[0]?.[0]).toBe(large);
+		expect(onPick.mock.calls[0]?.[2]).toEqual({ overContext: false });
 	});
 
 	test("uses cached models for Enter while the offline refresh is still pending", () => {
@@ -161,6 +181,34 @@ describe("ModelPicker", () => {
 		// Enter without navigation picks the preselected current model.
 		picker.handleInput("\n");
 		expect(onPick.mock.calls[0]?.[0]?.id).toBe("bb-model");
+	});
+
+	test("search jumps to the first result when choices through the current model change", () => {
+		const models = [makeModel("test", "aa-unrelated"), makeModel("test", "bb-match"), makeModel("test", "cc-match")];
+		const { picker, onPick } = createPicker({
+			models,
+			scoped: true,
+			picker: { currentSelector: "test/cc-match" },
+		});
+
+		picker.handleInput("match");
+		picker.handleInput("\n");
+
+		expect(onPick.mock.calls[0]?.[0]?.id).toBe("bb-match");
+	});
+
+	test("search keeps the selection when every choice through it stays unchanged", () => {
+		const models = [makeModel("test", "aa-shared"), makeModel("test", "bb-shared"), makeModel("test", "cc-shared")];
+		const { picker, onPick } = createPicker({
+			models,
+			scoped: true,
+			picker: { currentSelector: "test/cc-shared" },
+		});
+
+		picker.handleInput("shared");
+		picker.handleInput("\n");
+
+		expect(onPick.mock.calls[0]?.[0]?.id).toBe("cc-shared");
 	});
 
 	test("shows and applies ctrl+p quick roles when search starts with @", () => {

@@ -12,7 +12,7 @@ function createRunner(getAsyncJobSnapshot?: () => AsyncJobSnapshot | null): Exte
 		[],
 		runtime,
 		"/tmp",
-		{} as never,
+		{ getCwd: () => "/tmp" } as never,
 		{} as never,
 		undefined,
 		undefined,

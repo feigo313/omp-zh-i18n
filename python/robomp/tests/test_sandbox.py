@@ -91,6 +91,7 @@ def upstream_repo(tmp_path: Path) -> Path:
 
 def test_workspace_key_and_branch_shape() -> None:
     assert workspace_key("oven-sh/bun", 30654) == "oven-sh__bun__30654"
+    assert workspace_key("oven-sh/bun", "release") == "oven-sh__bun__release"
     branch = make_branch(issue_number=30654, title="JSON.parse crashes on BOM", seed="oven-sh/bun#30654")
     assert branch.startswith("farm/")
     parts = branch.split("/")
@@ -405,6 +406,87 @@ def test_ensure_workspace_creates_worktree(tmp_path: Path, upstream_repo: Path) 
     assert ws.context_dir.is_dir()
     assert ws.repro_dir.is_dir()
     assert ws.artifacts_dir.is_dir()
+
+
+def test_release_workspace_resets_to_remote_main_and_uses_tag_session(
+    tmp_path: Path,
+    upstream_repo: Path,
+) -> None:
+    mgr = SandboxManager(tmp_path / "workspaces")
+    workspace = mgr.ensure_release_workspace(
+        repo="octo/widget",
+        clone_url=str(upstream_repo),
+        default_branch="main",
+        tag="v1.2.3",
+        author_name="robomp-bot",
+        author_email="robomp-bot@example.invalid",
+    )
+    assert workspace.branch == "main"
+    assert workspace.issue_number == "release"
+    assert workspace.workspace_key == "octo__widget__release"
+    assert workspace.session_dir.name == ".omp-session-v1.2.3"
+
+    (workspace.repo_dir / "local.txt").write_text("discard me\n", encoding="utf-8")
+    _git(["-C", str(workspace.repo_dir), "add", "local.txt"], cwd=tmp_path)
+    _git(["-C", str(workspace.repo_dir), "commit", "-m", "local crash residue"], cwd=tmp_path)
+    (workspace.repo_dir / "untracked.txt").write_text("discard me too\n", encoding="utf-8")
+
+    seed = tmp_path / "seed"
+    (seed / "remote.txt").write_text("new remote state\n", encoding="utf-8")
+    _git(["-C", str(seed), "add", "remote.txt"], cwd=tmp_path)
+    subprocess.run(
+        ["git", "commit", "-m", "advance remote"],
+        cwd=str(seed),
+        check=True,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        },
+    )
+    _git(["-C", str(seed), "push", "origin", "main"], cwd=tmp_path)
+    remote_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(seed),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    resumed = mgr.ensure_release_workspace(
+        repo="octo/widget",
+        clone_url=str(upstream_repo),
+        default_branch="main",
+        tag="v1.2.3",
+        author_name="robomp-bot",
+        author_email="robomp-bot@example.invalid",
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(resumed.repo_dir),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head == remote_head
+    assert not (resumed.repo_dir / "local.txt").exists()
+    assert not (resumed.repo_dir / "untracked.txt").exists()
+    assert (resumed.repo_dir / "remote.txt").read_text(encoding="utf-8") == "new remote state\n"
+
+    next_release = mgr.ensure_release_workspace(
+        repo="octo/widget",
+        clone_url=str(upstream_repo),
+        default_branch="main",
+        tag="v1.2.4",
+        author_name="robomp-bot",
+        author_email="robomp-bot@example.invalid",
+    )
+    assert next_release.repo_dir == resumed.repo_dir
+    assert next_release.session_dir.name == ".omp-session-v1.2.4"
 
 
 def test_ensure_workspace_pr_head_uses_detached_pr_ref(tmp_path: Path, upstream_repo: Path) -> None:
@@ -1192,7 +1274,7 @@ def test_redact_credentials_strips_userinfo() -> None:
     from robomp.sandbox import redact_credentials
 
     assert (
-        redact_credentials("Cloning into 'x' from https://bot:" + "gh" + "p_secret@github.com/o/r.git failed")
+        redact_credentials("Cloning into 'x' from https://bot:ghp_secret@github.com/o/r.git failed")
         == "Cloning into 'x' from https://***@github.com/o/r.git failed"
     )
     # Multiple URLs in one string.
@@ -1211,11 +1293,11 @@ def test_git_command_error_redacts_url_in_args_and_stderr(tmp_path: Path) -> Non
 
     from robomp.sandbox import _run
 
-    cred_url = "https://bot:" + "gh" + "p_abc123secret@example.invalid/o/r.git"
+    cred_url = "https://bot:ghp_abc123secret@example.invalid/o/r.git"
     with _pytest.raises(Exception) as exc:
         _run(["git", "clone", cred_url, str(tmp_path / "out")])
     text = str(exc.value)
-    assert "gh" + "p_abc123secret" not in text
+    assert "ghp_abc123secret" not in text
     assert "bot" not in text or "https://bot:" not in text
     assert "***" in text or "example.invalid" in text
 
@@ -1230,10 +1312,10 @@ def test_ensure_workspace_rewrites_credentialed_origin(tmp_path: Path, upstream_
     pool = mgr.pool_path("octo/widget")
     pool.parent.mkdir(parents=True, exist_ok=True)
     _git(["clone", "--filter=blob:none", str(upstream_repo), str(pool)], cwd=tmp_path)
-    credentialed = "https://bot:" + "gh" + "p_seekrit@example.invalid/octo/widget.git"
+    credentialed = "https://bot:ghp_seekrit@example.invalid/octo/widget.git"
     _git(["-C", str(pool), "remote", "set-url", "origin", credentialed], cwd=tmp_path)
     config = (pool / ".git" / "config").read_text()
-    assert "gh" + "p_seekrit" in config  # sanity: precondition
+    assert "ghp_seekrit" in config  # sanity: precondition
 
     # Now resolve through ensure_workspace using the clean URL we now own.
     # The fetch step itself will fail against the bogus example.invalid host,
@@ -1249,7 +1331,7 @@ def test_ensure_workspace_rewrites_credentialed_origin(tmp_path: Path, upstream_
         author_email="robomp-bot@example.invalid",
     )
     config_after = (pool / ".git" / "config").read_text()
-    assert "gh" + "p_seekrit" not in config_after, config_after
+    assert "ghp_seekrit" not in config_after, config_after
     assert "bot:" not in config_after, config_after
     # Origin now points at the clean URL.
     url = subprocess.run(

@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_BYTES, OutputSink } from "../../session/streaming-output";
+import { DEFAULT_MAX_BYTES, type OutputArtifactError, OutputSink } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import type { ToolSession } from "../../tools";
 import { resolveOutputMaxColumns, resolveOutputSinkHeadBytes } from "../../tools/output-meta";
 import { isEvalTimeoutControlEvent } from "../bridge-timeout";
@@ -19,6 +19,8 @@ export interface JsExecutorOptions {
 	onStatus?: (event: JsStatusEvent) => void;
 	signal?: AbortSignal;
 	sessionId: string;
+	/** Logical owner identifier; scopes `reset` on shared contexts and retained-worker cleanup. */
+	kernelOwnerId?: string;
 	reset?: boolean;
 	sessionFile?: string;
 	artifactPath?: string;
@@ -34,6 +36,7 @@ export interface JsResult {
 	cancelled: boolean;
 	truncated: boolean;
 	artifactId?: string;
+	artifactError?: OutputArtifactError;
 	totalLines: number;
 	totalBytes: number;
 	outputLines: number;
@@ -100,6 +103,7 @@ export async function executeJs(code: string, options: JsExecutorOptions): Promi
 		await executeInVmContext({
 			sessionKey: options.sessionId,
 			sessionId: options.sessionId,
+			ownerId: options.kernelOwnerId,
 			cwd: options.cwd ?? options.session.cwd,
 			session: options.session,
 			localRoots: options.localRoots,
@@ -128,6 +132,7 @@ export async function executeJs(code: string, options: JsExecutorOptions): Promi
 			cancelled: false,
 			truncated: summary.truncated,
 			artifactId: summary.artifactId,
+			artifactError: summary.artifactError,
 			totalLines: summary.totalLines,
 			totalBytes: summary.totalBytes,
 			outputLines: summary.outputLines,
@@ -147,6 +152,7 @@ export async function executeJs(code: string, options: JsExecutorOptions): Promi
 				cancelled: true,
 				truncated: summary.truncated,
 				artifactId: summary.artifactId,
+				artifactError: summary.artifactError,
 				totalLines: summary.totalLines,
 				totalBytes: summary.totalBytes,
 				outputLines: summary.outputLines,
@@ -163,6 +169,7 @@ export async function executeJs(code: string, options: JsExecutorOptions): Promi
 			cancelled: false,
 			truncated: summary.truncated,
 			artifactId: summary.artifactId,
+			artifactError: summary.artifactError,
 			totalLines: summary.totalLines,
 			totalBytes: summary.totalBytes,
 			outputLines: summary.outputLines,

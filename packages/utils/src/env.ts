@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getAgentDir, getConfigRootDir, refreshDirsFromEnv } from "./dirs";
+import { parseEnv } from "node:util";
+import { getAgentDir, getConfigRootDir, getProjectDir, refreshDirsFromEnv } from "./dirs";
 
 export * from "./worker-host";
 
@@ -36,6 +37,18 @@ export function isMacosMallocStackLoggingEnvName(name: string): boolean {
 	return name === "MallocStackLogging" || name === "MallocStackLoggingNoCompact";
 }
 
+/**
+ * True when running inside a WSL (Windows Subsystem for Linux) distribution.
+ *
+ * WSL reports `linux` for `process.platform`, so the only reliable signal is
+ * the `WSL_DISTRO_NAME`/`WSL_INTEROP` variables the interop layer injects.
+ * Callers use this to translate Windows drive paths to their `/mnt/<drive>`
+ * mounts and to route clipboard access through `powershell.exe`.
+ */
+export function isWsl(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): boolean {
+	return platform === "linux" && Boolean(env.WSL_DISTRO_NAME || env.WSL_INTEROP);
+}
+
 export function filterProcessEnv(env: Record<string, string | undefined>): Record<string, string> {
 	const result: Record<string, string> = {};
 	for (const key in env) {
@@ -52,6 +65,48 @@ export function filterProcessEnv(env: Record<string, string | undefined>): Recor
 	}
 	return result;
 }
+/**
+ * Git variables that pin a repository location. They describe the checkout the
+ * agent process itself was launched from (git hooks, `git --git-dir` wrappers),
+ * so forwarding them to a child shell makes `git` ignore the command's `cwd`
+ * and mutate the wrong worktree or index. Stripped from child shell envs so git
+ * rediscovers the repository from the working directory. Mirrors the
+ * `env_remove` list in `crates/pi-vcs/src/git/cli.rs`.
+ */
+const GIT_REPO_LOCATION_ENV_NAMES = [
+	"GIT_DIR",
+	"GIT_COMMON_DIR",
+	"GIT_WORK_TREE",
+	"GIT_INDEX_FILE",
+	"GIT_OBJECT_DIRECTORY",
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+] as const;
+
+/**
+ * Removes {@link GIT_REPO_LOCATION_ENV_NAMES} from a copied child env in place.
+ *
+ * Windows environment lookups are case-insensitive, so a block that spells a
+ * variable `git_dir` is just as binding there; match case-insensitively on
+ * win32 and exactly elsewhere (POSIX env names are case-sensitive).
+ */
+export function stripGitRepoLocationEnv(
+	env: Record<string, string>,
+	platform: NodeJS.Platform = process.platform,
+): void {
+	if (platform !== "win32") {
+		for (const name of GIT_REPO_LOCATION_ENV_NAMES) {
+			delete env[name];
+		}
+		return;
+	}
+	const folded = new Set<string>(GIT_REPO_LOCATION_ENV_NAMES.map(name => name.toLowerCase()));
+	for (const key of Object.keys(env)) {
+		if (folded.has(key.toLowerCase())) {
+			delete env[key];
+		}
+	}
+}
+
 // Bun autoloads the project's dotenv files into `process.env` before user code
 // runs — including inside `bun build --compile` binaries — so a snapshot of
 // `Bun.env` is only pre-dotenv when autoloading was explicitly disabled. Linux
@@ -95,89 +150,125 @@ function expandDotenvValues(values: Record<string, string>, env: Record<string, 
 	return expanded;
 }
 
-/** Filters process env for child shells without launch-cwd dotenv values. */
-export function filterChildShellEnv(
+function filterChildShellEnvInternal(
 	env: Record<string, string | undefined>,
-	cwd: string = process.cwd(),
+	cwd: string,
+	onDotenvValue?: (value: string) => void,
 ): Record<string, string> {
+	const runtimeLaunchEnvValues = env === Bun.env || env === process.env ? launchEnvValues : undefined;
 	const result = filterProcessEnv(env);
 	const projectEnv = parseEnvFile(path.join(cwd, ".env"));
-	const nodeEnvName = `.env.${env.NODE_ENV || "development"}`;
+	const launchNodeEnv = runtimeLaunchEnvValues ? runtimeLaunchEnvValues.get("NODE_ENV") : env.NODE_ENV;
+	const nodeEnvName = `.env.${launchNodeEnv || "development"}`;
 	const modeEnv = parseEnvFile(path.join(cwd, nodeEnvName));
 	const localEnv = parseEnvFile(path.join(cwd, ".env.local"));
-	const launchEnv = { ...projectEnv, ...modeEnv, ...localEnv };
+	const modeLocalEnv = parseEnvFile(path.join(cwd, `${nodeEnvName}.local`));
+	const launchEnv = { ...projectEnv, ...modeEnv, ...localEnv, ...modeLocalEnv };
 	const expandedLaunchEnv = {
 		...expandDotenvValues(projectEnv, result),
 		...expandDotenvValues(modeEnv, result),
 		...expandDotenvValues(localEnv, result),
+		...expandDotenvValues(modeLocalEnv, result),
 	};
-	for (const key in launchEnv) {
-		const launchValue = launchEnvValues?.get(key);
+	let fallbackLaunchEnv: Record<string, string> | undefined;
+	let expandedFallbackLaunchEnv: Record<string, string> | undefined;
+	if (!runtimeLaunchEnvValues && nodeEnvName !== ".env.development") {
+		const fallbackModeEnv = parseEnvFile(path.join(cwd, ".env.development"));
+		const fallbackModeLocalEnv = parseEnvFile(path.join(cwd, ".env.development.local"));
+		const candidate = { ...projectEnv, ...fallbackModeEnv, ...localEnv, ...fallbackModeLocalEnv };
+		const expandedCandidate = {
+			...expandDotenvValues(projectEnv, result),
+			...expandDotenvValues(fallbackModeEnv, result),
+			...expandDotenvValues(localEnv, result),
+			...expandDotenvValues(fallbackModeLocalEnv, result),
+		};
+		if (candidate.NODE_ENV === env.NODE_ENV || expandedCandidate.NODE_ENV === env.NODE_ENV) {
+			// Without a launch snapshot, NODE_ENV may itself have come from dotenv.
+			// Bun chose the default mode before loading it, so retain both candidates.
+			fallbackLaunchEnv = candidate;
+			expandedFallbackLaunchEnv = expandedCandidate;
+		}
+	}
+	const allLaunchEnv = fallbackLaunchEnv ? { ...launchEnv, ...fallbackLaunchEnv } : launchEnv;
+	if (onDotenvValue) {
+		// Every value the project's dotenv files define is dotenv-sourced, whether
+		// or not this process loaded it (a `--cwd` launch never did).
+		for (const key in allLaunchEnv) onDotenvValue(allLaunchEnv[key]!);
+		for (const key in expandedLaunchEnv) onDotenvValue(expandedLaunchEnv[key]!);
+	}
+	for (const key in allLaunchEnv) {
+		const launchValue = runtimeLaunchEnvValues?.get(key);
 		if (launchValue !== undefined) {
 			// Launcher-owned name: it keeps the launcher's own value. Bun overwrites
 			// an empty launcher value with the dotenv one, so restore the launcher
 			// value whenever what survived is exactly what the dotenv file defines.
 			if (
 				result[key] !== launchValue &&
-				(result[key] === launchEnv[key] || result[key] === expandedLaunchEnv[key])
+				(result[key] === launchEnv[key] ||
+					result[key] === expandedLaunchEnv[key] ||
+					result[key] === fallbackLaunchEnv?.[key] ||
+					result[key] === expandedFallbackLaunchEnv?.[key])
 			) {
 				result[key] = launchValue;
 			}
 			continue;
 		}
-		if (launchEnvValues || projectEnvNamesLoadedByOmp.has(key)) {
+		if (runtimeLaunchEnvValues || projectEnvNamesLoadedByOmp.has(key)) {
 			// Strong provenance: the launch environment is known and this name is
 			// absent from it, or OMP itself injected the value — either way it came
 			// from a project dotenv file, not the parent shell.
+			const value = result[key];
+			if (value !== undefined) onDotenvValue?.(value);
 			delete result[key];
-		} else if (result[key] === launchEnv[key] || result[key] === expandedLaunchEnv[key]) {
+		} else if (
+			result[key] === launchEnv[key] ||
+			result[key] === expandedLaunchEnv[key] ||
+			result[key] === fallbackLaunchEnv?.[key] ||
+			result[key] === expandedFallbackLaunchEnv?.[key]
+		) {
 			// No launch-env snapshot (dotenv autoloaded without procfs): best-effort
 			// value match against the Bun-parsed dotenv.
+			const value = result[key];
+			if (value !== undefined) onDotenvValue?.(value);
 			delete result[key];
 		}
 	}
+	// Last, after dotenv merging: no source (inherited, launcher, or dotenv) may
+	// pin the child shell to the agent's own repository.
+	stripGitRepoLocationEnv(result);
 	return result;
 }
 
-/**
- * Parse one dotenv line with Bun-compatible semantics: an optional `export`
- * prefix, full-line `#` comments, inline `#` comments after whitespace on
- * unquoted values, and single/double/backtick quoting (a `#` inside quotes
- * stays literal). Returns undefined for blank lines, comments, and malformed
- * names.
- */
-function parseEnvLine(line: string): { key: string; value: string } | undefined {
-	const trimmed = line.trim();
-	if (!trimmed || trimmed.startsWith("#")) return undefined;
-	const eqIndex = trimmed.indexOf("=");
-	if (eqIndex === -1) return undefined;
-	let key = trimmed.slice(0, eqIndex).trim();
-	const exported = key.match(/^export[ \t]+(.*)$/);
-	if (exported) key = exported[1].trim();
-	if (!isValidEnvName(key)) return undefined;
-	const raw = trimmed.slice(eqIndex + 1).replace(/^[ \t]+/, "");
-	const quote = raw[0];
-	if (quote === '"' || quote === "'" || quote === "`") {
-		let close = raw.indexOf(quote, 1);
-		while (close !== -1 && raw[close - 1] === "\\") close = raw.indexOf(quote, close + 1);
-		return { key, value: close === -1 ? raw.slice(1) : raw.slice(1, close) };
-	}
-	const commentIndex = raw.search(/[ \t]#/);
-	return { key, value: (commentIndex === -1 ? raw : raw.slice(0, commentIndex)).trimEnd() };
+/** Filters process env for child shells without launch-cwd dotenv values. */
+export function filterChildShellEnv(
+	env: Record<string, string | undefined>,
+	cwd: string = getProjectDir(),
+): Record<string, string> {
+	return filterChildShellEnvInternal(env, cwd);
+}
+
+/** Return every value defined by `cwd`'s dotenv files, plus environment values that came from them. */
+export function getDotenvEnvValues(
+	cwd: string = getProjectDir(),
+	env: Record<string, string | undefined> = process.env,
+): string[] {
+	const values = new Set<string>();
+	filterChildShellEnvInternal(env, cwd, value => values.add(value));
+	return [...values];
 }
 
 /**
- * Parses a .env file synchronously into key-value string pairs using
- * {@link parseEnvLine} for Bun-compatible line semantics, then mirrors valid
+ * Parses a complete .env file with the runtime's dotenv grammar, then retains
+ * only shell-identifier names and spawn-safe values before mirroring valid
  * `OMP_` variables to their `PI_` aliases.
  */
 export function parseEnvFile(filePath: string): Record<string, string> {
 	const result: Record<string, string> = {};
 	try {
-		const content = fs.readFileSync(filePath, "utf-8");
-		for (const line of content.split("\n")) {
-			const parsed = parseEnvLine(line);
-			if (parsed && isSafeEnvValue(parsed.value)) result[parsed.key] = parsed.value;
+		const parsed = parseEnv(fs.readFileSync(filePath, "utf-8"));
+		for (const key in parsed) {
+			const value = parsed[key];
+			if (value !== undefined && isValidEnvName(key) && isSafeEnvValue(value)) result[key] = value;
 		}
 	} catch {
 		// File doesn't exist or can't be read - return empty result
@@ -197,7 +288,7 @@ export function parseEnvFile(filePath: string): Record<string, string> {
 const homeEnv = parseEnvFile(path.join(os.homedir(), ".env"));
 const piEnv = parseEnvFile(path.join(getConfigRootDir(), ".env"));
 const agentEnv = parseEnvFile(path.join(getAgentDir(), ".env"));
-const projectEnv = parseEnvFile(path.join(process.cwd(), ".env"));
+const projectEnv = parseEnvFile(path.join(getProjectDir(), ".env"));
 
 for (const key of Object.keys(Bun.env)) {
 	const value = Bun.env[key];
@@ -247,6 +338,35 @@ export function $pickenv(...keys: string[]): string | undefined {
 }
 
 /**
+ * Read an environment variable by its EXACT, case-sensitive name.
+ *
+ * `process.env` / `Bun.env` lookups are case-insensitive on Windows (Node backs
+ * them with `uv_os_getenv`, Bun with a `CaseInsensitiveASCIIStringArrayHashMap`),
+ * so a lowercase literal like `public` silently resolves to a differently-cased
+ * system variable — Windows ships `PUBLIC=C:\Users\Public`. Enumerated keys are
+ * the only signal that preserves the real casing, so this trusts the lookup only
+ * when a key with identical casing is actually present. On POSIX (case-sensitive
+ * env) it is equivalent to a direct lookup.
+ *
+ * Use this instead of `process.env[name] ?? literal` wherever `name` may be a
+ * user-supplied literal (e.g. a stored API key) rather than a genuine env-var
+ * reference — otherwise the literal gets hijacked by a same-named system var.
+ *
+ * @param name - Environment variable name to look up.
+ * @param env - Environment source; defaults to `process.env`.
+ */
+export function $envExact(name: string, env: Record<string, string | undefined> = process.env): string | undefined {
+	const value = env[name];
+	if (value === undefined) return undefined;
+	// Enumeration preserves real key casing on Windows, unlike the getter; the
+	// value is trusted only when an exact-case entry actually exists.
+	for (const key in env) {
+		if (key === name) return value;
+	}
+	return undefined;
+}
+
+/**
  * Parses a positive decimal integer from `$env[name]`.
  * Empty, invalid, NaN, zero, or negative values return `defaultValue`.
  */
@@ -258,9 +378,13 @@ export function $envpos(name: string, defaultValue: number): number {
 	return parsed;
 }
 
-/** True when `BUN_ENV` or `NODE_ENV` is the string `test`. */
+const BUN_TEST_ENTRY_PATTERN = /[._](?:test|spec)\.[cm]?[jt]sx?$/;
+
+/** True when the process is an explicitly marked test child or Bun is running a test entrypoint. */
 export function isBunTestRuntime(): boolean {
-	return Bun.env.BUN_ENV === "test" || Bun.env.NODE_ENV === "test";
+	if (Bun.env.PI_TEST_RUNTIME === "1") return true;
+	const hasTestEnvironment = Bun.env.BUN_ENV === "test" || Bun.env.NODE_ENV === "test";
+	return hasTestEnvironment && BUN_TEST_ENTRY_PATTERN.test(Bun.main);
 }
 
 let terminalHeadless = isBunTestRuntime();
@@ -315,6 +439,23 @@ export function setInteractiveHost(interactive: boolean): boolean {
 }
 
 /**
+ * SQLite `busy_timeout` for the session-critical databases (agent.db,
+ * history.db, stats.db).
+ *
+ * Interactive hosts tolerate a longer synchronous wait on lock contention
+ * (SQLITE_BUSY during WAL recovery/checkpoint — see oh-my-pi#2421): the
+ * operator sees a brief freeze and the statement eventually completes.
+ * Headless hosts (print/RPC/ACP/eval/SDK) run a protocol on the same thread —
+ * a multi-second synchronous busy-wait freezes their event loop and stalls
+ * every in-flight frame with no liveness signal, so they use a short timeout
+ * and rely on the existing asynchronous open/retry paths to recover from
+ * contention instead of blocking.
+ */
+export function getDbBusyTimeoutMs(): number {
+	return isInteractiveHost() ? 5000 : 1000;
+}
+
+/**
  * True when this code is running inside a `bun build --compile` standalone
  * binary. Detects via the embedded virtual-filesystem path markers
  * (`$bunfs`, `~BUN`, or its URL-encoded form `%7EBUN`) in `import.meta.url`,
@@ -339,8 +480,12 @@ const TRUTHY: Dict<boolean> = {
 	ON: true,
 	on: true,
 };
-export function $flag(name: string, def: boolean = false): boolean {
-	const value = $env[name];
+/** Parse a boolean-ish env value ("1", "yes", "on", …); `def` when unset/empty. */
+export function parseFlag(value: string | undefined, def = false): boolean {
 	if (!value) return def;
 	return TRUTHY[value] === true;
+}
+
+export function $flag(name: string, def: boolean = false): boolean {
+	return parseFlag($env[name], def);
 }

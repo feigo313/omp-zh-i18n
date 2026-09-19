@@ -6,9 +6,10 @@ import type {
 	MessageStats,
 	ModelDashboardStats,
 	OverviewStats,
-	PaginatedResult,
 	ProviderDashboardStats,
 	RequestDetails,
+	SessionSummary,
+	SessionTrace,
 	TimeRange,
 	ToolDashboardStats,
 } from "./types";
@@ -57,35 +58,18 @@ export async function getCostDashboardStats(
 	return fetchJson<CostDashboardStats>(`${API_BASE}/stats/costs?range=${encodeURIComponent(range)}`, { signal });
 }
 
-export async function getRecentRequests(
-	limit = 50,
-	offset = 0,
-	model?: string,
-	signal?: AbortSignal,
-): Promise<PaginatedResult<MessageStats>> {
-	const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-	if (model) params.set("model", model);
-	return fetchJson<PaginatedResult<MessageStats>>(`${API_BASE}/stats/recent?${params}`, { signal });
+export async function getRecentRequests(limit = 50, signal?: AbortSignal): Promise<MessageStats[]> {
+	return fetchJson<MessageStats[]>(`${API_BASE}/stats/recent?limit=${limit}`, { signal });
 }
 
 export async function getRecentErrors(
 	range: TimeRange = "24h",
 	limit = 50,
-	offset = 0,
-	model?: string,
 	signal?: AbortSignal,
-): Promise<PaginatedResult<MessageStats>> {
-	const params = new URLSearchParams({
-		range: encodeURIComponent(range),
-		limit: String(limit),
-		offset: String(offset),
+): Promise<MessageStats[]> {
+	return fetchJson<MessageStats[]>(`${API_BASE}/stats/errors?range=${encodeURIComponent(range)}&limit=${limit}`, {
+		signal,
 	});
-	if (model) params.set("model", model);
-	return fetchJson<PaginatedResult<MessageStats>>(`${API_BASE}/stats/errors?${params}`, { signal });
-}
-
-export async function getModelList(signal?: AbortSignal): Promise<string[]> {
-	return fetchJson<string[]>(`${API_BASE}/stats/models-list`, { signal });
 }
 
 export async function getRequestDetails(id: number, signal?: AbortSignal): Promise<RequestDetails> {
@@ -133,4 +117,25 @@ export async function getProviderDashboardStats(
 	return fetchJson<ProviderDashboardStats>(`${API_BASE}/stats/providers?range=${encodeURIComponent(range)}`, {
 		signal,
 	});
+}
+export async function getSessions(limit = 100, q?: string, signal?: AbortSignal): Promise<SessionSummary[]> {
+	const params = new URLSearchParams({ limit: String(limit) });
+	if (q) params.set("q", q);
+	return fetchJson<SessionSummary[]>(`${API_BASE}/sessions?${params}`, { signal });
+}
+
+export async function getSessionTrace(file: string, signal?: AbortSignal): Promise<SessionTrace> {
+	return fetchJson<SessionTrace>(`${API_BASE}/session/trace?file=${encodeURIComponent(file)}`, { signal });
+}
+
+/** Fetch one full journal entry for the span drawer. Entries are opaque JSON. */
+export async function getSessionEntryDetail(
+	file: string,
+	id: string,
+	signal?: AbortSignal,
+): Promise<{ entry: unknown }> {
+	return fetchJson<{ entry: unknown }>(
+		`${API_BASE}/session/entry?file=${encodeURIComponent(file)}&id=${encodeURIComponent(id)}`,
+		{ signal },
+	);
 }

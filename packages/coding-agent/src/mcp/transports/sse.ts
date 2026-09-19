@@ -1,5 +1,5 @@
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { logger, readSseEvents, Snowflake } from "@oh-my-pi/pi-utils";
+import { logger, postmortem, readSseEvents } from "@oh-my-pi/pi-utils";
 import type {
 	JsonRpcError,
 	JsonRpcMessage,
@@ -10,7 +10,9 @@ import type {
 	MCPTransport,
 } from "../../mcp/types";
 import { toJsonRpcError } from "../../mcp/types";
+import { RequestIdAllocator } from "../request-id";
 import { createMCPTimeout, getNeverAbortSignal, resolveMCPTimeoutMs } from "../timeout";
+import { type MCPFetchInit, mcpFetch } from "./header-policy";
 
 interface MCPTimeoutOperation {
 	signal?: AbortSignal;
@@ -25,13 +27,23 @@ interface PendingLegacySseRequest {
 	abortHandler?: () => void;
 }
 
+/** Identifies a legacy SSE transport whose endpoint handshake timed out. */
+export class LegacySseConnectionTimeoutError extends Error {
+	constructor(timeoutMs: number) {
+		super(`Legacy SSE endpoint timeout after ${timeoutMs}ms`);
+		this.name = "LegacySseConnectionTimeoutError";
+	}
+}
+
 /** Legacy MCP HTTP+SSE transport from protocol revision 2024-11-05. */
 export class LegacySseTransport implements MCPTransport {
 	#connected = false;
 	#endpointUrl: string | null = null;
 	#sseConnection: AbortController | null = null;
+	#lifecycleController = new AbortController();
 	#pending = new Map<string | number, PendingLegacySseRequest>();
 	#config: MCPSseServerConfig;
+	readonly #requestIds = new RequestIdAllocator();
 
 	onClose?: () => void;
 	onError?: (error: Error) => void;
@@ -42,6 +54,26 @@ export class LegacySseTransport implements MCPTransport {
 
 	constructor(config: MCPSseServerConfig) {
 		this.#config = config;
+	}
+
+	/** Fetch an endpoint with header precedence and origin policy. */
+	#fetch(url: string, init: MCPFetchInit, generated: Record<string, string>): Promise<Response> {
+		return mcpFetch(
+			url,
+			init,
+			{ generated, configured: this.#config.headers },
+			this.#config.headerPolicy === "origin-locked",
+		);
+	}
+
+	/**
+	 * Combine caller cancellation with transport shutdown for every HTTP
+	 * operation, so `close()` ends an in-flight POST as well as the GET stream.
+	 * Deadlines remain configured-only: this composes cancellation, never a
+	 * timer.
+	 */
+	#operationSignal(signal?: AbortSignal): AbortSignal {
+		return signal ? AbortSignal.any([signal, this.#lifecycleController.signal]) : this.#lifecycleController.signal;
 	}
 
 	get connected(): boolean {
@@ -56,21 +88,21 @@ export class LegacySseTransport implements MCPTransport {
 		if (this.#connected) return;
 		if (this.#sseConnection) return;
 
+		if (this.#lifecycleController.signal.aborted) {
+			this.#lifecycleController = new AbortController();
+		}
 		const connection = new AbortController();
 		const timeout = resolveMCPTimeoutMs(this.#config.timeout);
-		const operation = createMCPTimeout(timeout, connection.signal);
+		const operation = createMCPTimeout(timeout, this.#operationSignal(connection.signal));
 		const endpointReady = Promise.withResolvers<void>();
 		this.#sseConnection = connection;
 
 		try {
-			const response = await fetch(this.#config.url, {
-				method: "GET",
-				headers: {
-					Accept: "text/event-stream",
-					...this.#config.headers,
-				},
-				signal: operation.signal,
-			});
+			const response = await this.#fetch(
+				this.#config.url,
+				{ method: "GET", signal: operation.signal },
+				{ Accept: "text/event-stream" },
+			);
 
 			if (!response.ok) {
 				const text = await response.text();
@@ -91,7 +123,7 @@ export class LegacySseTransport implements MCPTransport {
 			if (this.#sseConnection === connection) this.#sseConnection = null;
 			connection.abort();
 			if (operation.isTimeoutAbort(error)) {
-				throw new Error(`Legacy SSE endpoint timeout after ${timeout}ms`);
+				throw new LegacySseConnectionTimeoutError(timeout);
 			}
 			throw error;
 		}
@@ -194,7 +226,7 @@ export class LegacySseTransport implements MCPTransport {
 			throw new Error("Transport not connected");
 		}
 
-		const id = Snowflake.next();
+		const id = this.#requestIds.next(this.#config.requestIdFormat);
 		const body = {
 			jsonrpc: "2.0" as const,
 			id,
@@ -202,7 +234,7 @@ export class LegacySseTransport implements MCPTransport {
 			params: params ?? {},
 		};
 		const timeout = resolveMCPTimeoutMs(this.#config.timeout);
-		const operation = createMCPTimeout(timeout, options?.signal);
+		const operation = createMCPTimeout(timeout, this.#operationSignal(options?.signal));
 		const deferred = Promise.withResolvers<unknown>();
 		// Observe the response promise synchronously so a stream-close rejection
 		// from `#rejectPending` that lands while `request()` is still awaiting the
@@ -218,10 +250,15 @@ export class LegacySseTransport implements MCPTransport {
 			pending.abortHandler = () => {
 				this.#pending.delete(id);
 				operation.clear();
+				// Name the source that actually aborted: the caller's reason, the
+				// close reason, or — when neither signalled — the configured timer.
+				const aborted = options?.signal?.aborted
+					? options.signal.reason
+					: this.#lifecycleController.signal.aborted
+						? this.#lifecycleController.signal.reason
+						: undefined;
 				deferred.reject(
-					options?.signal?.aborted && options.signal.reason instanceof Error
-						? options.signal.reason
-						: new Error(`Legacy SSE response timeout after ${timeout}ms`),
+					aborted instanceof Error ? aborted : new Error(`Legacy SSE response timeout after ${timeout}ms`),
 				);
 			};
 			operation.signal.addEventListener("abort", pending.abortHandler, { once: true });
@@ -253,7 +290,7 @@ export class LegacySseTransport implements MCPTransport {
 		}
 
 		const timeout = resolveMCPTimeoutMs(this.#config.timeout);
-		const operation = createMCPTimeout(timeout);
+		const operation = createMCPTimeout(timeout, this.#operationSignal());
 		try {
 			const response = await this.#postJson(
 				{
@@ -284,17 +321,12 @@ export class LegacySseTransport implements MCPTransport {
 	): Promise<Response> {
 		const endpointUrl = this.#endpointUrl;
 		if (!endpointUrl) throw new Error("Transport not connected");
-		let headers: Record<string, string> = {
+		const generated: Record<string, string> = {
 			"Content-Type": "application/json",
 			Accept: "application/json, text/event-stream",
-			...this.#config.headers,
 		};
-		let response = await fetch(endpointUrl, {
-			method: "POST",
-			headers,
-			body: JSON.stringify(body),
-			signal,
-		});
+		const payload = JSON.stringify(body);
+		let response = await this.#fetch(endpointUrl, { method: "POST", body: payload, signal }, generated);
 		const status = AIError.status(response);
 		if (!this.onAuthError || (status !== 401 && status !== 403)) return response;
 
@@ -302,17 +334,7 @@ export class LegacySseTransport implements MCPTransport {
 		if (!refreshedHeaders) return response;
 		await response.body?.cancel();
 		this.#config.headers = refreshedHeaders;
-		headers = {
-			"Content-Type": "application/json",
-			Accept: "application/json, text/event-stream",
-			...this.#config.headers,
-		};
-		response = await fetch(endpointUrl, {
-			method: "POST",
-			headers,
-			body: JSON.stringify(body),
-			signal,
-		});
+		response = await this.#fetch(endpointUrl, { method: "POST", body: payload, signal }, generated);
 		return response;
 	}
 
@@ -332,7 +354,7 @@ export class LegacySseTransport implements MCPTransport {
 	async #sendServerResponse(id: string | number, result?: unknown, error?: JsonRpcError): Promise<void> {
 		if (!this.#connected) return;
 		const timeout = resolveMCPTimeoutMs(this.#config.timeout);
-		const operation = createMCPTimeout(timeout);
+		const operation = createMCPTimeout(timeout, this.#operationSignal());
 		try {
 			const response = await this.#postJson(
 				error ? { jsonrpc: "2.0" as const, id, error } : { jsonrpc: "2.0" as const, id, result: result ?? {} },
@@ -359,11 +381,18 @@ export class LegacySseTransport implements MCPTransport {
 		const wasConnected = this.#connected;
 		this.#connected = false;
 		this.#endpointUrl = null;
+		const closeReason = postmortem.markExpectedCleanupError(
+			new DOMException("MCP legacy SSE transport closed", "AbortError"),
+		);
+		// Before rejecting pending entries, so an in-flight POST is cancelled
+		// rather than left holding a socket, and each waiter is told the close
+		// reason rather than a deadline it never had.
+		this.#lifecycleController.abort(closeReason);
 		if (this.#sseConnection) {
-			this.#sseConnection.abort();
+			this.#sseConnection.abort(closeReason);
 			this.#sseConnection = null;
 		}
-		this.#rejectPending(new Error("Transport closed"));
+		this.#rejectPending(closeReason);
 		if (wasConnected) this.onClose?.();
 		this.onClose = undefined;
 	}

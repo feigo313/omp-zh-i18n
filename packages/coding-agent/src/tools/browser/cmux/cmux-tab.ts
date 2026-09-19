@@ -4,20 +4,24 @@ import * as path from "node:path";
 import { logger, postmortem, Snowflake, untilAborted } from "@oh-my-pi/pi-utils";
 import { JsRuntime, type RuntimeHooks } from "../../../eval/js/shared/runtime";
 import { callSessionTool } from "../../../eval/js/tool-bridge";
-import { resizeImage } from "../../../utils/image-resize";
+import { formatScreenshot, resizeImage } from "../../../utils/image-resize";
 import type { ToolSession } from "../../index";
 import { resolveToCwd } from "../../path-utils";
-import { formatScreenshot } from "../../render-utils";
-import { ToolAbortError, ToolError, throwIfAborted } from "../../tool-errors";
+import {
+	bindRunFacade,
+	isBrowserRunOwnedRejection,
+	markBrowserRunRejection,
+	observeBrowserRunPromise,
+	resolvePredicateTimeout,
+	type WaitPredicateOptions,
+	waitForRun,
+	withBrowserPromiseCombinatorTracking,
+} from "../../run-scope";
+import { ToolAbortError, throwIfAborted } from "../../tool-errors";
+import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import { type AriaSnapshotOptions, assertSelectorString, buildAriaSnapshotScript } from "../aria/aria-snapshot";
 import { DEFAULT_VIEWPORT } from "../launch";
 import { extractReadableFromHtml, type ReadableFormat } from "../readable";
-import {
-	bindBrowserRunFacade,
-	resolvePredicateTimeout,
-	type WaitPredicateOptions,
-	waitForBrowserRun,
-} from "../run-cancellation";
 import { cloneSafe, RunOutput } from "../run-output";
 import type { Observation, ReadyInfo, RunResultOk, ScreenshotResult, SessionSnapshot } from "../tab-protocol";
 import {
@@ -259,6 +263,65 @@ export interface RunCmuxCodeOptions {
 	snapshot: SessionSnapshot;
 }
 
+interface ActiveCmuxRun {
+	filename: string;
+	floatingRejections: unknown[];
+}
+
+const RECENT_CMUX_RUN_FILES_MAX = 256;
+const activeCmuxRuns = new Map<string, ActiveCmuxRun>();
+const recentCmuxRunFiles = new Set<string>();
+
+function consumeCmuxRunRejection(reason: unknown): boolean {
+	// cmux runs guest JS in the shared main-process realm (TTS/STT/MCP and other
+	// subsystems live here too), so — like the eval inline fallback — only a
+	// guest-file stack frame can safely attribute a rejection. A stackless or
+	// non-run-stack reason is indistinguishable from a subsystem failure and
+	// keeps the default fatal path; worker isolation is the long-term fix.
+	const stack = reason instanceof Error && typeof reason.stack === "string" ? reason.stack : undefined;
+	if (!stack) return false;
+
+	let owner: ActiveCmuxRun | undefined;
+	let ownerIndex = -1;
+	for (const run of activeCmuxRuns.values()) {
+		const index = stack.lastIndexOf(run.filename);
+		if (index > ownerIndex) {
+			ownerIndex = index;
+			owner = run;
+		}
+	}
+	if (owner) {
+		owner.floatingRejections.push(reason);
+		return true;
+	}
+
+	let recent: string | undefined;
+	let recentIndex = -1;
+	for (const filename of recentCmuxRunFiles) {
+		const index = stack.lastIndexOf(filename);
+		if (index > recentIndex) {
+			recentIndex = index;
+			recent = filename;
+		}
+	}
+	if (!recent) return false;
+	logger.warn("Unhandled rejection from a finished cmux browser run (missing await?)", {
+		filename: recent,
+		error: reason,
+	});
+	return true;
+}
+
+function rememberCmuxRunFile(filename: string): void {
+	recentCmuxRunFiles.delete(filename);
+	recentCmuxRunFiles.add(filename);
+	if (recentCmuxRunFiles.size <= RECENT_CMUX_RUN_FILES_MAX) return;
+	const oldest = recentCmuxRunFiles.values().next().value;
+	if (oldest !== undefined) recentCmuxRunFiles.delete(oldest);
+}
+
+postmortem.interceptUnhandledRejections(consumeCmuxRunRejection);
+
 export class CmuxTab {
 	readonly #client: CmuxSocketClient;
 	readonly #surfaceId: string;
@@ -446,10 +509,10 @@ export class CmuxTab {
 		return new CmuxElementHandle(this, selector);
 	}
 
-	async evaluate<TResult, TArgs extends unknown[]>(
-		fn: string | ((...args: TArgs) => TResult | Promise<TResult>),
+	async evaluate<R, TArgs extends unknown[]>(
+		fn: string | ((...args: TArgs) => R | Promise<R>),
 		...args: TArgs
-	): Promise<TResult> {
+	): Promise<R> {
 		// A script that throws inside the daemon comes back as a bare
 		// `js_error: A JavaScript exception occurred` with no message or stack.
 		// Catch page-side instead so the exception is diagnosable, and turn the
@@ -457,7 +520,7 @@ export class CmuxTab {
 		// serialize — into an actionable error instead of "unsupported type".
 		const script = serializeEvalWithEnvelope(fn as string | ((...args: unknown[]) => unknown), args);
 		const result = (await this.#request("browser.eval", { script })) as CmuxEvalResult;
-		return unwrapEvalEnvelope<TResult>(result.value, "tab.evaluate()");
+		return unwrapEvalEnvelope<R>(result.value, "tab.evaluate()");
 	}
 
 	async scrollIntoView(selector: string): Promise<void> {
@@ -732,7 +795,7 @@ export class CmuxTab {
 		return await this.#selectorBox(this.#selectorSpec(selector));
 	}
 
-	async evaluateOnSelector<TResult>(selector: string, source: string, args: unknown[]): Promise<TResult> {
+	async evaluateOnSelector<R>(selector: string, source: string, args: unknown[]): Promise<R> {
 		const spec = this.#selectorSpec(selector);
 		const script = `(() => {
 			const spec = ${JSON.stringify(spec)};
@@ -749,7 +812,7 @@ export class CmuxTab {
 		const result = (await this.#request("browser.eval", {
 			script: serializeEvalWithEnvelope(script, []),
 		})) as CmuxEvalResult;
-		return unwrapEvalEnvelope<TResult>(result.value, "elementHandle.evaluate()");
+		return unwrapEvalEnvelope<R>(result.value, "elementHandle.evaluate()");
 	}
 
 	async pageContent(): Promise<string> {
@@ -779,9 +842,9 @@ export class CmuxTab {
 		throw new ToolError(`page.waitForFunction() timed out after ${timeoutMs}ms`);
 	}
 
-	async #evalScript<TResult>(script: string, timeoutMs?: number): Promise<TResult> {
+	async #evalScript<R>(script: string, timeoutMs?: number): Promise<R> {
 		const result = (await this.#request("browser.eval", { script }, timeoutMs)) as CmuxEvalResult;
-		return result.value as TResult;
+		return result.value as R;
 	}
 
 	async #captureScreenshotPng(timeoutMs: number): Promise<CmuxScreenshotResult & { png_base64: string }> {
@@ -792,52 +855,44 @@ export class CmuxTab {
 		return result as CmuxScreenshotResult & { png_base64: string };
 	}
 
-	async #selectorAction<TResult = void>(
-		selector: string,
-		action: string,
-		args: Record<string, unknown> = {},
-	): Promise<TResult> {
+	async #selectorAction<R = void>(selector: string, action: string, args: Record<string, unknown> = {}): Promise<R> {
 		const spec = this.#selectorSpec(selector);
 		const nativeSelector = this.#nativeSelector(spec);
 		if (nativeSelector && action !== "select" && action !== "uploadFile") {
 			switch (action) {
 				case "click":
 					await this.#request("browser.click", { selector: nativeSelector });
-					return undefined as TResult;
+					return undefined as R;
 				case "dblclick":
 					await this.#request("browser.dblclick", { selector: nativeSelector });
-					return undefined as TResult;
+					return undefined as R;
 				case "hover":
 					await this.#request("browser.hover", { selector: nativeSelector });
-					return undefined as TResult;
+					return undefined as R;
 				case "focus":
 					await this.#request("browser.focus", { selector: nativeSelector });
-					return undefined as TResult;
+					return undefined as R;
 				case "check":
 					await this.#request("browser.check", { selector: nativeSelector });
-					return undefined as TResult;
+					return undefined as R;
 				case "uncheck":
 					await this.#request("browser.uncheck", { selector: nativeSelector });
-					return undefined as TResult;
+					return undefined as R;
 				case "type":
 					await this.#request("browser.type", { selector: nativeSelector, text: String(args.text ?? "") });
-					return undefined as TResult;
+					return undefined as R;
 				case "fill":
 					await this.#request("browser.fill", { selector: nativeSelector, text: String(args.value ?? "") });
-					return undefined as TResult;
+					return undefined as R;
 				case "scrollIntoView":
 					await this.#request("browser.scroll_into_view", { selector: nativeSelector });
-					return undefined as TResult;
+					return undefined as R;
 			}
 		}
-		return await this.#evalSelectorAction<TResult>(spec, action, args);
+		return await this.#evalSelectorAction<R>(spec, action, args);
 	}
 
-	async #evalSelectorAction<TResult>(
-		spec: SelectorSpec,
-		action: string,
-		args: Record<string, unknown>,
-	): Promise<TResult> {
+	async #evalSelectorAction<R>(spec: SelectorSpec, action: string, args: Record<string, unknown>): Promise<R> {
 		const script = `(() => {
 			const spec = ${JSON.stringify(spec)};
 			const action = ${JSON.stringify(action)};
@@ -911,7 +966,7 @@ export class CmuxTab {
 			throw new Error("Unsupported selector action " + action);
 		})()`;
 		const result = (await this.#request("browser.eval", { script }, this.#runContext?.timeoutMs)) as CmuxEvalResult;
-		return result.value as TResult;
+		return result.value as R;
 	}
 
 	async #waitForSelector(selector: string, timeoutMs: number): Promise<void> {
@@ -1135,11 +1190,11 @@ class CmuxElementHandle {
 		await this.#tab.hover(this.#selector);
 	}
 
-	async evaluate<TResult, TArgs extends unknown[]>(
-		fn: (element: unknown, ...args: TArgs) => TResult | Promise<TResult>,
+	async evaluate<R, TArgs extends unknown[]>(
+		fn: (element: unknown, ...args: TArgs) => R | Promise<R>,
 		...args: TArgs
-	): Promise<TResult> {
-		return await this.#tab.evaluateOnSelector<TResult>(this.#selector, fn.toString(), args);
+	): Promise<R> {
+		return await this.#tab.evaluateOnSelector<R>(this.#selector, fn.toString(), args);
 	}
 
 	async boundingBox(): Promise<BoundingBox | null> {
@@ -1236,10 +1291,10 @@ class CmuxPageFacade {
 		return { url: this.#tab.url() };
 	}
 
-	async evaluate<TResult, TArgs extends unknown[]>(
-		fn: string | ((...args: TArgs) => TResult | Promise<TResult>),
+	async evaluate<R, TArgs extends unknown[]>(
+		fn: string | ((...args: TArgs) => R | Promise<R>),
 		...args: TArgs
-	): Promise<TResult> {
+	): Promise<R> {
 		return await this.#tab.evaluate(fn, ...args);
 	}
 
@@ -1314,9 +1369,13 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 	const signal = AbortSignal.any(
 		opts.signal ? [timeoutSignal, opts.signal, runAc.signal] : [timeoutSignal, runAc.signal],
 	);
+	const runEndedError = postmortem.markExpectedCleanupError(new ToolAbortError("Browser run ended"));
 	const output = new RunOutput();
 	const screenshots: ScreenshotResult[] = [];
 	const runId = crypto.randomUUID();
+	const filename = `cmux-run-${runId}.js`;
+	const activeRun: ActiveCmuxRun = { filename, floatingRejections: [] };
+	activeCmuxRuns.set(filename, activeRun);
 	tab.setRunContext({ session: opts.snapshot, output, screenshots, signal, timeoutMs: opts.timeoutMs });
 
 	const { promise: cancelRejection, reject } = Promise.withResolvers<never>();
@@ -1325,6 +1384,28 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 	// handler to this promise; keep its armed rejection from surfacing as an
 	// unhandled rejection — the postmortem-fatal path this run guards against.
 	cancelRejection.catch(() => {});
+	const rejectionOwner = {};
+	const { promise: floatingFailure, reject: rejectFloatingFailure } = Promise.withResolvers<never>();
+	floatingFailure.catch(() => {});
+	let runActive = true;
+	let hasFloatingFailure = false;
+	const recordFloatingFailure = (reason: unknown): void => {
+		if (hasFloatingFailure || postmortem.isExpectedCleanupError(reason)) return;
+		const message = reason instanceof Error ? reason.message : String(reason);
+		if (!runActive) {
+			logger.warn("Unhandled rejection after browser run ended", { runId, error: message });
+			return;
+		}
+		hasFloatingFailure = true;
+		const error = new Error(`Unhandled rejection (missing await?): ${message}`, { cause: reason });
+		if (reason instanceof Error) error.name = reason.name;
+		rejectFloatingFailure(error);
+	};
+	const uninstallRejectionInterceptor = postmortem.interceptUnhandledRejections(reason => {
+		if (!isBrowserRunOwnedRejection(reason, rejectionOwner, `cmux-run-${runId}.js`)) return false;
+		recordFloatingFailure(reason);
+		return true;
+	});
 	const onAbort = (): void => {
 		if (timeoutSignal.aborted) {
 			reject(new ToolError(`Browser code execution timed out after ${opts.timeoutMs}ms`));
@@ -1345,24 +1426,30 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 		// Keep both inside try so a concurrent in-process eval/browser run surfaces as
 		// a rejected promise the supervisor can report, never an unhandled rejection.
 		runtime.setCwd(opts.snapshot.cwd);
-		const runTab = bindBrowserRunFacade(tab, signal);
+		const runTab = bindRunFacade(tab, signal, rejectionOwner, recordFloatingFailure);
 		runtime.setRunScope({
-			page: bindBrowserRunFacade(tab.page, signal),
-			browser: bindBrowserRunFacade(tab.browser, signal),
+			page: bindRunFacade(tab.page, signal, rejectionOwner, recordFloatingFailure),
+			browser: bindRunFacade(tab.browser, signal, rejectionOwner, recordFloatingFailure),
 			tab: runTab,
 			assert: (cond: unknown, text?: string): void => {
 				if (!cond) throw new ToolError(text ?? "Assertion failed");
 			},
 			wait: (msOrPredicate: number | (() => unknown), waitOpts?: WaitPredicateOptions): Promise<unknown> =>
-				waitForBrowserRun(
-					msOrPredicate,
-					signal,
-					typeof msOrPredicate === "number"
-						? waitOpts
-						: {
-								timeout: resolvePredicateTimeout(opts.timeoutMs, waitOpts?.timeout),
-								interval: waitOpts?.interval,
-							},
+				observeBrowserRunPromise(
+					waitForRun(
+						msOrPredicate,
+						signal,
+						typeof msOrPredicate === "number"
+							? waitOpts
+							: {
+									timeout: resolvePredicateTimeout(opts.timeoutMs, waitOpts?.timeout),
+									interval: waitOpts?.interval,
+								},
+					).catch(error => {
+						throw markBrowserRunRejection(error, rejectionOwner);
+					}),
+					rejectionOwner,
+					recordFloatingFailure,
 				),
 		});
 
@@ -1383,14 +1470,50 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 		};
 		// Like the inline worker fallback, cmux runs user JS in-process: awaited cmux/tool calls
 		// observe this abort signal, but a synchronous infinite loop cannot be interrupted here.
-		const returnValue = await Promise.race([
-			runtime.run(opts.code, `cmux-run-${runId}.js`, hooks, { runId, cwd: opts.snapshot.cwd }),
-			cancelRejection,
-		]);
+		let returnValue: unknown;
+		let runError: unknown;
+		let runFailed = false;
+		try {
+			returnValue = await withBrowserPromiseCombinatorTracking(
+				rejectionOwner,
+				recordFloatingFailure,
+				async () =>
+					await Promise.race([
+						runtime.run(opts.code, filename, hooks, { runId, cwd: opts.snapshot.cwd }),
+						cancelRejection,
+						floatingFailure,
+					]),
+			);
+		} catch (error) {
+			runFailed = true;
+			runError = error;
+		}
+		runAc.abort(runEndedError);
+		// Let rejection callbacks run while this run can still own guest-created promises.
+		await Bun.sleep(0);
+		if (hasFloatingFailure && !runFailed) await floatingFailure;
+		if (runFailed) {
+			for (const reason of activeRun.floatingRejections) {
+				logger.warn("Unhandled rejection accompanied a failed cmux browser run", { filename, error: reason });
+			}
+			throw runError;
+		}
+		if (activeRun.floatingRejections.length > 0) {
+			const messages = activeRun.floatingRejections.map(reason =>
+				reason instanceof Error ? reason.message : String(reason),
+			);
+			throw new ToolError(`Unhandled rejection (missing await?): ${messages.join("\n[unhandled rejection] ")}`, {
+				rejections: activeRun.floatingRejections,
+			});
+		}
 		return { displays: output.finish(), returnValue: cloneSafe(returnValue), screenshots };
 	} finally {
+		runActive = false;
+		uninstallRejectionInterceptor();
 		signal.removeEventListener("abort", onAbort);
-		runAc.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Browser run ended")));
+		runAc.abort(runEndedError);
+		activeCmuxRuns.delete(filename);
+		rememberCmuxRunFile(filename);
 		tab.clearRunContext();
 	}
 }

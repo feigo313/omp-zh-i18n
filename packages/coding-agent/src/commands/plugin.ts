@@ -1,9 +1,11 @@
 /**
  * Manage plugins (install, uninstall, list, etc.).
  */
+
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { pluginHelp as commandHelp } from "../cli/command-help";
 import { type PluginAction, type PluginCommandArgs, runPluginCommand } from "../cli/plugin-cli";
-import { initTheme } from "../modes/theme/theme";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
 const ACTIONS: PluginAction[] = [
 	"install",
@@ -21,8 +23,8 @@ const ACTIONS: PluginAction[] = [
 ];
 
 export default class Plugin extends Command {
-	static description = "Manage plugins (install, uninstall, list, etc.)";
-
+	static description = commandHelp.description;
+	static aliases = ["plugins"];
 	static args = {
 		action: Args.string({
 			description: "Plugin action",

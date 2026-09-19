@@ -9,8 +9,9 @@
  * Transport security is delegated to the operator (Tailscale / Wireguard);
  * the server only checks a bearer token against an allow-list per request.
  */
+
+import { type Type, type } from "@oh-my-pi/omptype";
 import { logger } from "@oh-my-pi/pi-utils";
-import { type Type, type } from "arktype";
 import type { AuthStorage, StoredCredentialBlock } from "../auth-storage";
 import { parseBind } from "../utils/parse-bind";
 import { AuthBrokerRefresher, type AuthBrokerRefresherSchedule } from "./refresher";
@@ -40,7 +41,12 @@ import {
 	DEFAULT_SERVER_IDLE_TIMEOUT_S,
 	DEFAULT_STREAM_KEEPALIVE_MS,
 } from "./types";
-import { getAuthBrokerWireSchemas } from "./wire-schema-resource";
+import {
+	clientUsageReportRequestSchema,
+	credentialBlockRequestSchema,
+	credentialDisableRequestSchema,
+	credentialUploadRequestSchema,
+} from "./wire-schemas";
 
 const DEFAULT_EXTERNAL_CHANGE_POLL_MS = 250;
 
@@ -83,7 +89,7 @@ export interface AuthBrokerServerHandle {
 function json(status: number, body: unknown, headers?: Record<string, string>): Response {
 	return new Response(JSON.stringify(body), {
 		status,
-		headers: { "Content-Type": "application/json", ...(headers ?? {}) },
+		headers: { "Content-Type": "application/json", ...headers },
 	});
 }
 
@@ -254,9 +260,9 @@ class GenerationGate {
 	}
 
 	#wake(generation: number): void {
-		for (const [waitingFor, waiters] of [...this.#waiters]) {
+		for (const [waitingFor, waiters] of Array.from(this.#waiters)) {
 			if (generation <= waitingFor) continue;
-			for (const resolve of [...waiters]) resolve();
+			for (const resolve of Array.from(waiters)) resolve();
 		}
 	}
 }
@@ -582,7 +588,7 @@ function serveSnapshotStream(
 						generation: snapshot.generation,
 					});
 				}
-				for (const id of [...lastByCredId.keys()]) {
+				for (const id of Array.from(lastByCredId.keys())) {
 					if (seenIds.has(id)) continue;
 					lastByCredId.delete(id);
 					const payload: SnapshotStreamRemovedEvent = {
@@ -711,7 +717,7 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 					return json(200, { generatedAt: Date.now(), entries });
 				}
 				if (req.method === "POST" && pathname === "/v1/usage/observed") {
-					const parsed = await parseBody(req, getAuthBrokerWireSchemas().clientUsageReportRequestSchema);
+					const parsed = await parseBody(req, clientUsageReportRequestSchema);
 					if (!parsed.ok) return parsed.response;
 					// Arktype's inferred union collides the `entries` field with
 					// Array.prototype.entries; the schema already validated the shape.
@@ -740,7 +746,7 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 				}
 				if (req.method === "POST" && pathname === "/v1/usage/stale") {
 					try {
-						opts.storage.invalidateUsageCache?.();
+						await opts.storage.invalidateUsageCache?.();
 						logger.info("auth-broker usage cache invalidated", { peer });
 						return json(200, { ok: true });
 					} catch (error) {
@@ -778,7 +784,7 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 				const disableMatch = req.method === "POST" ? pathname.match(DISABLE_ROUTE) : null;
 				if (disableMatch) {
 					const id = Number.parseInt(disableMatch[1], 10);
-					const parsed = await parseBody(req, getAuthBrokerWireSchemas().credentialDisableRequestSchema, {
+					const parsed = await parseBody(req, credentialDisableRequestSchema, {
 						allowEmpty: true,
 					});
 					if (!parsed.ok) return parsed.response;
@@ -796,7 +802,7 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 				const blockMatch = req.method === "POST" ? pathname.match(BLOCK_ROUTE) : null;
 				if (blockMatch) {
 					const id = Number.parseInt(blockMatch[1], 10);
-					const parsed = await parseBody(req, getAuthBrokerWireSchemas().credentialBlockRequestSchema);
+					const parsed = await parseBody(req, credentialBlockRequestSchema);
 					if (!parsed.ok) return parsed.response;
 					const block: StoredCredentialBlock = {
 						credentialId: id,
@@ -846,7 +852,7 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 					}
 				}
 				if (req.method === "POST" && pathname === "/v1/credential") {
-					const parsed = await parseBody(req, getAuthBrokerWireSchemas().credentialUploadRequestSchema);
+					const parsed = await parseBody(req, credentialUploadRequestSchema);
 					if (!parsed.ok) return parsed.response;
 					const { provider, credential } = parsed.data;
 					try {

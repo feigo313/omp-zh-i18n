@@ -7,19 +7,7 @@ import type { ResetCreditAccountStatus, ResetCreditRedeemOutcome, ResetCreditTar
 
 export const CODEX_PROVIDER_ID = "openai-codex";
 
-/** One Codex account row for the reset-usage selector. */
-export interface ResetUsageAccount {
-	/** Display label (email, else account id). */
-	label: string;
-	/** Saved resets redeemable for this account right now. */
-	availableCount: number;
-	/** Identifies the account when redeeming. */
-	target: ResetCreditTarget;
-	/** Whether this is the session's active Codex account. */
-	active: boolean;
-	/** Set when this account could not be reached (token/list failure). */
-	error?: string;
-}
+import type { ResetUsageAccount } from "@oh-my-pi/pi-tui/overlays/reset-usage-selector";
 
 /**
  * Map live per-account reset status to selector rows. Sorted with the active
@@ -54,6 +42,8 @@ export function describeRedeemOutcome(outcome: ResetCreditRedeemOutcome, label: 
 			return `${label}: that reset was already redeemed.`;
 		case "no_credit":
 			return `${label}: no saved resets available to spend.`;
+		case "credit_list_failed":
+			return `${label}: couldn't load this account's saved resets (network/auth) — nothing was spent, try again.`;
 		case "nothing_to_reset":
 			return `${label}: nothing to reset right now — your limits aren't constrained, so no credit was spent.`;
 		case "no_account":
