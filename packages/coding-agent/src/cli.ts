@@ -566,6 +566,15 @@ export async function runCli(argv: string[]): Promise<void> {
 		resolvedArgv[0] === "help";
 	await Promise.all([setFullProcessName(), helpOrVersion ? Promise.resolve() : installNetworkBootstrap()]);
 
+	// Initialize i18n before any UI surface renders. Translation dictionaries are
+	// embedded at build time; the TUI translator seam is wired so tui-package
+	// components (welcome, settings, overlays) resolve strings through the same
+	// dictionaries without a reverse dependency on this package.
+	const { i18n } = await import("./i18n");
+	await i18n.init();
+	const { setTuiTranslator } = await import("@oh-my-pi/pi-tui/i18n-host");
+	setTuiTranslator(i18n.t.bind(i18n));
+
 	if (resolvedArgv[0] === "--smoke-test") {
 		await runSmokeTest();
 		return;

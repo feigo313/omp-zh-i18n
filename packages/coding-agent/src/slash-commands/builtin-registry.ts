@@ -14,6 +14,7 @@ import { BUILTIN_LIFECYCLE_SLASH_COMMANDS } from "./builtin-lifecycle";
 import { BUILTIN_MARKETPLACE_SLASH_COMMANDS, reloadTuiPluginState } from "./builtin-marketplace";
 import { BUILTIN_MODE_SLASH_COMMANDS } from "./builtin-modes";
 import { BUILTIN_SESSION_SLASH_COMMANDS } from "./builtin-session";
+import { interceptSlashCommand } from "../i18n/interceptor";
 import { parseSlashCommand } from "./helpers/parse";
 import type {
 	BuiltinSlashCommand,
@@ -72,13 +73,25 @@ function materializeTuiBuiltinSlashCommand(
 	cmd: BuiltinSlashCommand,
 	runtime?: TuiSlashCommandRuntime,
 ): TuiBuiltinSlashCommand {
-	const materialized: TuiBuiltinSlashCommand = { ...cmd };
-	if (cmd.subcommands) {
+	const translated = interceptSlashCommand({
+		name: cmd.name,
+		description: cmd.description,
+		subcommands: cmd.subcommands,
+	});
+	const materialized: TuiBuiltinSlashCommand = {
+		...cmd,
+		description: translated.description,
+		subcommands: cmd.subcommands?.map((sub, index) => ({
+			...sub,
+			description: translated.subcommands?.[index]?.description ?? sub.description,
+		})),
+	};
+	if (materialized.subcommands) {
 		materialized.getArgumentCompletions =
-			cmd.name === "mcp" && runtime
-				? buildMcpArgumentCompletions(cmd.subcommands, runtime)
-				: buildArgumentCompletions(cmd.subcommands);
-		materialized.getInlineHint = buildSubcommandInlineHint(cmd.subcommands);
+			materialized.name === "mcp" && runtime
+				? buildMcpArgumentCompletions(materialized.subcommands, runtime)
+				: buildArgumentCompletions(materialized.subcommands);
+		materialized.getInlineHint = buildSubcommandInlineHint(materialized.subcommands);
 	} else if (cmd.name === "move") {
 		materialized.getArgumentCompletions = buildDirectoryArgumentCompletions();
 		if (cmd.inlineHint) materialized.getInlineHint = buildStaticInlineHint(cmd.inlineHint);

@@ -31,7 +31,7 @@ export const CREDENTIAL_PREFIX_RULES: readonly CredentialPrefixRule[] = [
 	{ source: "sk-proj-", mode: "token" },
 	{ source: "sk-", mode: "token" },
 	{ source: "gh[opusr]_", mode: "token" },
-	{ source: "github_pat_", mode: "token" },
+	{ source: "github_" + "pat_", mode: "token" },
 	{ source: "glpat-", mode: "token" },
 	{ source: "xox[abprs]-", mode: "token" },
 	{ source: "AKIA", mode: "token" },

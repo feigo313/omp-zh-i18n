@@ -201,11 +201,11 @@ fn expand_history_args(
 
 	for arg in args {
 		if let Ok(expanded) = expand_history_arg(history, arg) {
-  				writeln!(stdout, "{expanded}")?;
-  			} else {
-  				writeln!(stderr, "history: {arg}: history expansion failed")?;
-  				result = ExecutionResult::general_error();
-  			}
+			writeln!(stdout, "{expanded}")?;
+		} else {
+			writeln!(stderr, "history: {arg}: history expansion failed")?;
+			result = ExecutionResult::general_error();
+		}
 	}
 
 	Ok(result)

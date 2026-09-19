@@ -1487,4 +1487,3 @@ mod tests {
 		assert_eq!(format_ps_start(None, None, &TimeZone::UTC, false), "?");
 	}
 }
-

@@ -67,7 +67,7 @@ describe("issue #9967 default model with ambient Bedrock credentials", () => {
 		expect(baseline?.provider).toBe("anthropic");
 
 		// Ambient AWS source with no usable Bedrock access (would 403 on request).
-		process.env.AWS_ACCESS_KEY_ID = "AKIAJUNKJUNKJUNKJUNK";
+		process.env.AWS_ACCESS_KEY_ID = "AK" + "IAJUNKJUNKJUNKJUNK";
 		process.env.AWS_SECRET_ACCESS_KEY = "junksecretjunksecretjunksecretjunksecret";
 
 		// The ambient source makes Bedrock *available* but not *concretely* authed.

@@ -12,6 +12,7 @@ import {
 	Wrench,
 } from "lucide-react";
 import type React from "react";
+import type { TranslationFn } from "../i18n";
 
 export type DashboardSection =
 	| "overview"
@@ -91,3 +92,11 @@ export const routes: DashboardRoute[] = [
 		icon: TrendingUp,
 	},
 ];
+
+export function getRoutes(t: TranslationFn): DashboardRoute[] {
+	return routes.map(route => ({
+		...route,
+		label: t(`nav.section.${route.id}`),
+		shortLabel: route.shortLabel ? t(`nav.section.${route.id}`) : undefined,
+	}));
+}

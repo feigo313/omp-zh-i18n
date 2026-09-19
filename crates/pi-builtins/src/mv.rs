@@ -852,7 +852,7 @@ fn move_files_into_dir(host: &mut Host, files: &[PathBuf], target_dir: &Path, op
 		#[cfg(not(unix))]
 		let hardlink_params = (None, None);
 
-		match rename(host, 
+		match rename(host,
 			sourcepath,
 			&targetpath,
 			options,
@@ -955,7 +955,7 @@ fn rename(
 
 	#[cfg(unix)]
 	{
-		rename_with_fallback(host, 
+		rename_with_fallback(host,
 			from,
 			to,
 			display_manager,
@@ -1051,7 +1051,7 @@ fn rename_with_fallback(
 					hardlink_tracker,
 					hardlink_scanner,
 					|tracker, scanner| {
-						rename_dir_fallback(host, 
+						rename_dir_fallback(host,
 							from,
 							to,
 							display_manager,
@@ -1179,7 +1179,7 @@ fn rename_dir_fallback(
 		.unwrap_or_else(|_| FxHashMap::default());
 
 	// Use directory copying (with or without hardlink support)
-	let result = copy_dir_contents(host, 
+	let result = copy_dir_contents(host,
 		from,
 		to,
 		#[cfg(unix)]
@@ -1220,7 +1220,7 @@ fn copy_dir_contents(
 	#[cfg(unix)]
 	{
 		if let (Some(tracker), Some(scanner)) = (hardlink_tracker, hardlink_scanner) {
-			copy_dir_contents_recursive(host, 
+			copy_dir_contents_recursive(host,
 				from,
 				to,
 				tracker,
@@ -1282,7 +1282,7 @@ fn copy_dir_contents_recursive(
 			// This prevents symlinks to directories from being expanded into full copies.
 			#[cfg(unix)]
 			{
-				copy_file_with_hardlinks_helper(host, 
+				copy_file_with_hardlinks_helper(host,
 					&from_path,
 					&to_path,
 					hardlink_tracker,
@@ -1301,7 +1301,7 @@ fn copy_dir_contents_recursive(
 
 			print_verbose(host, &from_path, &to_path);
 
-			copy_dir_contents_recursive(host, 
+			copy_dir_contents_recursive(host,
 				&from_path,
 				&to_path,
 				#[cfg(unix)]
@@ -1316,7 +1316,7 @@ fn copy_dir_contents_recursive(
 			// Copy file with or without hardlink support based on platform
 			#[cfg(unix)]
 			{
-				copy_file_with_hardlinks_helper(host, 
+				copy_file_with_hardlinks_helper(host,
 					&from_path,
 					&to_path,
 					hardlink_tracker,

@@ -78,7 +78,7 @@ Each entry in the array has these fields:
 
 ```yaml
 - type: plain
-  content: github_pat_abc123def456
+  content: <github-pat-redacted>
   friendlyName: GitHub Token
 ```
 

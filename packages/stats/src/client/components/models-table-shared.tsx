@@ -8,6 +8,7 @@
 import { format } from "@oh-my-pi/pi-utils/dates";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Line } from "react-chartjs-2";
+import { useTranslation } from "../i18n";
 import type { ChartTheme } from "./chart-shared";
 
 // Detail-table charts share the exact OMP chart chrome as the timeline charts;
@@ -250,6 +251,10 @@ export function TrendEmpty() {
 }
 
 /** Placeholder shown in the expanded detail-chart slot when data is missing. */
-export function DetailChartEmpty({ message = "No data available" }: { message?: string }) {
-	return <div className="h-full flex items-center justify-center text-[var(--text-muted)] text-sm">{message}</div>;
+export function DetailChartEmpty({ message }: { message?: string }) {
+	const { t } = useTranslation();
+	const displayMessage = message ?? t("common.noData");
+	return (
+		<div className="h-full flex items-center justify-center text-[var(--text-muted)] text-sm">{displayMessage}</div>
+	);
 }

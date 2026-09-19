@@ -17,6 +17,24 @@ function vcsError(code, message) {
 }
 
 /**
+ * Resolve a native VCS export. Staged JS and the prebuilt `.node` addon can
+ * drift (e.g. v18 wrapper on a v17 binary): missing exports must not throw a
+ * raw TypeError out of session switch / status-line paths.
+ */
+function nativeFn(name) {
+	const fn = api()[name];
+	return typeof fn === "function" ? fn : undefined;
+}
+
+function requireNativeFn(name) {
+	const fn = nativeFn(name);
+	if (!fn) {
+		throw vcsError("NativeUnavailable", `native binding \`${name}\` is unavailable (rebuild @oh-my-pi/pi-natives)`);
+	}
+	return fn;
+}
+
+/**
  * True when `error` is a native VCS failure. The native layer constructs these
  * on the JS thread as real `Error` objects with `name: "VcsError"`, a
  * machine-readable `code`, and `exitCode`/`stdout`/`stderr` properties — an
@@ -34,16 +52,22 @@ export function isEmptyCherryPick(error) {
 
 /** Discover the git repository containing `dir`; `null` outside any checkout. */
 export function git(dir) {
-	return api().vcsGitDiscover(dir);
+	const fn = nativeFn("vcsGitDiscover");
+	if (!fn) return null;
+	return fn(dir);
 }
 /** Discover the repository owning `dir`; `null` outside any repository. */
 export function repo(dir) {
-	return api().vcsDiscover(dir);
+	const fn = nativeFn("vcsDiscover");
+	if (!fn) return null;
+	return fn(dir);
 }
 
 /** Like {@link repo}, but equal-root jj+git ties prefer Jujutsu for display. Git-safe automation must keep using {@link repo}. */
 export function repoForDisplay(dir) {
-	return api().vcsDiscoverForDisplay(dir);
+	const fn = nativeFn("vcsDiscoverForDisplay");
+	if (!fn) return null;
+	return fn(dir);
 }
 
 /** Like {@link repo}, asserting any requested backend capabilities. */
@@ -72,37 +96,43 @@ export function requireGit(dir) {
 
 /** Repository metadata only (cheap fs walk) — for synchronous render paths. */
 export function gitInfo(dir) {
-	return api().vcsGitRepoInfo(dir);
+	const fn = nativeFn("vcsGitRepoInfo");
+	if (!fn) return null;
+	return fn(dir);
 }
 
 /** Discover the Jujutsu workspace containing `dir`; `null` when absent. */
 export function jj(dir) {
-	return api().vcsJjDiscover(dir);
+	const fn = nativeFn("vcsJjDiscover");
+	if (!fn) return null;
+	return fn(dir);
 }
 
 /** Whether jj is the nearest VCS ancestor, making git automation unsafe. */
 export function isPureJj(dir) {
-	return api().vcsIsPureJj(dir);
+	const fn = nativeFn("vcsIsPureJj");
+	if (!fn) return false;
+	return fn(dir);
 }
 
 /** Clone a repository (git CLI under the hood for credential parity). */
 export function clone(url, target, options = {}, signal) {
-	return api().vcsGitClone(url, target, options, signal);
+	return requireNativeFn("vcsGitClone")(url, target, options, signal);
 }
 
 /** Sever a copied working tree from shared git metadata. */
 export function detachGitDir(worktreeRoot, sourceCommonDir, signal) {
-	return api().vcsDetachGitDir(worktreeRoot, sourceCommonDir, signal);
+	return requireNativeFn("vcsDetachGitDir")(worktreeRoot, sourceCommonDir, signal);
 }
 
 /** Join patch fragments, preserving each part's trailing newline. */
 export function joinPatches(parts) {
-	return api().vcsJoinPatches(parts);
+	return requireNativeFn("vcsJoinPatches")(parts);
 }
 
 /** Validate hunk selections against a raw diff. */
 export function validateHunkSelections(rawDiff, selections) {
-	return api().vcsValidateHunkSelections(rawDiff, selections);
+	return requireNativeFn("vcsValidateHunkSelections")(rawDiff, selections);
 }
 
 /** Stat-poll interval for {@link watch}. */

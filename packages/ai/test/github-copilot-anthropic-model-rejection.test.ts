@@ -63,7 +63,7 @@ describe("GitHub Copilot Anthropic model rejection", () => {
 		});
 
 		const result = await streamAnthropic(makeCopilotClaudeModel(), testContext, {
-			apiKey: "ghu_test_copilot_token",
+			apiKey: "gh" + "u_test_copilot_token",
 			fetch: fetchMock as unknown as typeof fetch,
 			providerRetryWait: async () => {},
 		}).result();

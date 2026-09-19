@@ -161,7 +161,7 @@ pub fn is_readable(host: &mut Host, path: &Path) -> bool {
 }
 
 /// Remove a single file using safe traversal
-pub fn safe_remove_file(host: &mut Host, 
+pub fn safe_remove_file(host: &mut Host,
 	path: &Path,
 	options: &Options,
 	progress_bar: Option<&ProgressBar>,
@@ -193,7 +193,7 @@ pub fn safe_remove_file(host: &mut Host,
 }
 
 /// Remove an empty directory using safe traversal
-pub fn safe_remove_empty_dir(host: &mut Host, 
+pub fn safe_remove_empty_dir(host: &mut Host,
 	path: &Path,
 	options: &Options,
 	progress_bar: Option<&ProgressBar>,
@@ -235,7 +235,7 @@ fn handle_error_with_force(host: &mut Host, e: std::io::Error, path: &Path, opti
 }
 
 /// Helper to handle permission denied errors
-fn handle_permission_denied(host: &mut Host, 
+fn handle_permission_denied(host: &mut Host,
 	dir_fd: &DirFd,
 	entry_name: &OsStr,
 	entry_path: &Path,
@@ -258,7 +258,7 @@ fn handle_permission_denied(host: &mut Host,
 }
 
 /// Helper to handle unlink operation with error reporting
-fn handle_unlink(host: &mut Host, 
+fn handle_unlink(host: &mut Host,
 	dir_fd: &DirFd,
 	entry_name: &OsStr,
 	entry_path: &Path,
@@ -309,7 +309,7 @@ pub fn remove_dir_with_special_cases(host: &mut Host, path: &Path, options: &Opt
 	}
 }
 
-pub fn safe_remove_dir_recursive(host: &mut Host, 
+pub fn safe_remove_dir_recursive(host: &mut Host,
 	path: &Path,
 	options: &Options,
 	progress_bar: Option<&ProgressBar>,
@@ -1147,7 +1147,7 @@ fn is_writable_metadata(_metadata: &Metadata) -> bool {
 /// directory, remove all of its entries recursively and then remove the
 /// directory itself. In case of an error, print the error message to
 /// `stderr` and return `true`. If there were no errors, return `false`.
-fn remove_dir_recursive(host: &mut Host, 
+fn remove_dir_recursive(host: &mut Host,
 	path: &Path,
 	options: &Options,
 	progress_bar: Option<&ProgressBar>,
@@ -1361,7 +1361,7 @@ fn remove_file(host: &mut Host, path: &Path, options: &Options, progress_bar: Op
 			Err(e) => {
 				if e.kind() == io::ErrorKind::PermissionDenied {
 					// GNU compatibility (rm/fail-eacces.sh)
-					show_error!(host, 
+					show_error!(host,
 						"{}",
 						RmError::CannotRemovePermissionDenied(path.as_os_str().to_os_string())
 					);

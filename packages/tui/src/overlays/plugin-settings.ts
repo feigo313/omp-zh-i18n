@@ -17,6 +17,7 @@ import {
 	Text,
 } from "../index";
 import { logger } from "@oh-my-pi/pi-utils";
+import { tuiT } from "../i18n-host";
 import { getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme";
 import { shortenPath } from "../render/render-utils";
 import { OverlayPanel } from "../chrome/overlay-box";
@@ -148,7 +149,8 @@ async function buildPluginConfigItems(
 	for (const key in schemaSettings) {
 		const schema = schemaSettings[key];
 		const currentValue = settings[key] ?? schema.default;
-		const displayValue = schema.secret && currentValue ? "••••••••" : String(currentValue ?? "(not set)");
+		const displayValue =
+			schema.secret && currentValue ? "••••••••" : String(currentValue ?? tuiT("ui.plugins.notSet", "(not set)"));
 
 		if (schema.type === "boolean") {
 			items.push({
@@ -167,7 +169,7 @@ async function buildPluginConfigItems(
 				submenu: (cv, done) =>
 					createConfigEnumPanel(
 						key,
-						schema.description || `Select value for ${key}`,
+						schema.description || `${tuiT("ui.plugins.selectValueFor", "Select value for")} ${key}`,
 						schema.values,
 						cv,
 						value => {
@@ -231,15 +233,36 @@ export class PluginListComponent extends OverlayPanel {
 		private readonly entries: ReadonlyArray<PluginListEntry>,
 		callbacks: PluginListCallbacks,
 	) {
-		super("Plugins");
+		super(tuiT("ui.plugins.title", "Plugins"));
 		this.addChild(new Spacer(1));
 
 		if (entries.length === 0) {
-			this.addChild(new Text(theme.fg("muted", "No plugins installed"), 0, 0));
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("dim", "Install npm plugins:        omp plugin install <package>"), 0, 0));
 			this.addChild(
-				new Text(theme.fg("dim", "Install marketplace plugins: omp plugin install <name>@<marketplace>"), 0, 0),
+				new Text(theme.fg("muted", tuiT("ui.plugins.noPluginsInstalled", "No plugins installed")), 0, 0),
+			);
+			this.addChild(new Spacer(1));
+			this.addChild(
+				new Text(
+					theme.fg(
+						"dim",
+						tuiT("ui.plugins.installNpm", "Install npm plugins:        omp plugin install <package>"),
+					),
+					0,
+					0,
+				),
+			);
+			this.addChild(
+				new Text(
+					theme.fg(
+						"dim",
+						tuiT(
+							"ui.plugins.installMarketplace",
+							"Install marketplace plugins: omp plugin install <name>@<marketplace>",
+						),
+					),
+					0,
+					0,
+				),
 			);
 			this.addChild(new Spacer(1));
 
@@ -270,7 +293,9 @@ export class PluginListComponent extends OverlayPanel {
 
 		this.addChild(this.#selectList);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "Enter to configure · Esc to go back"), 0, 0));
+		this.addChild(
+			new Text(theme.fg("dim", tuiT("ui.plugins.enterToConfigure", "Enter to configure · Esc to go back")), 0, 0),
+		);
 	}
 
 	#renderItem(entry: PluginListEntry): SelectItem {
@@ -286,7 +311,7 @@ export class PluginListComponent extends OverlayPanel {
 
 			let details = `${kindBadge} ${theme.sep.dot} v${p.version}`;
 			if (featureCount > 0) {
-				details += ` ${theme.sep.dot} ${enabledCount}/${featureCount} features`;
+				details += ` ${theme.sep.dot} ${enabledCount}/${featureCount} ${tuiT("ui.plugins.features", "features")}`;
 			}
 
 			return {
@@ -305,7 +330,7 @@ export class PluginListComponent extends OverlayPanel {
 
 		let details = `${kindBadge} ${scopeTag} ${theme.sep.dot} v${version}`;
 		if (summary.shadowedBy) {
-			details += ` ${theme.sep.dot} shadowed by ${summary.shadowedBy}`;
+			details += ` ${theme.sep.dot} ${tuiT("ui.plugins.shadowedBy", "shadowed by")} ${summary.shadowedBy}`;
 		}
 
 		return {
@@ -365,8 +390,8 @@ export class PluginDetailComponent extends OverlayPanel {
 		// Enable/disable toggle
 		items.push({
 			id: "__enabled__",
-			label: "Enabled",
-			description: "Enable or disable this plugin",
+			label: tuiT("ui.plugins.enabled", "Enabled"),
+			description: tuiT("ui.plugins.enableOrDisable", "Enable or disable this plugin"),
 			currentValue: plugin.enabled ? "true" : "false",
 			values: ["true", "false"],
 		});
@@ -512,25 +537,51 @@ export class MarketplacePluginDetailComponent extends OverlayPanel {
 			{
 				id: "__enabled__",
 				label: "Enabled",
-				description: "Enable or disable this marketplace plugin",
+				description: tuiT("ui.plugins.enableOrDisableMarketplace", "Enable or disable this marketplace plugin"),
 				currentValue: marketplaceEnabled(plugin) ? "true" : "false",
 				values: ["true", "false"],
 			},
 			...configItems,
 		];
 		const summary: Component[] = [
-			new Text(theme.fg("dim", `version       ${entry?.version ?? "(unknown)"}`), 0, 0),
-			new Text(theme.fg("dim", `scope         ${plugin.scope}`), 0, 0),
 			new Text(
-				theme.fg("dim", `install path  ${entry?.installPath ? shortenPath(entry.installPath) : "(unknown)"}`),
+				theme.fg(
+					"dim",
+					`${tuiT("ui.plugins.metaVersion", "version       ")}${entry?.version ?? tuiT("ui.plugins.unknown", "(unknown)")}`,
+				),
 				0,
 				0,
 			),
-			new Text(theme.fg("dim", `installed at  ${entry?.installedAt ?? "(unknown)"}`), 0, 0),
-			new Text(theme.fg("dim", `last updated  ${entry?.lastUpdated ?? "(unknown)"}`), 0, 0),
+			new Text(theme.fg("dim", `${tuiT("ui.plugins.metaScope", "scope         ")}${plugin.scope}`), 0, 0),
+			new Text(
+				theme.fg(
+					"dim",
+					`${tuiT("ui.plugins.metaInstallPath", "install path  ")}${entry?.installPath ? shortenPath(entry.installPath) : tuiT("ui.plugins.unknown", "(unknown)")}`,
+				),
+				0,
+				0,
+			),
+			new Text(
+				theme.fg(
+					"dim",
+					`${tuiT("ui.plugins.metaInstalledAt", "installed at  ")}${entry?.installedAt ?? tuiT("ui.plugins.unknown", "(unknown)")}`,
+				),
+				0,
+				0,
+			),
+			new Text(
+				theme.fg(
+					"dim",
+					`${tuiT("ui.plugins.metaLastUpdated", "last updated  ")}${entry?.lastUpdated ?? tuiT("ui.plugins.unknown", "(unknown)")}`,
+				),
+				0,
+				0,
+			),
 		];
 		if (entry?.gitCommitSha) {
-			summary.push(new Text(theme.fg("dim", `git sha       ${entry.gitCommitSha}`), 0, 0));
+			summary.push(
+				new Text(theme.fg("dim", `${tuiT("ui.plugins.metaGitSha", "git sha       ")}${entry.gitCommitSha}`), 0, 0),
+			);
 		}
 		summary.push(new Spacer(1));
 		this.#settingsList = new SettingsFormField({
@@ -572,7 +623,7 @@ export class MarketplacePluginDetailComponent extends OverlayPanel {
 // =============================================================================
 
 /** Shared footer hint for plugin detail lists. */
-const DETAIL_FOOTER_HINT = "Enter to edit · Esc to go back";
+const DETAIL_FOOTER_HINT = tuiT("ui.plugins.enterToEdit", "Enter to edit · Esc to go back");
 
 /**
  * Thin OverlayPanel boundary around a shared form field. The panel title stays
@@ -631,7 +682,7 @@ function createConfigEnumPanel(
 		currentValue,
 		maxVisible: 8,
 		selectTheme: getSelectListTheme(),
-		hint: "Enter to select · Esc to cancel",
+		hint: tuiT("ui.plugins.enterToSelect", "Enter to select · Esc to cancel"),
 		onSubmit: onSelect,
 		onCancel,
 		requestRender,
@@ -660,7 +711,7 @@ function createConfigInputPanel(
 		secret: schema.secret,
 		initialValue: !schema.secret ? currentValue : undefined,
 		empty: "cancel",
-		hint: "Enter to save · Esc to cancel",
+		hint: tuiT("ui.plugins.enterToSave", "Enter to save · Esc to cancel"),
 		onSubmit,
 		onCancel,
 		requestRender,

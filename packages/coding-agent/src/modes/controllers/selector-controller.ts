@@ -32,6 +32,7 @@ import {
 	getPluginsCacheDir,
 	MarketplaceManager,
 } from "../../extensibility/plugins/marketplace";
+import { i18n } from "../../i18n";
 import {
 	getAvailableThemes,
 	getSymbolTheme,
@@ -128,6 +129,7 @@ import { TreeSelectorComponent } from "@oh-my-pi/pi-tui/overlays/tree-selector";
 import { UsageDashboardComponent } from "@oh-my-pi/pi-tui/overlays/usage-dashboard";
 import { renderUsageReports } from "./command-controller";
 import type { SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
+import { invalidateTipsCache } from "@oh-my-pi/pi-tui/prompt/welcome";
 
 const MANUAL_LOGIN_PROMPT = "Paste the authorization code (or full redirect URL), then press Enter:";
 
@@ -816,6 +818,14 @@ export class SelectorController {
 			case "colorBlindMode": {
 				setColorBlindMode(value === "true" || value === true).then(() => {
 					this.ctx.ui.invalidate();
+				});
+				break;
+			}
+			case "i18n.language": {
+				const lang = typeof value === "string" ? value : String(value);
+				void i18n.setLanguage(lang).then(() => {
+					invalidateTipsCache();
+					this.ctx.ui.requestRender();
 				});
 				break;
 			}

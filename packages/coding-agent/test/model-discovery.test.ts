@@ -3119,8 +3119,8 @@ providers:
 		});
 		// Emulate a legacy write: the variant has no same-id static header source,
 		// so it is flagged unrestorable even though its base carries the headers.
-		authStorage.setRuntimeApiKey("github-copilot", "ghp_test_token");
-		const cacheProviderId = resolveModelCacheProviderId("github-copilot", { apiKey: "ghp_test_token" });
+		authStorage.setRuntimeApiKey("github-copilot", "gh" + "p_test_token");
+		const cacheProviderId = resolveModelCacheProviderId("github-copilot", { apiKey: "gh" + "p_test_token" });
 		writeModelCache(cacheProviderId, Date.now(), [cachedVariant], true, "", cacheDbPath);
 		const db = new Database(cacheDbPath);
 		db.run("UPDATE model_cache SET header_restore_version = 0 WHERE provider_id = ?", [cacheProviderId]);

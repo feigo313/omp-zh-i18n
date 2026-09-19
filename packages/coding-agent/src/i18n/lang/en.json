@@ -1,0 +1,78 @@
+{
+  "meta": {
+    "version": "16.2.2",
+    "lastUpdated": "2026-06-28",
+    "completeness": 100,
+    "description": "English translation file (reference)"
+  },
+  "errors": {
+    "file_not_found": "File not found: {path}",
+    "permission_denied": "Permission denied: {path}",
+    "invalid_config": "Invalid configuration: {key}",
+    "command_failed": "Command failed: {command}",
+    "network_error": "Network error: {message}",
+    "timeout": "Operation timeout: {operation}",
+    "parse_error": "Parse error: {file}"
+  },
+  "tools": {
+    "read": {
+      "description": "Read file contents",
+      "status_reading": "Reading...",
+      "status_success": "Read {path}",
+      "status_error": "Read failed"
+    },
+    "write": {
+      "description": "Write file",
+      "status_writing": "Writing...",
+      "status_success": "Wrote {path}",
+      "status_error": "Write failed"
+    },
+    "edit": {
+      "description": "Edit file",
+      "status_editing": "Editing...",
+      "status_success": "Edited {path}",
+      "status_error": "Edit failed"
+    },
+    "bash": {
+      "description": "Execute Bash command",
+      "status_running": "Running...",
+      "status_success": "Command completed",
+      "status_error": "Command failed",
+      "status_timeout": "Command timeout"
+    },
+    "grep": {
+      "description": "Search file contents",
+      "status_searching": "Searching...",
+      "status_success": "Search completed",
+      "status_no_results": "No matches found"
+    },
+    "glob": {
+      "description": "Search file paths",
+      "status_searching": "Searching files...",
+      "status_success": "Search completed",
+      "status_no_results": "No matching files found"
+    }
+  },
+  "ui": {
+    "loading": "Loading...",
+    "processing": "Processing...",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "yes": "Yes",
+    "no": "No",
+    "error": "Error",
+    "warning": "Warning",
+    "info": "Info",
+    "success": "Success",
+    "retry": "Retry",
+    "abort": "Abort"
+  },
+  "cli": {
+    "version": "Version",
+    "help": "Help",
+    "usage": "Usage",
+    "options": "Options",
+    "commands": "Commands",
+    "examples": "Examples"
+  }
+}

@@ -29,6 +29,7 @@ import type {
 	StatusLineSegmentId,
 	StatusLineSeparatorStyle,
 } from "../status-line/schema";
+import { tuiLanguage, tuiT } from "../i18n-host";
 import {
 	SETTING_TABS,
 	TAB_METADATA,
@@ -43,7 +44,35 @@ import { type ComposerPreviewStatusSource, ComposerShapePreview } from "./compos
 import { getComposerShapeOptions } from "./composer-shape-registry";
 import { bottomBorder, divider, row, topBorder } from "../chrome/overlay-box";
 import { PluginSettingsComponent, type PluginSettingsHost } from "./plugin-settings";
-import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
+import { getSettingDef, getSettingsForTab, type SettingDef, type SubmenuSettingDef } from "./settings-defs";
+
+// Translation bridge: the fork's settings hooks were written against the
+// coding-agent i18n runtime; here they resolve through the injected host
+// translator instead. Unregistered host (tests, SDK, English) → fallbacks.
+const i18n = {
+	getLanguage: (): string => tuiLanguage(),
+	t: (key: string, fallback?: string, params?: Record<string, unknown>): string => tuiT(key, fallback ?? key, params),
+};
+
+/** Intercept a settings tab label (key: `tabs.<tab>.label`). */
+function interceptTabLabel(tab: string, englishLabel: string): string {
+	return tuiT(`tabs.${tab}.label`, englishLabel);
+}
+
+/** Intercept the plugins tab label (key: `tabs.plugins.label`). */
+function interceptPluginsLabel(englishLabel: string): string {
+	return tuiT("tabs.plugins.label", englishLabel);
+}
+
+/** Intercept a settings section group heading (key: `tabs.<tab>.groups.<group>`). */
+function interceptGroupLabel(tab: string, group: string): string {
+	return tuiT(`tabs.${tab}.groups.${group}`, group);
+}
+
+/** Intercept a fixed UI string with an explicit English fallback. */
+function interceptUIString(key: string, english: string, params?: Record<string, unknown>): string {
+	return tuiT(key, english, params);
+}
 import { SnapcompactShapePreview } from "./snapcompact-shape-preview";
 import { getPreset } from "../status-line/presets";
 import { FormField, SelectFormField, TextFormField } from "../components/form";
@@ -430,9 +459,9 @@ function getSettingsTabs(): Tab[] {
 		...SETTING_TABS.map(id => {
 			const meta = TAB_METADATA[id];
 			const icon = theme.symbol(meta.icon);
-			return { id, label: `${icon} ${meta.label}`, short: icon };
+			return { id, label: `${icon} ${interceptTabLabel(id, meta.label)}`, short: icon };
 		}),
-		{ id: "plugins", label: `${theme.icon.package} Plugins`, short: theme.icon.package },
+		{ id: "plugins", label: `${theme.icon.package} ${interceptPluginsLabel("Plugins")}`, short: theme.icon.package },
 	];
 }
 
@@ -507,6 +536,7 @@ export class SettingsSelectorComponent implements Component {
 	#searchFirstMatch = new Map<string, string>();
 	#textInputActive = false;
 	#hasSectionJump = false;
+	#lastLanguage = "";
 	// Frame geometry from the last render, for mouse hit-testing (the
 	// fullscreen overlay paints from screen row 0, so mouse rows map 1:1).
 	#tabRowStart = 0;
@@ -568,16 +598,28 @@ export class SettingsSelectorComponent implements Component {
 
 	#footerHintText(): string {
 		if (this.#searchList) {
-			return "Enter to change · Tab to jump tabs · Esc to exit search";
+			return interceptUIString(
+				"ui.settings.footer.search",
+				"Enter to change · Tab to jump tabs · Esc to exit search",
+			);
 		}
 		if (this.#currentTabId === "plugins") {
-			return "Tab to switch tabs · Esc to close";
+			return interceptUIString("ui.settings.footer.plugins", "Tab to switch tabs · Esc to close");
 		}
 		if (this.#currentList?.sectionFocused) {
-			return "↑/↓ to jump sections · Tab/Enter to settings · ←/→ to switch tabs · Esc to close";
+			return interceptUIString(
+				"ui.settings.footer.sectionFocus",
+				"↑/↓ to jump sections · Tab/Enter to settings · ←/→ to switch tabs · Esc to close",
+			);
 		}
-		const nav = this.#hasSectionJump ? "Tab to jump sections · ←/→ to switch tabs" : "Tab to switch tabs";
-		return `Enter/Space to change · ${nav} · Type to search · Esc to close`;
+		const nav = this.#hasSectionJump
+			? interceptUIString("ui.settings.footer.withSectionsNav", "Tab to jump sections · ←/→ to switch tabs")
+			: interceptUIString("ui.settings.footer.withoutSectionsNav", "Tab to switch tabs");
+		return interceptUIString(
+			"ui.settings.footer.main",
+			`Enter/Space to change · ${nav} · Type to search · Esc to close`,
+			{ nav },
+		);
 	}
 
 	/** Single-line search banner: accent icon, editable query with live cursor, right-aligned match count. */
@@ -601,11 +643,19 @@ export class SettingsSelectorComponent implements Component {
 	render(width: number): readonly string[] {
 		const height = Math.max(14, process.stdout.rows || 40);
 		const innerWidth = Math.max(1, width - 4);
+		const currentLang = i18n.getLanguage();
+		if (this.#lastLanguage && this.#lastLanguage !== currentLang) {
+			this.#tabBar.setTabs(getSettingsTabs(), this.#currentTabId);
+			if (this.#currentTabId !== "plugins") this.#showSettingsTab(this.#currentTabId);
+		}
+		this.#lastLanguage = currentLang;
 
 		const tabLines = this.#tabBar.render(innerWidth);
 		const searching = this.#searchList !== null;
 		const showPreview = !searching && this.#currentTabId === "appearance";
-		const previewLines = showPreview ? ["", theme.fg("muted", "Preview:"), this.#getStatusPreviewString()] : [];
+		const previewLines = showPreview
+			? ["", theme.fg("muted", interceptUIString("ui.settings.preview", "Preview:")), this.#getStatusPreviewString()]
+			: [];
 
 		// Fixed chrome: top border, tabs, divider, [search row], divider, hint, bottom border.
 		const fixedRows = 1 + tabLines.length + 1 + (searching ? 1 : 0) + 1 + 1 + 1;
@@ -624,7 +674,7 @@ export class SettingsSelectorComponent implements Component {
 		}
 
 		const out: string[] = [];
-		out.push(topBorder(width, "Settings"));
+		out.push(topBorder(width, interceptUIString("ui.settings.title", "Settings")));
 		this.#tabRowStart = out.length;
 		this.#tabRowCount = tabLines.length;
 		for (const line of tabLines) {
@@ -731,7 +781,7 @@ export class SettingsSelectorComponent implements Component {
 			{
 				layout: "flat",
 				typeToSearch: false,
-				emptyText: "No matching settings",
+				emptyText: interceptUIString("ui.settings.noResults", "No matching settings"),
 				hint: "",
 			},
 		);
@@ -785,7 +835,7 @@ export class SettingsSelectorComponent implements Component {
 			const meta = TAB_METADATA[result.tab];
 			items.push({
 				id: `__tab:${result.tab}`,
-				label: `${theme.symbol(meta.icon)} ${meta.label}`,
+				label: `${theme.symbol(meta.icon)} ${interceptTabLabel(result.tab, meta.label)}`,
 				currentValue: "",
 				heading: true,
 			});
@@ -835,19 +885,23 @@ export class SettingsSelectorComponent implements Component {
 			const icon = theme.symbol(meta.icon);
 			const count = counts.get(id) ?? 0;
 			if (count > 0) {
-				matched.push({ id, label: `${icon} ${meta.label} (${count})`, short: `${icon} ${count}` });
+				matched.push({
+					id,
+					label: `${icon} ${interceptTabLabel(id, meta.label)} (${count})`,
+					short: `${icon} ${count}`,
+				});
 			}
 		}
 		for (const id of SETTING_TABS) {
 			if (matchedIds.has(id)) continue;
 			const meta = TAB_METADATA[id];
 			const icon = theme.symbol(meta.icon);
-			empty.push({ id, label: `${icon} ${meta.label}`, short: icon, muted: true });
+			empty.push({ id, label: `${icon} ${interceptTabLabel(id, meta.label)}`, short: icon, muted: true });
 		}
 		// Plugins hosts its own UI; it is not part of the schema-backed search.
 		empty.push({
 			id: "plugins",
-			label: `${theme.icon.package} Plugins`,
+			label: `${theme.icon.package} ${interceptPluginsLabel("Plugins")}`,
 			short: theme.icon.package,
 			muted: true,
 		});
@@ -909,7 +963,7 @@ export class SettingsSelectorComponent implements Component {
 			case "submenu":
 				return {
 					...item,
-					currentValue: this.#getSubmenuCurrentValue(def.path, currentValue),
+					currentValue: this.#getSubmenuCurrentValue(def.path, currentValue, def),
 					submenu: (cv, done) => this.#createSubmenu(def, cv, done),
 				};
 
@@ -954,7 +1008,7 @@ export class SettingsSelectorComponent implements Component {
 		return !Object.is(currentValue, defaultValue);
 	}
 
-	#getSubmenuCurrentValue(path: string, value: unknown): string {
+	#getSubmenuCurrentValue(path: string, value: unknown, def?: SubmenuSettingDef): string {
 		const rawValue = String(value ?? "");
 		if (path === "compaction.thresholdPercent" && (rawValue === "-1" || rawValue === "")) {
 			return "default";
@@ -962,6 +1016,9 @@ export class SettingsSelectorComponent implements Component {
 		if (path === "compaction.thresholdTokens" && (rawValue === "-1" || rawValue === "")) {
 			return "default";
 		}
+		const option = def?.options.find(item => item.value === rawValue);
+		if (option?.label) return option.label;
+		if (path === "theme.dark" || path === "theme.light") return i18n.t(`themes.${rawValue}.label`, rawValue);
 		return rawValue;
 	}
 
@@ -984,7 +1041,7 @@ export class SettingsSelectorComponent implements Component {
 				return baseOpt || { value: level, label: level };
 			});
 		} else if (def.path === "theme.dark" || def.path === "theme.light") {
-			options = this.#context.availableThemes.map(t => ({ value: t, label: t }));
+			options = this.#context.availableThemes.map(t => ({ value: t, label: i18n.t(`themes.${t}.label`, t) }));
 		} else if (def.path === "composer.shape") {
 			options = getComposerShapeOptions();
 		}
@@ -1276,7 +1333,12 @@ export class SettingsSelectorComponent implements Component {
 			const item = this.#defToItem(def);
 			if (!item) continue;
 			if (def.group && def.group !== lastGroup) {
-				items.push({ id: `__heading:${def.group}`, label: def.group, currentValue: "", heading: true });
+				items.push({
+					id: `__heading:${def.group}`,
+					label: interceptGroupLabel(def.tab, def.group),
+					currentValue: "",
+					heading: true,
+				});
 				lastGroup = def.group;
 			}
 			items.push(item);

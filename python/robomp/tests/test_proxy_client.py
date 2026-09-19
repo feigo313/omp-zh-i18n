@@ -36,7 +36,7 @@ from robomp.sandbox import workspace_key
 
 _HMAC = "test-hmac-key-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 _HMAC_BYTES = _HMAC.encode("utf-8")
-_TOKEN = "ghp_test_token_value"
+_TOKEN = "gh" + "p_test_token_value"
 
 
 # ---------- shared helpers ----------

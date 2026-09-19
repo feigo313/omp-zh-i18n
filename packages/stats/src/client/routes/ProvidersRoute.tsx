@@ -20,6 +20,7 @@ import {
 	formatTokensPerSecond,
 } from "../data/formatters";
 import { useResource } from "../data/useResource";
+import { type TranslationFn, useTranslation } from "../i18n";
 import type {
 	ProviderAggregate,
 	ProviderDashboardStats,
@@ -38,6 +39,7 @@ export interface ProvidersRouteProps {
 }
 
 export function ProvidersRoute({ active, range, refreshTrigger }: ProvidersRouteProps) {
+	const { t, locale } = useTranslation();
 	const {
 		data: stats,
 		error,
@@ -52,11 +54,11 @@ export function ProvidersRoute({ active, range, refreshTrigger }: ProvidersRoute
 			<AsyncBoundary loading={loading} error={error} data={stats}>
 				{stats && (
 					<>
-						<ProviderTotalsPanel providers={stats.providers} />
-						<ProviderTrendPanel stats={stats} />
-						<PeakHoursPanel hourly={stats.hourly} providers={stats.providers} />
-						<WindowInsightsPanel insights={stats.windowInsights} />
-						<WindowUtilizationPanel usageSeries={stats.usageSeries} />
+						<ProviderTotalsPanel providers={stats.providers} t={t} />
+						<ProviderTrendPanel stats={stats} t={t} />
+						<PeakHoursPanel hourly={stats.hourly} providers={stats.providers} t={t} />
+						<WindowInsightsPanel insights={stats.windowInsights} t={t} />
+						<WindowUtilizationPanel usageSeries={stats.usageSeries} t={t} locale={locale} />
 					</>
 				)}
 			</AsyncBoundary>
@@ -68,7 +70,7 @@ export function ProvidersRoute({ active, range, refreshTrigger }: ProvidersRoute
 // Provider totals
 // ---------------------------------------------------------------------------
 
-function ProviderTotalsPanel({ providers }: { providers: ProviderAggregate[] }) {
+function ProviderTotalsPanel({ providers, t }: { providers: ProviderAggregate[]; t: TranslationFn }) {
 	const grandTotal = useMemo(() => providers.reduce((sum, p) => sum + p.totalTokens, 0), [providers]);
 	const unpricedRequests = useMemo(
 		() => providers.reduce((sum, provider) => sum + provider.unpricedRequests, 0),
@@ -76,22 +78,32 @@ function ProviderTotalsPanel({ providers }: { providers: ProviderAggregate[] }) 
 	);
 
 	const columns: DataTableColumn<ProviderAggregate>[] = [
-		{ key: "provider", header: "Provider", render: p => <span className="font-medium">{p.provider}</span> },
-		{ key: "requests", header: "Requests", numeric: true, render: p => formatInteger(p.totalRequests) },
+		{ key: "provider", header: t("common.provider"), render: p => <span className="font-medium">{p.provider}</span> },
+		{
+			key: "requests",
+			header: t("providers.columns.requests"),
+			numeric: true,
+			render: p => formatInteger(p.totalRequests),
+		},
 		{
 			key: "errors",
-			header: "Error Rate",
+			header: t("metric.errorRate"),
 			numeric: true,
 			render: p => formatPercent(p.totalRequests > 0 ? p.failedRequests / p.totalRequests : 0),
 		},
-		{ key: "models", header: "Models", numeric: true, render: p => formatInteger(p.models) },
+		{ key: "models", header: t("providers.columns.models"), numeric: true, render: p => formatInteger(p.models) },
 		{
 			key: "tokens",
-			header: "Tokens",
+			header: t("common.tokens"),
 			numeric: true,
 			render: p => (
 				<span
-					title={`Input ${formatCompact(p.totalInputTokens)} · Output ${formatCompact(p.totalOutputTokens)} · Cache read ${formatCompact(p.totalCacheReadTokens)} · Cache write ${formatCompact(p.totalCacheWriteTokens)}`}
+					title={t("providers.tooltip.tokenBreakdown", {
+						input: formatCompact(p.totalInputTokens),
+						output: formatCompact(p.totalOutputTokens),
+						cacheRead: formatCompact(p.totalCacheReadTokens),
+						cacheWrite: formatCompact(p.totalCacheWriteTokens),
+					})}
 				>
 					{formatCompact(p.totalTokens)}
 				</span>
@@ -99,7 +111,7 @@ function ProviderTotalsPanel({ providers }: { providers: ProviderAggregate[] }) 
 		},
 		{
 			key: "share",
-			header: "Share",
+			header: t("providers.columns.share"),
 			numeric: true,
 			render: p => formatPercent(grandTotal > 0 ? p.totalTokens / grandTotal : 0),
 		},
@@ -125,7 +137,7 @@ function ProviderTotalsPanel({ providers }: { providers: ProviderAggregate[] }) 
 				columns={columns}
 				data={providers}
 				keyExtractor={p => p.provider}
-				emptyText="No requests recorded in this range"
+				emptyText={t("providers.noRequests")}
 			/>
 		</Panel>
 	);
@@ -135,7 +147,7 @@ function ProviderTotalsPanel({ providers }: { providers: ProviderAggregate[] }) 
 // Token / cost trend by provider
 // ---------------------------------------------------------------------------
 
-function ProviderTrendPanel({ stats }: { stats: ProviderDashboardStats }) {
+function ProviderTrendPanel({ stats, t }: { stats: ProviderDashboardStats; t: TranslationFn }) {
 	const [metric, setMetric] = useState<"tokens" | "cost">("tokens");
 	const theme = useSystemTheme();
 	const chartTheme = CHART_THEMES[theme];
@@ -174,7 +186,7 @@ function ProviderTrendPanel({ stats }: { stats: ProviderDashboardStats }) {
 				footer: items => {
 					if (items.length < 2) return undefined;
 					const total = items.reduce((sum, item) => sum + (item.parsed.y ?? 0), 0);
-					return `Total: ${formatValue(total)}`;
+					return t("providers.total", { value: formatValue(total) });
 				},
 			}),
 			scales: {
@@ -203,8 +215,8 @@ function ProviderTrendPanel({ stats }: { stats: ProviderDashboardStats }) {
 			actions={
 				<SegmentedControl
 					options={[
-						{ value: "tokens" as const, label: "Tokens" },
-						{ value: "cost" as const, label: "API-equivalent estimate" },
+						{ value: "tokens" as const, label: t("common.tokens") },
+						{ value: "cost" as const, label: t("costs.apiEquivalent") },
 					]}
 					value={metric}
 					onChange={setMetric}
@@ -213,7 +225,7 @@ function ProviderTrendPanel({ stats }: { stats: ProviderDashboardStats }) {
 		>
 			<div className="h-[300px]">
 				{chartData.labels.length === 0 ? (
-					<EmptyState message="No provider activity in this range" />
+					<EmptyState message={t("providers.noActivity")} />
 				) : (
 					<Bar data={data} options={options} />
 				)}
@@ -228,7 +240,15 @@ function ProviderTrendPanel({ stats }: { stats: ProviderDashboardStats }) {
 
 const ALL_PROVIDERS = "__all__";
 
-function PeakHoursPanel({ hourly, providers }: { hourly: ProviderHourlyPoint[]; providers: ProviderAggregate[] }) {
+function PeakHoursPanel({
+	hourly,
+	providers,
+	t,
+}: {
+	hourly: ProviderHourlyPoint[];
+	providers: ProviderAggregate[];
+	t: TranslationFn;
+}) {
 	const [provider, setProvider] = useState(ALL_PROVIDERS);
 	const theme = useSystemTheme();
 	const chartTheme = CHART_THEMES[theme];
@@ -254,7 +274,7 @@ function PeakHoursPanel({ hourly, providers }: { hourly: ProviderHourlyPoint[]; 
 			labels: Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`),
 			datasets: [
 				{
-					label: "Tokens",
+					label: t("common.tokens"),
 					data: tokensByHour,
 					...barDatasetStyle(MODEL_COLORS[2]),
 					// Highlight the peak hour in the brand accent color.
@@ -273,7 +293,7 @@ function PeakHoursPanel({ hourly, providers }: { hourly: ProviderHourlyPoint[]; 
 			plugins: buildSharedPlugins({
 				chartTheme,
 				showLegend: false,
-				defaultLabel: "Tokens",
+				defaultLabel: t("common.tokens"),
 				formatValue: formatCompact,
 			}),
 			scales: { x: sharedScaleBase, y: yScale },
@@ -282,20 +302,20 @@ function PeakHoursPanel({ hourly, providers }: { hourly: ProviderHourlyPoint[]; 
 
 	return (
 		<Panel
-			title="Peak Burn Hours"
+			title={t("providers.peak.title")}
 			subtitle={
 				hasData
-					? `Token burn by local hour of day — peak at ${String(peakHour).padStart(2, "0")}:00`
-					: "Token burn by local hour of day"
+					? t("providers.peak.subtitlePeak", { hour: `${String(peakHour).padStart(2, "0")}:00` })
+					: t("providers.peak.subtitle")
 			}
 			actions={
 				<select
 					className="stats-select"
 					value={provider}
 					onChange={e => setProvider(e.target.value)}
-					aria-label="Provider"
+					aria-label={t("common.provider")}
 				>
-					<option value={ALL_PROVIDERS}>All providers</option>
+					<option value={ALL_PROVIDERS}>{t("providers.all")}</option>
 					{providers.map(p => (
 						<option key={p.provider} value={p.provider}>
 							{p.provider}
@@ -305,7 +325,7 @@ function PeakHoursPanel({ hourly, providers }: { hourly: ProviderHourlyPoint[]; 
 			}
 		>
 			<div className="h-[260px]">
-				{hasData ? <Bar data={data} options={options} /> : <EmptyState message="No activity in this range" />}
+				{hasData ? <Bar data={data} options={options} /> : <EmptyState message={t("providers.noActivity")} />}
 			</div>
 		</Panel>
 	);
@@ -315,58 +335,57 @@ function PeakHoursPanel({ hourly, providers }: { hourly: ProviderHourlyPoint[]; 
 // Subscription window insights
 // ---------------------------------------------------------------------------
 
-function WindowInsightsPanel({ insights }: { insights: ProviderWindowInsight[] }) {
+function WindowInsightsPanel({ insights, t }: { insights: ProviderWindowInsight[]; t: TranslationFn }) {
 	const columns: DataTableColumn<ProviderWindowInsight>[] = [
-		{ key: "provider", header: "Provider", render: i => <span className="font-medium">{i.provider}</span> },
-		{ key: "window", header: "Window", render: i => i.windowLabel },
-		{ key: "accounts", header: "Accounts", numeric: true, render: i => formatInteger(i.accounts) },
+		{ key: "provider", header: t("common.provider"), render: i => <span className="font-medium">{i.provider}</span> },
+		{ key: "window", header: t("providers.columns.window"), render: i => i.windowLabel },
+		{
+			key: "accounts",
+			header: t("providers.columns.accounts"),
+			numeric: true,
+			render: i => formatInteger(i.accounts),
+		},
 		{
 			key: "consumed",
-			header: "Windows Burned",
+			header: t("providers.columns.windowsBurned"),
 			numeric: true,
-			render: i => (
-				<span title="Subscription-window equivalents consumed in range (sum of used-fraction increases across accounts)">
-					{i.fractionConsumed.toFixed(2)}
-				</span>
-			),
+			render: i => <span title={t("providers.tooltip.windowsBurned")}>{i.fractionConsumed.toFixed(2)}</span>,
 		},
 		{
 			key: "capacity",
-			header: "Est. Tokens / Window",
+			header: t("providers.columns.estTokensPerWindow"),
 			numeric: true,
 			render: i => (
-				<span title="Provider tokens burned in range ÷ windows burned — what one full window is worth">
+				<span title={t("providers.tooltip.estTokensPerWindow")}>
 					{i.estTokensPerWindow !== null ? formatCompact(i.estTokensPerWindow) : "—"}
 				</span>
 			),
 		},
 		{
 			key: "peak",
-			header: "Peak Utilization",
+			header: t("providers.columns.peakUtilization"),
 			numeric: true,
 			render: i => (
-				<span title="Peak of summed used fraction across accounts at any sampled instant">
-					{formatPercent(i.peakConcurrentFraction)}
-				</span>
+				<span title={t("providers.tooltip.peakUtilization")}>{formatPercent(i.peakConcurrentFraction)}</span>
 			),
 		},
 		{
 			key: "ideal",
-			header: "Ideal Accounts",
+			header: t("providers.columns.idealAccounts"),
 			numeric: true,
 			render: i => (
 				<span
-					title="Accounts needed to keep peak demand under 90% of fleet capacity"
+					title={t("providers.tooltip.idealAccounts")}
 					className={i.idealAccounts > i.accounts ? "stats-text-warning font-semibold" : undefined}
 				>
 					{formatInteger(i.idealAccounts)}
-					{i.idealAccounts > i.accounts ? ` (have ${i.accounts})` : ""}
+					{i.idealAccounts > i.accounts ? ` (${t("providers.have", { count: i.accounts })})` : ""}
 				</span>
 			),
 		},
 		{
 			key: "exhausted",
-			header: "Exhaustions",
+			header: t("providers.columns.exhaustions"),
 			numeric: true,
 			render: i => (
 				<span className={i.exhaustedEvents > 0 ? "stats-text-warning" : undefined}>
@@ -377,15 +396,12 @@ function WindowInsightsPanel({ insights }: { insights: ProviderWindowInsight[] }
 	];
 
 	return (
-		<Panel
-			title="Subscription Windows"
-			subtitle="What each usage window buys you, and how many accounts peak demand needs"
-		>
+		<Panel title={t("providers.windows.title")} subtitle={t("providers.windows.subtitle")}>
 			<DataTable
 				columns={columns}
 				data={insights}
 				keyExtractor={i => `${i.provider}::${i.windowKey}`}
-				emptyText="No usage snapshots recorded yet — they accumulate whenever usage is fetched (TUI footer, /usage, omp usage)"
+				emptyText={t("providers.windows.noSnapshots")}
 			/>
 		</Panel>
 	);
@@ -401,7 +417,15 @@ const UTILIZATION_COLORS = {
 	exhausted: "#ff6b7d",
 } as const;
 
-function WindowUtilizationPanel({ usageSeries }: { usageSeries: UsageWindowSeries[] }) {
+function WindowUtilizationPanel({
+	usageSeries,
+	t,
+	locale,
+}: {
+	usageSeries: UsageWindowSeries[];
+	t: TranslationFn;
+	locale: "en" | "zh";
+}) {
 	const providers = useMemo(() => [...new Set(usageSeries.map(s => s.provider))], [usageSeries]);
 	const [selected, setSelected] = useState<string | null>(null);
 	const provider = selected !== null && providers.includes(selected) ? selected : (providers[0] ?? null);
@@ -434,7 +458,7 @@ function WindowUtilizationPanel({ usageSeries }: { usageSeries: UsageWindowSerie
 			labels: rows.map(r => r.label),
 			datasets: [
 				{
-					label: "Used",
+					label: t("providers.used"),
 					data: rows.map(r => r.fraction * 100),
 					backgroundColor: rows.map(r =>
 						r.exhausted
@@ -458,7 +482,7 @@ function WindowUtilizationPanel({ usageSeries }: { usageSeries: UsageWindowSerie
 		const shared = buildSharedPlugins({
 			chartTheme,
 			showLegend: false,
-			defaultLabel: "Used",
+			defaultLabel: t("providers.used"),
 			formatValue: v => `${v.toFixed(1)}%`,
 		});
 		return {
@@ -473,7 +497,9 @@ function WindowUtilizationPanel({ usageSeries }: { usageSeries: UsageWindowSerie
 						label: (ctx: { dataIndex: number; parsed: { x: number | null } }) => {
 							const row = rows[ctx.dataIndex];
 							const used = `${(ctx.parsed.x ?? 0).toFixed(1)}% used`;
-							return row ? `${used} · recorded ${formatRelativeTime(row.recordedAt)}` : used;
+							return row
+								? `${used} · ${t("providers.recorded", { time: formatRelativeTime(row.recordedAt, locale) })}`
+								: used;
 						},
 					},
 				},
@@ -487,15 +513,15 @@ function WindowUtilizationPanel({ usageSeries }: { usageSeries: UsageWindowSerie
 
 	return (
 		<Panel
-			title="Window Utilization"
-			subtitle="Latest recorded limit utilization per account and window — red bars are exhausted, amber above 80%"
+			title={t("providers.utilization.title")}
+			subtitle={t("providers.utilization.subtitle")}
 			actions={
 				providers.length > 1 ? (
 					<select
 						className="stats-select"
 						value={provider ?? ""}
 						onChange={e => setSelected(e.target.value)}
-						aria-label="Provider"
+						aria-label={t("common.provider")}
 					>
 						{providers.map(p => (
 							<option key={p} value={p}>
@@ -508,7 +534,7 @@ function WindowUtilizationPanel({ usageSeries }: { usageSeries: UsageWindowSerie
 		>
 			<div style={{ height: Math.max(160, rows.length * 34 + 60) }}>
 				{rows.length === 0 ? (
-					<EmptyState message="No usage snapshots recorded yet — they accumulate whenever usage is fetched" />
+					<EmptyState message={t("providers.utilization.noSnapshots")} />
 				) : (
 					<Bar data={data} options={options} />
 				)}

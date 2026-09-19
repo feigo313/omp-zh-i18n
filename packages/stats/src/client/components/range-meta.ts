@@ -63,9 +63,11 @@ const RANGE_META: Record<TimeRange, RangeMeta> = {
 	all: { windowLabel: "all time", trendLabel: "Trend", bucketMs: DAY_MS, bucketCount: 0, tickFormat: "MMM d" },
 };
 
-export function rangeMeta(range: TimeRange): RangeMeta {
+export function rangeMeta(range: TimeRange, _translation?: unknown): RangeMeta {
 	return RANGE_META[range];
 }
+
+export const rangeBucketMeta = rangeMeta;
 
 /** Format a bucket timestamp using the active range's tick format. */
 export function formatRangeTick(timestamp: number, range: TimeRange): string {

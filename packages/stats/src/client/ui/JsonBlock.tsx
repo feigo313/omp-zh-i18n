@@ -1,6 +1,7 @@
 import { Check, Copy } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "../i18n";
 
 export interface JsonBlockProps {
 	data: unknown;
@@ -9,6 +10,7 @@ export interface JsonBlockProps {
 }
 
 export function JsonBlock({ data, title, initialCollapsed = false }: JsonBlockProps) {
+	const { t } = useTranslation();
 	const [collapsed, setCollapsed] = useState(initialCollapsed);
 	const [copied, setCopied] = useState(false);
 	const copyResetRef = useRef<number>(0);
@@ -47,19 +49,19 @@ export function JsonBlock({ data, title, initialCollapsed = false }: JsonBlockPr
 				role="button"
 				aria-expanded={!collapsed}
 			>
-				<span className="stats-json-block-title">{title || "JSON"}</span>
+				<span className="stats-json-block-title">{title || t("json.title")}</span>
 				<div className="stats-json-actions">
 					<button
 						type="button"
 						className="stats-json-copy-btn"
 						onClick={handleCopy}
-						aria-label={copied ? "Copied to clipboard" : "Copy JSON to clipboard"}
+						aria-label={copied ? t("json.copiedToClipboard") : t("json.copyToClipboard")}
 					>
 						{copied ? <Check size={13} /> : <Copy size={13} />}
-						{copied ? "Copied" : "Copy"}
+						{copied ? t("json.copied") : t("json.copy")}
 					</button>
 					<span className="stats-json-block-toggle-indicator" data-collapsed={collapsed}>
-						{collapsed ? "▶ Show" : "▼ Hide"}
+						{collapsed ? `▶ ${t("json.show")}` : `▼ ${t("json.hide")}`}
 					</span>
 				</div>
 			</div>

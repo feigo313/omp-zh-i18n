@@ -1,10 +1,46 @@
 # Development Rules
 
+## This Fork (omp-zh-i18n)
+
+| | |
+|---|---|
+| What | Chinese localization fork of Oh My Pi — not upstream `can1357/oh-my-pi` |
+| Public | https://github.com/feigo313/omp-zh-i18n · branch `master` · also `gitee.com/atrix313/omp-zh-i18n` |
+| Upstream remote | `upstream` → `https://github.com/can1357/oh-my-pi.git` |
+| Current baseline | coding-agent **18.2.6-zh** (X/Y upstream change triggers a new zh release) |
+| Primary work | `packages/coding-agent/src/i18n/lang/zh-*.json` + required en SoT / wiring (`interceptor.ts`, settings UI) and the tui translation seam (`packages/tui/src/i18n-host.ts`) |
+
+**Defaults for agents**
+
+- Do **not** start new i18n or release work unless the user asks.
+- Prefer editing bundled `lang/zh-*.json` (+ explicitly requested en/wiring). Do not treat `~/.omp/lang` as the delivery path.
+- Never `commit` / `push` / GitHub comment / open issues unless the user explicitly asks.
+- Source strings stay English; translate at the UI boundary (`interceptUIString` / `i18n.t` / tui seam `tuiT`).
+- Brand names, model ids, `true`/`false` may remain English.
+
+**Local-only files (`.git/info/exclude`, not `.gitignore`)**
+
+These exist on this machine, are **not tracked**, and must not be force-added for release:
+
+- `docs/local/` — worklogs, STATUS, audits
+- `i18n.release.json` — overlay roots / release metadata
+- `scripts/i18n/`, `.agents/`, `.reasonix/`, `.tools/`
+
+**Where to read next**
+
+| Need | File |
+|---|---|
+| Session entry / Chinese collab norms | `CLAUDE.md` (tracked) |
+| **Canonical** zh release process | `docs/local/I18N-RELEASE-WORKFLOW.md` (local-only SoT) |
+| Historical status / worklogs | `docs/local/*` (archives; workflow file wins on conflict) |
+
+Do not re-implement the release Gates here. Upstream `bun run release` is **not** the normal path for `vX.Y.Z-zh` builds.
+
 ## Default Context
 
 This repo contains multiple packages, but **`packages/coding-agent/`** is the primary focus. Unless otherwise specified, assume work refers to this package.
 
-**Terminology**: When the user says "agent" or asks "why is agent doing X", they mean the **coding-agent package implementation**, not you (the assistant). The coding-agent is a CLI tool — questions about its behavior refer to code in `packages/coding-agent/`, not your current session.
+**Terminology**: When the user says "agent" or asks "why is agent doing X", they mean the **coding-agent package implementation**, not you (the assistant). The coding-agent is a CLI tool — questions about its behavior refer to code in `packages/coding-agent/`, not your current session. i18n / 中文翻译 → `packages/coding-agent/src/i18n/`.
 
 ### Package Structure
 
@@ -22,6 +58,14 @@ This repo contains multiple packages, but **`packages/coding-agent/`** is the pr
 | `crates/pi-natives`     | Rust crate for performance-critical text/grep ops                                       |
 
 **Catalog import convention**: code in this repo imports catalog _values_ (bundled models, model-thinking helpers, identity, descriptors, model manager/cache) from `@oh-my-pi/pi-catalog/<module>` — never via `@oh-my-pi/pi-ai`. The pi-ai barrel re-exports only the model/effort _types_ its own signatures use (`Model`, `Api`, `ThinkingConfig`, `Effort`, …); type-only imports of those from `@oh-my-pi/pi-ai` are fine.
+
+### i18n wiring (fork-critical)
+
+- Bundled files: `packages/coding-agent/src/i18n/lang/{en,zh}-*.json`.
+- They are **statically imported** in `src/i18n/index.ts` and registered in `EMBEDDED_TRANSLATIONS` — a new lang JSON that is not imported there will not ship in the binary.
+- Load order: bundled `lang/` first, then optional user overrides under `~/.omp/lang/`.
+- UI boundary: `src/i18n/interceptor.ts` (slash commands, CLI help) plus the tui seam `packages/tui/src/i18n-host.ts` (`setTuiTranslator`/`tuiT`) — since v18 the settings/welcome/plugin overlays live in `packages/tui` and resolve strings through the injected translator. Keep source English; do not sprinkle Chinese literals in components.
+- Do **not** bulk-run extract/generate/translate scripts unless the user asks; edit keys by hand and keep en/zh key symmetry (no empty strings).
 
 ## GitHub
 
@@ -258,9 +302,30 @@ For the bash tool specifically:
 ## Commands
 
 - NEVER commit unless asked.
-- Never use `tsc`/`npx tsc` — always `bun check`.
+- Never use `tsc`/`npx tsc` — always `bun check` (package gate uses `tsgo`, not `tsc`).
 - Never run `cargo test` directly for Rust tests — use `bun run test:rs`. It runs `cargo nextest run` (config: `.config/nextest.toml`) followed by a `cargo test --doc` pass, because nextest does not execute doctests. The doctest pass currently executes nothing (pi-natives is a `cdylib`, which rustdoc skips; pi-builtins' examples are `ignore`d vendored uutils docs) and exists so the first runnable doctest added to a lib crate is actually run.
 - Merge commits (maintainer merges of PRs) follow: `Merge PR #<number>: <conventional PR subject> (@<author>)` — e.g. `Merge PR #6386: feat(catalog): add native Meta Model API provider (@eggpeat)`.
+- Runtime is **Bun** (`packageManager` in root `package.json`). On Windows use PowerShell; do not assume bash-only paths.
+
+### High-signal scripts (root unless noted)
+
+| Task | Command |
+| --- | --- |
+| Install + native build + link `omp` | `bun run setup` |
+| Run CLI from source | `bun run dev` |
+| Full type+lint gate (TS+RS parallel) | `bun check` |
+| TS-only gate | `bun run check:ts` |
+| Package gate | `cd packages/coding-agent && bun run check` (`check:types` = `tsgo`) |
+| Local test suite | `bun run test` (`scripts/ci-test-ts.ts local`) |
+| TS tests only | `bun run test:ts` |
+| Focused coding-agent buckets | `bun run ci:test:coding-agent:singleton` / `:ui` / `:runtime` / `:native` / `:heavy` |
+| CLI smoke (workers, tiny model) | `bun run ci:test:smoke` |
+| Regenerate model catalog | `bun run gen:models` |
+| Rebuild collab tool views after renderer edits | `bun run gen:tool-views` |
+| Validate a zh JSON file | `bun -e "JSON.parse(await Bun.file('packages/coding-agent/src/i18n/lang/zh-settings-tools.json').text()); console.log('ok')"` |
+
+Tests are **bucketed** via `scripts/ci-test-ts.ts` — do not assume a single `bun test` covers coding-agent; UI/native/heavy suites are split on purpose (OOM/GC).
+
 ## Rust Build Profiles
 
 Profiles live in the root `Cargo.toml`; `.cargo/config.toml` carries the settings Cargo.toml cannot express. Both are committed, so no local `~/.cargo/config.toml` is required.
@@ -338,6 +403,10 @@ Location: `packages/*/CHANGELOG.md` (per package).
 - External contributions: `Added feature X ([#456](https://github.com/can1357/oh-my-pi/pull/456) by [@username](https://github.com/username))`.
 
 ## Releasing
+
+**Fork note:** Chinese releases (`vX.Y.Z-zh`) follow `docs/local/I18N-RELEASE-WORKFLOW.md` (local-only). That file is the sole process SoT: master-only, no feature branches/PRs for release, one tag + one GitHub Release per version, no force-push. Do not invent a parallel flow.
+
+Upstream-style package release (only when explicitly aligning with official npm publish):
 
 1. Ensure all changes since last release are in each affected package's `[Unreleased]` section.
 2. Run `bun run release`.

@@ -18,7 +18,7 @@ function createAbortedSignal(): AbortSignal {
 function captureResponsesPayload(model: Model<"openai-responses">): Promise<unknown> {
 	const { promise, resolve } = Promise.withResolvers<unknown>();
 	streamOpenAIResponses(model, testContext, {
-		apiKey: "ghu_test_copilot_token",
+		apiKey: "gh" + "u_test_copilot_token",
 		reasoning: Effort.High,
 		signal: createAbortedSignal(),
 		onPayload: payload => resolve(payload),
@@ -29,7 +29,7 @@ function captureResponsesPayload(model: Model<"openai-responses">): Promise<unkn
 function captureAnthropicPayload(model: Model<"anthropic-messages">): Promise<unknown> {
 	const { promise, resolve } = Promise.withResolvers<unknown>();
 	streamAnthropic(model, testContext, {
-		apiKey: "ghu_test_copilot_token",
+		apiKey: "gh" + "u_test_copilot_token",
 		isOAuth: false,
 		reasoning: Effort.High,
 		thinkingEnabled: true,

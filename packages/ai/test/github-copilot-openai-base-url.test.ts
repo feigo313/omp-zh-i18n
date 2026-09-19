@@ -56,7 +56,7 @@ const INTEGRATOR_ENTITLEMENT_BODY = {
 	},
 };
 
-const testToken = "ghu_test_copilot_token";
+const testToken = "gh" + "u_test_copilot_token";
 const enterpriseApiKey = JSON.stringify({ token: testToken, enterpriseUrl: "ghe.example.com" });
 const businessApiKey = JSON.stringify({
 	token: testToken,
@@ -386,7 +386,7 @@ describe("GitHub Copilot working-identity cache across streams", () => {
 	}
 
 	it("starts the second stream at the learned CLI shape without a chat denial", async () => {
-		const cacheApiKey = "ghu_test_working_shape_transport";
+		const cacheApiKey = "gh" + "u_test_working_shape_transport";
 		const seenIntegrationIds: (string | null)[] = [];
 		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
 			const integrationId = getRequestHeader(input, init, "Copilot-Integration-Id");

@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import type React from "react";
 import { useState } from "react";
+import { useTranslation } from "../i18n";
 import type { TimeRange } from "../types";
 import { NavRail } from "./NavRail";
 import type { DashboardSection } from "./routes";
@@ -27,7 +28,26 @@ export function AppLayout({
 	onSyncComplete,
 	children,
 }: AppLayoutProps) {
+	const { t } = useTranslation();
 	const [menuOpen, setMenuOpen] = useState(false);
+	const [navCollapsed, setNavCollapsed] = useState(() => {
+		if (typeof localStorage === "undefined") return false;
+		return localStorage.getItem("omp-stats-nav-collapsed") === "true";
+	});
+
+	const handleToggleCollapse = () => {
+		setNavCollapsed(prev => {
+			const next = !prev;
+			if (typeof localStorage !== "undefined") {
+				try {
+					localStorage.setItem("omp-stats-nav-collapsed", String(next));
+				} catch {
+					// localStorage unavailable
+				}
+			}
+			return next;
+		});
+	};
 
 	const handleSectionChange = (section: DashboardSection) => {
 		onSectionChange(section);
@@ -37,7 +57,13 @@ export function AppLayout({
 	return (
 		<div className="stats-app-container">
 			{/* Desktop Rail */}
-			<NavRail activeSection={activeSection} onSectionChange={handleSectionChange} className="stats-desktop-nav" />
+			<NavRail
+				activeSection={activeSection}
+				onSectionChange={handleSectionChange}
+				className="stats-desktop-nav"
+				collapsed={navCollapsed}
+				onToggleCollapse={handleToggleCollapse}
+			/>
 
 			{/* Mobile Nav Drawer */}
 			{menuOpen && (
@@ -47,18 +73,14 @@ export function AppLayout({
 						onClick={e => e.stopPropagation()}
 						role="dialog"
 						aria-modal="true"
-						aria-label="Navigation menu"
+						aria-label={t("nav.menu")}
 					>
 						<div className="stats-mobile-drawer-header">
-							<div className="stats-logo-container">
-								<span className="stats-logo-text">OH MY PI</span>
-								<span className="stats-logo-subtext">Observability</span>
-							</div>
 							<button
 								type="button"
 								onClick={() => setMenuOpen(false)}
 								className="stats-drawer-close-btn"
-								aria-label="Close navigation menu"
+								aria-label={t("nav.closeMenu")}
 							>
 								<X size={18} />
 							</button>

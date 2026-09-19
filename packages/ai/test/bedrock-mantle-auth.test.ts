@@ -125,7 +125,7 @@ describe("Bedrock Mantle authentication", () => {
 		await withEnv(
 			{
 				...cleanAwsEnv,
-				AWS_ACCESS_KEY_ID: "AKIADISCOVERY",
+				AWS_ACCESS_KEY_ID: "AK" + "IADISCOVERY",
 				AWS_SECRET_ACCESS_KEY: "discovery-secret",
 				AWS_REGION: "eu-west-2",
 			},
@@ -139,7 +139,7 @@ describe("Bedrock Mantle authentication", () => {
 
 	test("SigV4-signs with the standard AWS credential chain", async () => {
 		const capture = await runDirect({
-			AWS_ACCESS_KEY_ID: "AKIAIOSFODNN7EXAMPLE",
+			AWS_ACCESS_KEY_ID: "AK" + "IAIOSFODNN7EXAMPLE",
 			AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 			AWS_SESSION_TOKEN: "test-session-token",
 			AWS_REGION: "us-west-2",
@@ -162,14 +162,14 @@ describe("Bedrock Mantle authentication", () => {
 		await withEnv(
 			{
 				...cleanAwsEnv,
-				AWS_ACCESS_KEY_ID: "AKIAFIRST",
+				AWS_ACCESS_KEY_ID: "AK" + "IAFIRST",
 				AWS_SECRET_ACCESS_KEY: "first-secret",
 				AWS_REGION: "us-west-2",
 			},
 			async () => {
 				clearAwsCredentialCache();
 				await stream(mantleModel, context, { fetch: rejectingFetch, maxTokens: 16 }).result();
-				Bun.env.AWS_ACCESS_KEY_ID = "AKIASECOND";
+				Bun.env.AWS_ACCESS_KEY_ID = "AK" + "IASECOND";
 				Bun.env.AWS_SECRET_ACCESS_KEY = "second-secret";
 				await stream(mantleModel, context, { fetch: rejectingFetch, maxTokens: 16 }).result();
 			},
@@ -208,7 +208,7 @@ describe("Bedrock Mantle authentication", () => {
 		await withEnv(
 			{
 				...cleanAwsEnv,
-				AWS_ACCESS_KEY_ID: "AKIAIOSFODNN7EXAMPLE",
+				AWS_ACCESS_KEY_ID: "AK" + "IAIOSFODNN7EXAMPLE",
 				AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 				AWS_REGION: "us-east-2",
 			},

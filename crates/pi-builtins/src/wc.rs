@@ -6,11 +6,11 @@ mod count_fast {
 	use std::io::{self, ErrorKind, Read};
 	#[cfg(unix)]
 	use std::os::fd::AsRawFd;
-	
+
 	#[cfg(unix)]
 	use libc::{_SC_PAGESIZE, S_IFREG, sysconf};
 	use uucore::hardware::SimdPolicy;
-	
+
 	use super::WordCountable;
 	use super::{wc_simd_allowed, word_count::WordCount};
 	#[cfg(windows)]
@@ -19,17 +19,17 @@ mod count_fast {
 	const FILE_ATTRIBUTE_ARCHIVE: u32 = 32;
 	#[cfg(windows)]
 	const FILE_ATTRIBUTE_NORMAL: u32 = 128;
-	
+
 	#[cfg(any(target_os = "linux", target_os = "android"))]
 	use std::os::fd::AsFd;
-	
+
 	#[cfg(any(target_os = "linux", target_os = "android"))]
 	use libc::S_IFIFO;
 	#[cfg(any(target_os = "linux", target_os = "android"))]
 	use uucore::pipes::{MAX_ROOTLESS_PIPE_SIZE, pipe, splice, splice_exact};
-	
+
 	const BUF_SIZE: usize = 256 * 1024;
-	
+
 	/// This is a Linux-specific function to count the number of bytes using the
 	/// `splice` system call, which is faster than using `read`.
 	///
@@ -42,7 +42,7 @@ mod count_fast {
 		// todo: avoid generating broker if input is pipe (fcntl_setpipe_size succeed)
 		// and directly splice() to /dev/null to save RAM usage
 		let (pipe_rd, pipe_wr) = pipe().map_err(|_| 0_usize)?;
-	
+
 		let mut byte_count = 0;
 		// improve throughput from pipe
 		let _ = rustix::pipe::fcntl_setpipe_size(fd, MAX_ROOTLESS_PIPE_SIZE);
@@ -59,10 +59,10 @@ mod count_fast {
 				Err(_) => return Err(byte_count),
 			}
 		}
-	
+
 		Ok(byte_count)
 	}
-	
+
 	/// In the special case where we only need to count the number of bytes. There
 	/// are several optimizations we can do:
 	///   1. On Unix,  we can simply `stat` the file if it is regular.
@@ -75,7 +75,7 @@ mod count_fast {
 	#[inline]
 	pub(crate) fn count_bytes_fast<T: WordCountable>(handle: &mut T) -> (usize, Option<io::Error>) {
 		let mut byte_count = 0;
-	
+
 		#[cfg(unix)]
 		if let Some(fd) = handle.inner_fd() {
 			let stat = rustix::fs::fstat(fd);
@@ -108,13 +108,13 @@ mod count_fast {
 				}
 			}
 		}
-	
+
 		#[cfg(windows)]
 		{
 			if let Some(file) = handle.inner_file() {
 				if let Ok(metadata) = file.metadata() {
 					let attributes = metadata.file_attributes();
-	
+
 					if (attributes & FILE_ATTRIBUTE_ARCHIVE) != 0
 						|| (attributes & FILE_ATTRIBUTE_NORMAL) != 0
 					{
@@ -123,7 +123,7 @@ mod count_fast {
 				}
 			}
 		}
-	
+
 		// Fall back on `read`, but without the overhead of counting words and lines.
 		let mut buf = [0_u8; BUF_SIZE];
 		loop {
@@ -137,7 +137,7 @@ mod count_fast {
 			}
 		}
 	}
-	
+
 	/// A simple structure used to align a [`BUF_SIZE`] buffer to 32-byte boundary.
 	///
 	/// This is useful as bytecount uses 256-bit wide vector operations that run
@@ -146,13 +146,13 @@ mod count_fast {
 	struct AlignedBuffer {
 		data: [u8; BUF_SIZE],
 	}
-	
+
 	impl Default for AlignedBuffer {
 		fn default() -> Self {
 			Self { data: [0; BUF_SIZE] }
 		}
 	}
-	
+
 	/// Returns a [`WordCount`] that counts the number of bytes, lines, and/or the
 	/// number of Unicode characters encoded in UTF-8 read via a Reader.
 	///
@@ -264,12 +264,12 @@ mod countable {
 }
 
 mod utf8 {
-	
-	
+
+
 	use std::{cmp, str};
-	
+
 	pub use read::{BufReadDecoder, BufReadDecoderError};
-	
+
 	///
 	/// Incremental, zero-copy UTF-8 decoding with error handling
 	///
@@ -277,35 +277,35 @@ mod utf8 {
 	/// `uu_wc` used to depend on that crate.
 	/// The author archived the repository <https://github.com/SimonSapin/rust-utf8>.
 	/// They suggested incorporating the source directly into `uu_wc` <https://github.com/uutils/coreutils/issues/4289>.
-	
+
 	#[derive(Debug, Copy, Clone)]
 	pub struct Incomplete {
 		pub buffer:     [u8; 4],
 		pub buffer_len: u8,
 	}
-	
+
 	impl Incomplete {
 		pub fn empty() -> Self {
 			Self { buffer: [0, 0, 0, 0], buffer_len: 0 }
 		}
-	
+
 		pub fn is_empty(self) -> bool {
 			self.buffer_len == 0
 		}
-	
+
 		pub fn new(bytes: &[u8]) -> Self {
 			let mut buffer = [0, 0, 0, 0];
 			let len = bytes.len();
 			buffer[..len].copy_from_slice(bytes);
 			Self { buffer, buffer_len: len as u8 }
 		}
-	
+
 		fn take_buffer(&mut self) -> &[u8] {
 			let len = self.buffer_len as usize;
 			self.buffer_len = 0;
 			&self.buffer[..len]
 		}
-	
+
 		/// `(consumed_from_input, None)`: not enough input
 		/// `(consumed_from_input, Some(Err(())))`: error bytes in buffer
 		/// `(consumed_from_input, Some(Ok(())))`: UTF-8 string in buffer
@@ -371,18 +371,18 @@ mod utf8 {
 	// DEALINGS IN THE SOFTWARE.
 	mod read {
 		use std::io::{self, BufRead};
-		
+
 		use thiserror::Error;
-		
+
 		use super::{Incomplete, str};
-		
+
 		/// Wraps a `std::io::BufRead` buffered byte stream and decode it as UTF-8.
 		pub struct BufReadDecoder<B: BufRead> {
 			buf_read:       B,
 			bytes_consumed: usize,
 			incomplete:     Incomplete,
 		}
-		
+
 		#[derive(Debug, Error)]
 		pub enum BufReadDecoderError<'a> {
 			/// Represents one UTF-8 error in the byte stream.
@@ -391,17 +391,17 @@ mod utf8 {
 			/// (See `BufReadDecoder::next_lossy` and `BufReadDecoderError::lossy`.)
 			#[error("invalid byte sequence: {:02x?}", .0)]
 			InvalidByteSequence(&'a [u8]),
-		
+
 			/// An I/O error from the underlying byte stream
 			#[error("underlying bytestream error: {}", .0)]
 			Io(#[source] io::Error),
 		}
-		
+
 		impl<B: BufRead> BufReadDecoder<B> {
 			pub fn new(buf_read: B) -> Self {
 				Self { buf_read, bytes_consumed: 0, incomplete: Incomplete::empty() }
 			}
-		
+
 			/// Decode and consume the next chunk of UTF-8 input.
 			///
 			/// This method is intended to be called repeatedly until it returns `None`,
@@ -430,7 +430,7 @@ mod utf8 {
 						self.bytes_consumed = 0;
 					}
 					let buf = try_io!(self.buf_read.fill_buf());
-		
+
 					// Force loop iteration to go through an explicit `continue`
 					enum Unreachable {}
 					let _: Unreachable = if self.incomplete.is_empty() {
@@ -490,7 +490,7 @@ mod word_count {
 		cmp::max,
 		ops::{Add, AddAssign},
 	};
-	
+
 	#[derive(Debug, Default, Copy, Clone)]
 	pub struct WordCount {
 		pub bytes:           usize,
@@ -499,10 +499,10 @@ mod word_count {
 		pub words:           usize,
 		pub max_line_length: usize,
 	}
-	
+
 	impl Add for WordCount {
 		type Output = Self;
-	
+
 		fn add(self, other: Self) -> Self {
 			Self {
 				bytes:           self.bytes + other.bytes,
@@ -513,7 +513,7 @@ mod word_count {
 			}
 		}
 	}
-	
+
 	impl AddAssign for WordCount {
 		fn add_assign(&mut self, other: Self) {
 			*self = *self + other;

@@ -1,8 +1,11 @@
 import { Menu } from "lucide-react";
+import { useEffect } from "react";
+import { getLocale, setLocale, useTranslation } from "../i18n";
 import type { TimeRange } from "../types";
+import { refreshExchangeRate, useExchangeRate, useExchangeRateTimestamp } from "../useExchangeRate";
 import { RangeControl } from "./RangeControl";
 import type { DashboardSection } from "./routes";
-import { routes } from "./routes";
+import { getRoutes } from "./routes";
 import { SyncButton } from "./SyncButton";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -27,13 +30,23 @@ export function TopBar({
 	onMenuToggle,
 	className = "",
 }: TopBarProps) {
+	const { t } = useTranslation();
+	const locale = getLocale();
+	const exchangeRate = useExchangeRate();
+	const rateTimestamp = useExchangeRateTimestamp();
+
+	useEffect(() => {
+		if (locale === "zh") refreshExchangeRate();
+	}, [locale]);
+	const routes = getRoutes(t);
 	const currentRoute = routes.find(r => r.id === activeSection);
-	const title = currentRoute?.label || "Observability";
+	const title = currentRoute?.label || t("topBar.observability");
 
 	const formatLastUpdated = (time: number | null) => {
-		if (!time) return "Not updated";
+		if (!time) return t("topBar.notUpdated");
 		const date = new Date(time);
-		return `Updated ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+		const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+		return t("topBar.updated", { time: timeStr });
 	};
 
 	return (
@@ -44,7 +57,7 @@ export function TopBar({
 						type="button"
 						onClick={onMenuToggle}
 						className="stats-mobile-menu-btn"
-						aria-label="Open navigation menu"
+						aria-label={t("topBar.openMenu")}
 					>
 						<Menu size={20} />
 					</button>
@@ -63,6 +76,44 @@ export function TopBar({
 				</div>
 
 				<RangeControl value={range} onChange={onRangeChange} />
+				<select
+					value={getLocale()}
+					onChange={e => setLocale(e.target.value as "en" | "zh")}
+					className="stats-language-select"
+					aria-label={t("topBar.languageToggle")}
+					title={t("topBar.languageToggle")}
+				>
+					<option value="en">English</option>
+					<option value="zh">中文</option>
+				</select>
+
+				{locale === "zh" && (
+					<div className="stats-exchange-rate">
+						<span className="stats-text-muted stats-exchange-rate-label">{t("exchangeRate.label")}</span>
+						<span className="stats-text-primary stats-exchange-rate-value">¥{exchangeRate.toFixed(4)}</span>
+						{rateTimestamp > 0 && (
+							<span
+								className="stats-text-muted stats-exchange-rate-timestamp"
+								title={new Date(rateTimestamp).toLocaleString()}
+							>
+								{t("exchangeRate.updated", {
+									time: new Date(rateTimestamp).toLocaleTimeString([], {
+										hour: "2-digit",
+										minute: "2-digit",
+									}),
+								})}
+							</span>
+						)}
+						<button
+							type="button"
+							onClick={() => refreshExchangeRate()}
+							className="stats-button stats-button-secondary stats-exchange-rate-refresh"
+							title={t("exchangeRate.refresh")}
+						>
+							{t("exchangeRate.refresh")}
+						</button>
+					</div>
+				)}
 
 				<ThemeToggle />
 

@@ -2647,4 +2647,3 @@ export const UserStatusSchema: MessageCodec<UserStatus> = pb<UserStatus>("exa.co
 	{ no: 35, name: "maxNumPremiumChatMessages", kind: "int64" },
 	{ no: 36, name: "userId", kind: "string" },
 ]);
-

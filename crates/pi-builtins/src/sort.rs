@@ -4230,7 +4230,7 @@ fn emit_debug_warnings(
 			.iter()
 			.find(|warning| warning.key_index == Some(key_index))
 		{
-			show_error!(&mut host.stderr, 
+			show_error!(&mut host.stderr,
 				"{}",
 				format!(
 					"obsolescent key '{}' used; consider '-k {}' instead",
@@ -4248,7 +4248,7 @@ fn emit_debug_warnings(
 		if flags.keys_specified && key_spans_multiple_fields(selector) {
 			show_error!(&mut host.stderr, "{}", format!("key {key_index} is numeric and spans multiple fields"));
 		} else if flags.keys_specified && key_leading_blanks_significant(selector) {
-			show_error!(&mut host.stderr, 
+			show_error!(&mut host.stderr,
 				"{}",
 				format!(
 					"leading blanks are significant in key {key_index}; consider also specifying 'b'"

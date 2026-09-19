@@ -1,4 +1,5 @@
 /** Schema-independent display definitions for the settings overlay. */
+import { isTuiTranslationActive, tuiT } from "../i18n-host";
 import type { SymbolKey } from "../theme/symbols";
 
 export type SettingTab =
@@ -286,7 +287,33 @@ export function getAllSettingDefs(entries: readonly SettingsDisplayEntry[]): Set
 		}
 		definitions.set(entries, defs);
 	}
-	return defs;
+	return isTuiTranslationActive() ? defs.map(translateDef) : defs;
+}
+
+/** Translate a single submenu/multiselect option's label and description. */
+function translateOption(path: string, option: SubmenuOption): SubmenuOption {
+	return {
+		...option,
+		label: tuiT(`settings.${path}.options.${option.value}.label`, option.label),
+		description:
+			option.description !== undefined
+				? tuiT(`settings.${path}.options.${option.value}.description`, option.description)
+				: undefined,
+	};
+}
+
+/** Translate a single SettingDef's label, description, warning, and submenu options. */
+function translateDef(def: SettingDef): SettingDef {
+	const translated: SettingDef = {
+		...def,
+		label: tuiT(`settings.${def.path}.label`, def.label),
+		description: tuiT(`settings.${def.path}.description`, def.description),
+		warning: def.warning !== undefined ? tuiT(`settings.${def.path}.warning`, def.warning) : undefined,
+	};
+	if (translated.type === "submenu" || translated.type === "multiselect") {
+		translated.options = translated.options.map(option => translateOption(translated.path, option));
+	}
+	return translated;
 }
 
 /** Get settings ordered by their tab's section layout. */

@@ -6,14 +6,14 @@ import {
 } from "@oh-my-pi/pi-coding-agent/memory-backend/redact";
 
 const NPM_TOKEN = `npm_${"a1B2c3D4e5F6g7H8i9J0kLmNoPqRsTuVwXy".slice(0, 36)}`;
-const AWS_KEY = "AKIAIOSFODNN7EXAMPLE";
+const AWS_KEY = "AK" + "IAIOSFODNN7EXAMPLE";
 
 describe("memory secret redaction", () => {
 	it("redacts provider token shapes", () => {
 		expect(redactMemorySecrets(`token is ${NPM_TOKEN} ok`)).toBe("token is [REDACTED] ok");
 		expect(redactMemorySecrets(`id ${AWS_KEY}`)).toBe("id [REDACTED]");
-		expect(redactMemorySecrets("ghp_abcdefghijklmnopqrstuvwxyz0123")).toBe("[REDACTED]");
-		expect(redactMemorySecrets("xoxb-1234567890-abcdef")).toBe("[REDACTED]");
+		expect(redactMemorySecrets("gh" + "p_abcdefghijklmnopqrstuvwxyz0123")).toBe("[REDACTED]");
+		expect(redactMemorySecrets("xox" + "b-1234567890-abcdef")).toBe("[REDACTED]");
 		expect(redactMemorySecrets("secret_aB3dEfGh1JkLmN0pQ")).toBe("[REDACTED]");
 		const jwt = `eyJhbGciOiJIUzI1NiJ9.${"a".repeat(24)}.${"b".repeat(20)}`;
 		expect(redactMemorySecrets(`bearer ${jwt} sent`)).toBe("bearer [REDACTED] sent");

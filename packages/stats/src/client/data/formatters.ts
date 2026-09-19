@@ -1,18 +1,26 @@
-import { formatDistanceToNow } from "@oh-my-pi/pi-utils/dates";
+import { formatDistanceToNow } from "date-fns";
+import { zhCN } from "date-fns/locale";
+import type { Locale } from "../i18n";
+import { getExchangeRate } from "../useExchangeRate";
 import type { MessageStats } from "../types";
 
 export function formatInteger(value: number): string {
 	return value.toLocaleString();
 }
 
-export function formatCompact(value: number): string {
-	return value.toLocaleString(undefined, { notation: "compact" });
+export function formatCompact(value: number, locale: "en" | "zh" = "en"): string {
+	const displayLocale = locale === "zh" ? "zh-CN" : "en-US";
+	return value.toLocaleString(displayLocale, { notation: "compact" });
 }
 
-export function formatCost(value: number, digits?: number): string {
-	if (value === 0) return "$0";
-	const fractionDigits = digits !== undefined ? digits : value > 0 && value < 0.01 ? 4 : 2;
-	return `$${value.toLocaleString(undefined, {
+export function formatCost(value: number, digits?: number, locale: "en" | "zh" = "en"): string {
+	const isCny = locale === "zh";
+	const rate = isCny ? getExchangeRate() : 1;
+	const converted = value * rate;
+	const symbol = isCny ? "¥" : "$";
+	if (converted === 0) return `${symbol}0`;
+	const fractionDigits = digits !== undefined ? digits : converted > 0 && converted < 0.01 ? 4 : 2;
+	return `${symbol}${converted.toLocaleString(undefined, {
 		minimumFractionDigits: fractionDigits,
 		maximumFractionDigits: fractionDigits,
 	})}`;
@@ -58,8 +66,11 @@ export function formatTokensPerSecond(value: number | null): string {
 	return value.toFixed(1);
 }
 
-export function formatRelativeTime(timestamp: number): string {
-	return formatDistanceToNow(new Date(timestamp), { addSuffix: true });
+export function formatRelativeTime(timestamp: number, locale: Locale = "en"): string {
+	return formatDistanceToNow(new Date(timestamp), {
+		addSuffix: true,
+		locale: locale === "zh" ? zhCN : undefined,
+	});
 }
 
 export function formatBytes(value: number): string {

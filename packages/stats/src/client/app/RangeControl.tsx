@@ -1,3 +1,4 @@
+import { useTranslation } from "../i18n";
 import type { TimeRange } from "../types";
 
 export interface RangeControlProps {
@@ -6,31 +7,27 @@ export interface RangeControlProps {
 	className?: string;
 }
 
-const RANGE_OPTIONS: { value: TimeRange; label: string }[] = [
-	{ value: "1h", label: "1h" },
-	{ value: "24h", label: "24h" },
-	{ value: "7d", label: "7d" },
-	{ value: "30d", label: "30d" },
-	{ value: "90d", label: "90d" },
-	{ value: "all", label: "All" },
-];
+const RANGE_VALUES: TimeRange[] = ["1h", "24h", "7d", "30d", "90d", "all"];
 
 export function RangeControl({ value, onChange, className = "" }: RangeControlProps) {
+	const { t } = useTranslation();
+
 	return (
-		<div className={`stats-range-control ${className}`} role="radiogroup" aria-label="Select time range">
-			{RANGE_OPTIONS.map(opt => {
-				const isActive = opt.value === value;
+		<div className={`stats-range-control ${className}`} role="radiogroup" aria-label={t("rangeControl.selectRange")}>
+			{RANGE_VALUES.map(rangeValue => {
+				const isActive = rangeValue === value;
+				const label = rangeValue === "all" ? t("rangeControl.all") : rangeValue;
 				return (
 					<button
-						key={opt.value}
+						key={rangeValue}
 						type="button"
 						role="radio"
 						aria-checked={isActive}
 						data-active={isActive ? "true" : "false"}
 						className="stats-range-control-btn"
-						onClick={() => onChange(opt.value)}
+						onClick={() => onChange(rangeValue)}
 					>
-						{opt.label}
+						{label}
 					</button>
 				);
 			})}

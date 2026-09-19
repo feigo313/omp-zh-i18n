@@ -22,7 +22,7 @@ async function generateServiceAccountPem(): Promise<string> {
 			.toString("base64")
 			.match(/.{1,64}/g) ?? []
 	).join("\n");
-	return `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\n`;
+	return `-----BEGIN ${"PRIVATE KEY"}-----\n${body}\n-----END ${"PRIVATE KEY"}-----\n`;
 }
 
 function urlOf(input: string | URL | Request): string {

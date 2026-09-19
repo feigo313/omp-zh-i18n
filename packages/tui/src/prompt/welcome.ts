@@ -3,13 +3,92 @@ import type { Component } from "../tui";
 import { padding, replaceTabs, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils";
 import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
 import { theme } from "../theme/theme";
+import { tuiT } from "../i18n-host";
 import tipsText from "./tips.txt" with { type: "text" };
 
 /** Tips embedded at build time, one per line; blanks dropped. */
-const TIPS: readonly string[] = tipsText
+const EN_TIPS: readonly string[] = tipsText
 	.split("\n")
 	.map(line => line.trim())
 	.filter(line => line.length > 0);
+
+/** i18n keys for each tip, parallel to tips.txt lines (0-indexed).
+ *  A tip without a translation key stays in English. */
+const TIP_KEYS: readonly string[] = [
+	"tips.tired_of_typing_keep_going",
+	"tips.btw_side_question",
+	"tips.tan_background_agent",
+	"tips.ctrl_d_exit",
+	"tips.ompt_stats",
+	"tips.task_isolation",
+	"tips.completion_nested",
+	"tips.spaghetti_code",
+	"tips.multi_session",
+	"tips.ultrathink",
+	"tips.orchestrate",
+	"tips.workflowz",
+	"tips.multi_account",
+	"tips.auth_broker",
+	"tips.switch_provider",
+	"tips.ctrl_r_history",
+	"tips.force_read",
+	"tips.copy_code",
+	"tips.shake",
+	"tips.collab",
+	"tips.inspect_transcript",
+	"tips.usage_reset",
+	"tips.pi_dialect",
+	"tips.advisor",
+	"tips.prompt_arrow_list",
+	"tips.shift_tab_effort",
+	"tips.cleanse",
+];
+
+/** Translate the tips array positionally through the host translator. */
+function interceptTips(enTips: readonly string[]): readonly string[] {
+	return enTips.map((tip, i) => {
+		const key = TIP_KEYS[i];
+		if (!key) return tip;
+		const translated = tuiT(key, key);
+		return translated !== key ? translated : tip;
+	});
+}
+
+/** English source strings for fixed welcome UI copy, keyed by i18n key. */
+const WELCOME_STRINGS: Record<string, string> = {
+	back: "Welcome back!",
+	"welcome.back": "Welcome back!",
+	noRecentSessions: "No recent sessions",
+	noLspServers: "No LSP servers",
+	tips: "Tips",
+	"tips.promptActions": " for prompt actions",
+	"tips.commands": " for commands",
+	"tips.bash": " to run bash",
+	"tips.python": " to run python",
+	lspServers: "LSP Servers",
+	recentSessions: "Recent sessions",
+	tipLabel: "Tip: ",
+	nerdfont: "Please use nerdfont 😭.",
+};
+
+/** Resolve a fixed welcome string through the host translator. */
+function interceptWelcomeString(key: string): string {
+	return tuiT(key, WELCOME_STRINGS[key] ?? key);
+}
+
+function resolveTips(): readonly string[] {
+	return interceptTips(EN_TIPS);
+}
+
+let _tips: readonly string[] | null = null;
+function getTips(): readonly string[] {
+	if (_tips === null) _tips = resolveTips();
+	return _tips;
+}
+
+export function invalidateTipsCache(): void {
+	_tips = null;
+}
 
 /**
  * Fixed number of session rows in the welcome box so its height stays stable
@@ -38,12 +117,16 @@ const NEW_GLOW_PERIOD_MS = 1500;
  *  affordance surfaces this many times as often. */
 const NEW_TIP_WEIGHT = 4;
 
+function computeTipWeights(tips: readonly string[]): readonly number[] {
+	return tips.map(tip => (NEW_TIP_MARKER.test(tip) ? NEW_TIP_WEIGHT : 1));
+}
+
 /** Pick a tip from `tips`, biased toward "[NEW]" tips by {@link NEW_TIP_WEIGHT};
  *  `r` is a uniform sample in [0, 1). Returns "" when `tips` is empty.
  *  Exported for tests. */
 export function pickWeightedTip(tips: readonly string[], r: number): string {
 	if (tips.length === 0) return "";
-	const weights = tips.map(tip => (NEW_TIP_MARKER.test(tip) ? NEW_TIP_WEIGHT : 1));
+	const weights = computeTipWeights(tips);
 	const total = weights.reduce((sum, weight) => sum + weight, 0);
 	let acc = r * total;
 	for (let i = 0; i < tips.length; i++) {
@@ -77,7 +160,7 @@ function renderNewTag(phase: number, encoding: ColorEncoding): string {
 	return out + reset;
 }
 export function renderWelcomeTip(tip: string, boxWidth: number, phase = 0): string[] {
-	const label = "Tip: ";
+	const label = interceptWelcomeString("tipLabel");
 	const labelWidth = visibleWidth(label);
 	const bodyBudget = boxWidth - 1 - labelWidth; // 1 = leading indent
 	if (bodyBudget < 8) return [];
@@ -159,9 +242,9 @@ export class WelcomeComponent implements Component {
 		this.#nagRoll ??= Math.random();
 		this.#tipRoll ??= Math.random();
 		if (theme.getSymbolPreset() === "unicode" && this.#nagRoll < 0.1) {
-			return "Please use nerdfont 😭.";
+			return interceptWelcomeString("nerdfont");
 		}
-		return pickWeightedTip(TIPS, this.#tipRoll) || undefined;
+		return pickWeightedTip(getTips(), this.#tipRoll) || undefined;
 	}
 
 	invalidate(): void {
@@ -271,7 +354,7 @@ export class WelcomeComponent implements Component {
 		// Dynamic model/provider labels are truncated inside the fixed column.
 		// Letting them influence the responsive breakpoint changes the box height
 		// when authoritative session data replaces the empty prepaint labels.
-		const leftMinContentWidth = Math.max(minLeftCol, visibleWidth("Welcome back!"));
+		const leftMinContentWidth = Math.max(minLeftCol, visibleWidth(interceptWelcomeString("welcome.back")));
 		const desiredLeftCol = Math.max(
 			Math.min(preferredLeftCol, Math.max(minLeftCol, Math.floor(dualContentWidth * 0.35))),
 			leftMinContentWidth,
@@ -291,7 +374,7 @@ export class WelcomeComponent implements Component {
 		// Left column - centered content
 		const leftLines = [
 			"",
-			this.#centerText(theme.bold("Welcome back!"), leftCol),
+			this.#centerText(theme.bold(interceptWelcomeString("welcome.back")), leftCol),
 			"",
 			...logoColored.map(l => this.#centerText(l, leftCol)),
 			"",
@@ -306,7 +389,7 @@ export class WelcomeComponent implements Component {
 		// Recent sessions content
 		const sessionLines: string[] = [];
 		if (this.recentSessions.length === 0) {
-			sessionLines.push(` ${theme.fg("dim", "No recent sessions")}`);
+			sessionLines.push(` ${theme.fg("dim", interceptWelcomeString("noRecentSessions"))}`);
 		} else {
 			// Reserve width for the bullet prefix (" • ") and the trailing " (timeAgo)"
 			// so the relative time is never the part that gets truncated. The name
@@ -332,7 +415,7 @@ export class WelcomeComponent implements Component {
 		// LSP servers content
 		const lspLines: string[] = [];
 		if (this.lspServers.length === 0) {
-			lspLines.push(` ${theme.fg("dim", "No LSP servers")}`);
+			lspLines.push(` ${theme.fg("dim", interceptWelcomeString("noLspServers"))}`);
 		} else {
 			for (const server of this.lspServers.slice(0, WELCOME_LSP_SLOTS)) {
 				const icon =
@@ -354,16 +437,16 @@ export class WelcomeComponent implements Component {
 
 		// Right column
 		const rightLines = [
-			` ${theme.bold(theme.fg("accent", "Tips"))}`,
-			` ${theme.fg("dim", "#")}${theme.fg("muted", " for prompt actions")}`,
-			` ${theme.fg("dim", "/")}${theme.fg("muted", " for commands")}`,
-			` ${theme.fg("dim", "!")}${theme.fg("muted", " to run bash")}`,
-			` ${theme.fg("dim", "$")}${theme.fg("muted", " to run python")}`,
+			` ${theme.bold(theme.fg("accent", interceptWelcomeString("tips")))}`,
+			` ${theme.fg("dim", "#")}${theme.fg("muted", interceptWelcomeString("tips.promptActions"))}`,
+			` ${theme.fg("dim", "/")}${theme.fg("muted", interceptWelcomeString("tips.commands"))}`,
+			` ${theme.fg("dim", "!")}${theme.fg("muted", interceptWelcomeString("tips.bash"))}`,
+			` ${theme.fg("dim", "$")}${theme.fg("muted", interceptWelcomeString("tips.python"))}`,
 			separator,
-			` ${theme.bold(theme.fg("accent", "LSP Servers"))}`,
+			` ${theme.bold(theme.fg("accent", interceptWelcomeString("lspServers")))}`,
 			...lspLines,
 			separator,
-			` ${theme.bold(theme.fg("accent", "Recent sessions"))}`,
+			` ${theme.bold(theme.fg("accent", interceptWelcomeString("recentSessions")))}`,
 			...sessionLines,
 			"",
 		];

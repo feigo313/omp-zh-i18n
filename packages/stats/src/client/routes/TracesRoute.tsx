@@ -4,6 +4,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { useTranslation } from "../i18n";
 import { getSessions } from "../api";
 import { formatCompact, formatDurationMs, formatEstimatedCost, formatRelativeTime } from "../data/formatters";
 import { useResource } from "../data/useResource";
@@ -48,6 +49,7 @@ function ModelChips({ models }: { models: string[] }) {
 
 export function TracesRoute({ active, session, onOpenSession, refreshTrigger }: TracesRouteProps) {
 	const [filter, setFilter] = useState("");
+	const { t } = useTranslation();
 
 	const {
 		data: sessions,
@@ -130,11 +132,11 @@ export function TracesRoute({ active, session, onOpenSession, refreshTrigger }: 
 			</div>
 			<div className="stats-mobile-card-grid">
 				<div>
-					<div className="stats-mobile-card-label">Started</div>
+					<div className="stats-mobile-card-label">{t("common.started")}</div>
 					<div className="stats-mobile-card-value">{formatRelativeTime(item.startedAt)}</div>
 				</div>
 				<div>
-					<div className="stats-mobile-card-label">Duration</div>
+					<div className="stats-mobile-card-label">{t("common.duration")}</div>
 					<div className="stats-mobile-card-value">{formatDurationMs(item.endedAt - item.startedAt)}</div>
 				</div>
 				<div>

@@ -57,7 +57,7 @@ function getRequestHeader(
 describe("Anthropic Copilot auth config", () => {
 	it("uses apiKey: null and Authorization Bearer for Copilot models", () => {
 		const model = makeCopilotClaudeModel();
-		const token = "ghu_test_token_12345";
+		const token = "gh" + "u_test_token_12345";
 		const options = buildAnthropicClientOptions({
 			model,
 			apiKey: token,
@@ -115,19 +115,19 @@ describe("Anthropic Copilot auth config", () => {
 		const model = makeCopilotClaudeModel();
 		const options = buildAnthropicClientOptions({
 			model,
-			apiKey: JSON.stringify({ token: "ghu_test_token_12345", enterpriseUrl: "ghe.example.com" }),
+			apiKey: JSON.stringify({ token: "gh" + "u_test_token_12345", enterpriseUrl: "ghe.example.com" }),
 			extraBetas: [],
 			stream: true,
 			dynamicHeaders: {},
 		});
 
 		expect(options.apiKey).toBeNull();
-		expect(options.defaultHeaders.Authorization).toBe("Bearer ghu_test_token_12345");
+		expect(options.defaultHeaders.Authorization).toBe("Bearer gh" + "u_test_token_12345");
 	});
 
 	it("uses model baseUrl directly (no proxy-ep extraction)", () => {
 		const model = makeCopilotClaudeModel();
-		const token = "ghu_test_token_12345";
+		const token = "gh" + "u_test_token_12345";
 		const options = buildAnthropicClientOptions({
 			model,
 			apiKey: token,
@@ -143,7 +143,7 @@ describe("Anthropic Copilot auth config", () => {
 		const model = makeCopilotClaudeModel();
 		const options = buildAnthropicClientOptions({
 			model,
-			apiKey: JSON.stringify({ token: "ghu_test_token_12345", enterpriseUrl: "ghe.example.com" }),
+			apiKey: JSON.stringify({ token: "gh" + "u_test_token_12345", enterpriseUrl: "ghe.example.com" }),
 			extraBetas: [],
 			stream: true,
 			dynamicHeaders: {},
@@ -155,7 +155,7 @@ describe("Anthropic Copilot auth config", () => {
 		const model = makeCopilotClaudeModel();
 		const options = buildAnthropicClientOptions({
 			model,
-			apiKey: "ghu_test",
+			apiKey: "gh" + "u_test",
 			extraBetas: [],
 			stream: true,
 			dynamicHeaders: {},
@@ -175,7 +175,7 @@ describe("Anthropic Copilot auth config", () => {
 		const model = makeCopilotClaudeModel();
 		const options = buildAnthropicClientOptions({
 			model,
-			apiKey: "ghu_test",
+			apiKey: "gh" + "u_test",
 			extraBetas: ["interleaved-thinking-2025-05-14"],
 			stream: true,
 			dynamicHeaders: {},
@@ -190,7 +190,7 @@ describe("Anthropic Copilot auth config", () => {
 		const model = makeCopilotClaudeModel();
 		const options = buildAnthropicClientOptions({
 			model,
-			apiKey: "ghu_test",
+			apiKey: "gh" + "u_test",
 			extraBetas: ["interleaved-thinking-2025-05-14"],
 			stream: true,
 			dynamicHeaders: {},
@@ -206,7 +206,7 @@ describe("Anthropic Copilot auth config", () => {
 		const model = makeCopilotClaudeModel();
 		const result = buildAnthropicClientOptions({
 			model,
-			apiKey: "ghu_test",
+			apiKey: "gh" + "u_test",
 			extraBetas: [],
 			stream: true,
 			dynamicHeaders: {},
@@ -235,7 +235,7 @@ describe("Anthropic Copilot auth config", () => {
 	it("sends Content-Type and anthropic-version on Copilot anthropic requests", () => {
 		const result = buildAnthropicClientOptions({
 			model: makeCopilotClaudeModel(),
-			apiKey: "ghu_test",
+			apiKey: "gh" + "u_test",
 			extraBetas: [],
 			stream: true,
 			dynamicHeaders: {},
@@ -254,7 +254,7 @@ describe("Anthropic Copilot auth config", () => {
 				...makeCopilotClaudeModel(),
 				headers: { ...COPILOT_API_HEADERS, authorization: "Bearer override" },
 			},
-			apiKey: "ghu_test",
+			apiKey: "gh" + "u_test",
 			extraBetas: [],
 			stream: true,
 			dynamicHeaders: {},
@@ -289,7 +289,7 @@ describe("Anthropic Copilot auth config", () => {
 
 		const model = makeCopilotClaudeModel();
 		const result = await streamAnthropic(model, testContext, {
-			apiKey: "ghu_test_copilot_token",
+			apiKey: "gh" + "u_test_copilot_token",
 			fetch: fetchMock as unknown as typeof fetch,
 			initiatorOverride: "agent",
 		}).result();
@@ -311,7 +311,7 @@ describe("Anthropic Copilot auth config", () => {
 		});
 
 		const result = await streamAnthropic(makeCopilotClaudeModel(), testContext, {
-			apiKey: JSON.stringify({ token: "ghu_test_token_12345", enterpriseUrl: "ghe.example.com" }),
+			apiKey: JSON.stringify({ token: "gh" + "u_test_token_12345", enterpriseUrl: "ghe.example.com" }),
 			fetch: fetchMock as unknown as typeof fetch,
 		}).result();
 

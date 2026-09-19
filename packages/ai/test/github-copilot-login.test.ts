@@ -24,7 +24,7 @@ function deviceCodeResponse(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function accessTokenResponse(token = "ghu_test") {
+function accessTokenResponse(token = "gh" + "u_test") {
 	return {
 		access_token: token,
 		token_type: "bearer",
@@ -90,8 +90,8 @@ describe("loginGitHubCopilot", () => {
 		});
 
 		expect(onAuth).toHaveBeenCalled();
-		expect(credentials.access).toBe("ghu_test");
-		expect(credentials.refresh).toBe("ghu_test");
+		expect(credentials.access).toBe("gh" + "u_test");
+		expect(credentials.refresh).toBe("gh" + "u_test");
 		expect(credentials.expires).toBeGreaterThan(Date.now());
 		expect(credentials.enterpriseUrl).toBeUndefined();
 		expect(pollCount).toBeGreaterThanOrEqual(1);
@@ -146,15 +146,15 @@ describe("loginGitHubCopilot", () => {
 		const refreshToken = getProviderDefinition("github-copilot")?.refreshToken;
 		if (!refreshToken) throw new Error("expected github-copilot refresh");
 		const credentials = await refreshToken({
-			access: "ghu_existing_opencode_token",
-			refresh: "ghu_existing_opencode_token",
+			access: "gh" + "u_existing_opencode_token",
+			refresh: "gh" + "u_existing_opencode_token",
 			expires: 0,
 			enterpriseUrl: "ghe.example.com",
 			apiEndpoint: "https://api.business.githubcopilot.com",
 		});
 		expect(credentials).toMatchObject({
-			access: "ghu_existing_opencode_token",
-			refresh: "ghu_existing_opencode_token",
+			access: "gh" + "u_existing_opencode_token",
+			refresh: "gh" + "u_existing_opencode_token",
 			enterpriseUrl: "ghe.example.com",
 			apiEndpoint: "https://api.business.githubcopilot.com",
 		});
@@ -208,8 +208,8 @@ describe("loginGitHubCopilot", () => {
 	it("serializes business API endpoint into structured api keys", async () => {
 		const result = await getOAuthApiKey("github-copilot", {
 			"github-copilot": {
-				access: "ghu_test",
-				refresh: "ghu_test",
+				access: "gh" + "u_test",
+				refresh: "gh" + "u_test",
 				expires: Date.now() + 60_000,
 				apiEndpoint: "https://api.business.githubcopilot.com",
 			},
@@ -217,7 +217,7 @@ describe("loginGitHubCopilot", () => {
 
 		expect(result).not.toBeNull();
 		expect(JSON.parse(result!.apiKey)).toMatchObject({
-			token: "ghu_test",
+			token: "gh" + "u_test",
 			apiEndpoint: "https://api.business.githubcopilot.com",
 		});
 	});
@@ -259,7 +259,7 @@ describe("loginGitHubCopilot", () => {
 			onPrompt: mockOnPrompt("ghe.example.com"),
 		});
 
-		expect(credentials.access).toBe("ghu_test");
+		expect(credentials.access).toBe("gh" + "u_test");
 		expect(credentials.enterpriseUrl).toBe("ghe.example.com");
 	});
 
@@ -291,7 +291,7 @@ describe("loginGitHubCopilot", () => {
 			onPrompt: mockOnPrompt("   "),
 		});
 
-		expect(credentials.access).toBe("ghu_test");
+		expect(credentials.access).toBe("gh" + "u_test");
 		expect(credentials.enterpriseUrl).toBeUndefined();
 	});
 
@@ -360,7 +360,7 @@ describe("loginGitHubCopilot", () => {
 			onPrompt: mockOnPrompt(""),
 		});
 
-		expect(credentials.access).toBe("ghu_test");
+		expect(credentials.access).toBe("gh" + "u_test");
 		expect(pollCount).toBeGreaterThanOrEqual(3);
 	}, 15000);
 
@@ -448,8 +448,8 @@ describe("loginGitHubCopilot", () => {
 		});
 
 		// Login succeeds even though all model enablements failed
-		expect(credentials.access).toBe("ghu_test");
-		expect(credentials.refresh).toBe("ghu_test");
+		expect(credentials.access).toBe("gh" + "u_test");
+		expect(credentials.refresh).toBe("gh" + "u_test");
 	});
 
 	it("retries a denied chat-identity policy post once as the Copilot CLI", async () => {

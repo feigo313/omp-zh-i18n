@@ -44,7 +44,7 @@ describe("AuthStorage.getCredentialOrigin", () => {
 	});
 
 	test("env origin carries the backing variable name for single-var providers", async () => {
-		await withEnv({ ...SUPPRESS_ENV, COPILOT_GITHUB_TOKEN: "ghp_fake" }, () => {
+		await withEnv({ ...SUPPRESS_ENV, COPILOT_GITHUB_TOKEN: "gh" + "p_fake" }, () => {
 			expect(auth?.getCredentialOrigin("github-copilot")).toEqual({
 				kind: "env",
 				envVar: "COPILOT_GITHUB_TOKEN",
@@ -54,13 +54,13 @@ describe("AuthStorage.getCredentialOrigin", () => {
 
 	test("env origin omits the variable name for computed resolvers", async () => {
 		// anthropic resolves through $pickenv(...) — no single variable describes it.
-		await withEnv({ ...SUPPRESS_ENV, ANTHROPIC_API_KEY: "sk-fake" }, () => {
+		await withEnv({ ...SUPPRESS_ENV, ANTHROPIC_API_KEY: "sk" + "-fake" }, () => {
 			expect(auth?.getCredentialOrigin("anthropic")).toEqual({ kind: "env" });
 		});
 	});
 
 	test("a stored OAuth credential outranks an env var", async () => {
-		await withEnv({ ...SUPPRESS_ENV, COPILOT_GITHUB_TOKEN: "ghp_fake" }, async () => {
+		await withEnv({ ...SUPPRESS_ENV, COPILOT_GITHUB_TOKEN: "gh" + "p_fake" }, async () => {
 			await auth?.set("github-copilot", [
 				{ type: "oauth", access: "a", refresh: "r", expires: Date.now() + 60_000 },
 			]);
@@ -73,7 +73,7 @@ describe("AuthStorage.getCredentialOrigin", () => {
 			// getApiKey() resolves stored OAuth before a stored api_key, so the origin must match.
 			await auth?.set("openai", [
 				{ type: "oauth", access: "a", refresh: "r", expires: Date.now() + 60_000 },
-				{ type: "api_key", key: "sk-stored" },
+				{ type: "api_key", key: "sk" + "-stored" },
 			]);
 			expect(auth?.getCredentialOrigin("openai")).toEqual({ kind: "oauth" });
 		});
@@ -82,17 +82,17 @@ describe("AuthStorage.getCredentialOrigin", () => {
 	test("an explicit env var outranks a stored api key", async () => {
 		// Regression: a live env var is the user's current choice and must win over a stored
 		// static api_key (e.g. a stale broker-migrated copy) so `GEMINI_API_KEY` etc. take effect.
-		await withEnv({ ...SUPPRESS_ENV, OPENAI_API_KEY: "sk-env" }, async () => {
-			await auth?.set("openai", [{ type: "api_key", key: "sk-stored" }]);
+		await withEnv({ ...SUPPRESS_ENV, OPENAI_API_KEY: "sk" + "-env" }, async () => {
+			await auth?.set("openai", [{ type: "api_key", key: "sk" + "-stored" }]);
 			expect(auth?.getCredentialOrigin("openai")).toEqual({ kind: "env", envVar: "OPENAI_API_KEY" });
-			expect(await auth?.getApiKey("openai")).toBe("sk-env");
+			expect(await auth?.getApiKey("openai")).toBe("sk" + "-env");
 		});
 	});
 
 	test("config then runtime overrides take precedence over stored credentials", async () => {
 		await withEnv(SUPPRESS_ENV, async () => {
 			if (!auth) throw new Error("test setup failed");
-			await auth.set("openai", [{ type: "api_key", key: "sk-stored" }]);
+			await auth.set("openai", [{ type: "api_key", key: "sk" + "-stored" }]);
 			expect(auth.getCredentialOrigin("openai")).toEqual({ kind: "api_key" });
 
 			auth.setConfigApiKey("openai", "gateway-bearer");

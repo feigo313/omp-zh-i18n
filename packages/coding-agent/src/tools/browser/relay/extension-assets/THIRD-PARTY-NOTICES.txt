@@ -516,7 +516,7 @@ exhaustive, and do not form part of our licenses.
      such as asking that all changes be marked or described.
      Although not required by our licenses, you are encouraged to
      respect those requests where reasonable. More_considerations
-     for the public: 
+     for the public:
 	wiki.creativecommons.org/Considerations_for_licensees
 
 =======================================================================
@@ -1204,9 +1204,9 @@ MIT, ISC, BSD-3-Clause, Apache-2.0, BSD-2-Clause, and BlueOak-1.0.0.
 
 > Angular - the compiler library
 
-License: MIT  
-Repository: <https://github.com/angular/angular.git>  
-Author: angular  
+License: MIT
+Repository: <https://github.com/angular/angular.git>
+Author: angular
 
 > The MIT License
 >
@@ -1236,10 +1236,10 @@ Author: angular
 
 > Generate errors that contain a code frame that point to source locations.
 
-License: MIT  
-Homepage: <https://babel.dev/docs/en/next/babel-code-frame>  
-Repository: <https://github.com/babel/babel.git>  
-Author: The Babel Team (https://babel.dev/team)  
+License: MIT
+Homepage: <https://babel.dev/docs/en/next/babel-code-frame>
+Repository: <https://github.com/babel/babel.git>
+Author: The Babel Team (https://babel.dev/team)
 
 > MIT License
 >
@@ -1270,9 +1270,9 @@ Author: The Babel Team (https://babel.dev/team)
 
 > Validate identifier/keywords name
 
-License: MIT  
-Repository: <https://github.com/babel/babel.git>  
-Author: The Babel Team (https://babel.dev/team)  
+License: MIT
+Repository: <https://github.com/babel/babel.git>
+Author: The Babel Team (https://babel.dev/team)
 
 > MIT License
 >
@@ -1303,10 +1303,10 @@ Author: The Babel Team (https://babel.dev/team)
 
 > A JavaScript parser
 
-License: MIT  
-Homepage: <https://babel.dev/docs/en/next/babel-parser>  
-Repository: <https://github.com/babel/babel.git>  
-Author: The Babel Team (https://babel.dev/team)  
+License: MIT
+Homepage: <https://babel.dev/docs/en/next/babel-parser>
+Repository: <https://github.com/babel/babel.git>
+Author: The Babel Team (https://babel.dev/team)
 
 > Copyright (C) 2012-2014 by various contributors (see AUTHORS)
 >
@@ -1334,8 +1334,8 @@ Author: The Babel Team (https://babel.dev/team)
 
 > Parse and render wiki-style links
 
-License: MIT  
-Repository: <git+https://github.com/stereobooster/braindb.git>  
+License: MIT
+Repository: <git+https://github.com/stereobooster/braindb.git>
 Contributors:
  - Mark Hudnall <me@markhudnall.com> (https://markhudnall.com)
  - stereobooster
@@ -1346,8 +1346,8 @@ Contributors:
 
 > Parse and render wiki-style links
 
-License: MIT  
-Repository: <git+https://github.com/stereobooster/braindb.git>  
+License: MIT
+Repository: <git+https://github.com/stereobooster/braindb.git>
 Contributors:
  - Mark Hudnall <me@markhudnall.com> (https://markhudnall.com)
  - stereobooster
@@ -1358,11 +1358,11 @@ Contributors:
 
 > High Performance In-Memory Cache for Node.js
 
-License: MIT  
-Repository: <git+https://github.com/jaredwray/cacheable.git>  
-Author: Jared Wray <me@jaredwray.com>  
+License: MIT
+Repository: <git+https://github.com/jaredwray/cacheable.git>
+Author: Jared Wray <me@jaredwray.com>
 
-> MIT License & © Jared Wray 
+> MIT License & © Jared Wray
 >
 > Permission is hereby granted, free of charge, to any person obtaining a copy
 > of this software and associated documentation files (the "Software"), to
@@ -1388,11 +1388,11 @@ Author: Jared Wray <me@jaredwray.com>
 
 > Cacheable Utilities for Caching Libraries
 
-License: MIT  
-Repository: <git+https://github.com/jaredwray/cacheable.git>  
-Author: Jared Wray <me@jaredwray.com>  
+License: MIT
+Repository: <git+https://github.com/jaredwray/cacheable.git>
+Author: Jared Wray <me@jaredwray.com>
 
-> MIT License & © Jared Wray 
+> MIT License & © Jared Wray
 >
 > Permission is hereby granted, free of charge, to any person obtaining a copy
 > of this software and associated documentation files (the "Software"), to
@@ -1416,8 +1416,8 @@ Author: Jared Wray <me@jaredwray.com>
 
 ## @glimmer/syntax@v0.95.0
 
-License: MIT  
-Repository: <git+https://github.com/glimmerjs/glimmer-vm.git>  
+License: MIT
+Repository: <git+https://github.com/glimmerjs/glimmer-vm.git>
 
 > Copyright (c) 2015 Tilde, Inc.
 >
@@ -1445,8 +1445,8 @@ Repository: <git+https://github.com/glimmerjs/glimmer-vm.git>
 
 > Common utilities used in Glimmer
 
-License: MIT  
-Repository: <git+https://github.com/glimmerjs/glimmer-vm.git>  
+License: MIT
+Repository: <git+https://github.com/glimmerjs/glimmer-vm.git>
 
 > Copyright (c) 2015 Tilde, Inc.
 >
@@ -1472,8 +1472,8 @@ Repository: <git+https://github.com/glimmerjs/glimmer-vm.git>
 
 ## @glimmer/wire-format@v0.94.8
 
-License: MIT  
-Repository: <git+https://github.com/glimmerjs/glimmer-vm.git>  
+License: MIT
+Repository: <git+https://github.com/glimmerjs/glimmer-vm.git>
 
 > Copyright (c) 2015 Tilde, Inc.
 >
@@ -1501,9 +1501,9 @@ Repository: <git+https://github.com/glimmerjs/glimmer-vm.git>
 
 > The parser for the Handlebars language
 
-License: ISC  
-Homepage: <https://github.com/handlebars-lang/handlebars-parser#readme>  
-Repository: <git+https://github.com/handlebars-lang/handlebars-parser.git>  
+License: ISC
+Homepage: <https://github.com/handlebars-lang/handlebars-parser#readme>
+Repository: <git+https://github.com/handlebars-lang/handlebars-parser.git>
 
 ----------------------------------------
 
@@ -1511,10 +1511,10 @@ Repository: <git+https://github.com/handlebars-lang/handlebars-parser.git>
 
 > Serialization for Keyv
 
-License: MIT  
-Homepage: <https://github.com/jaredwray/keyv>  
-Repository: <git+https://github.com/jaredwray/keyv.git>  
-Author: Jared Wray <me@jaredwray.com> (https://jaredwray.com)  
+License: MIT
+Homepage: <https://github.com/jaredwray/keyv>
+Repository: <git+https://github.com/jaredwray/keyv.git>
+Author: Jared Wray <me@jaredwray.com> (https://jaredwray.com)
 
 > MIT License
 >
@@ -1545,7 +1545,7 @@ Author: Jared Wray <me@jaredwray.com> (https://jaredwray.com)
 
 > List files and directories inside the specified directory
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -1575,7 +1575,7 @@ License: MIT
 
 > Get the status of a file with some features
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -1605,7 +1605,7 @@ License: MIT
 
 > A library for efficiently walking a directory recursively
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -1635,7 +1635,7 @@ License: MIT
 
 > A faster CLI for Prettier.
 
-License: MIT  
+License: MIT
 
 > Copyright © James Long and contributors
 >
@@ -1651,8 +1651,8 @@ License: MIT
 
 > List of HTML event handler attributes.
 
-License: MIT  
-Author: fisker <lionkay@gmail.com> (https://fiskercheung.com)  
+License: MIT
+Author: fisker <lionkay@gmail.com> (https://fiskercheung.com)
 
 > MIT License
 >
@@ -1682,9 +1682,9 @@ Author: fisker <lionkay@gmail.com> (https://fiskercheung.com)
 
 > A spec-conformant JavaScript parser for the HTML5 srcset attribute
 
-License: MIT  
-Homepage: <https://github.com/prettier/parse-srcset#readme>  
-Author: Alex Bell <alex@bellandwhistle.net>  
+License: MIT
+Homepage: <https://github.com/prettier/parse-srcset#readme>
+Author: Alex Bell <alex@bellandwhistle.net>
 
 > The MIT License (MIT)
 >
@@ -1715,9 +1715,9 @@ Author: Alex Bell <alex@bellandwhistle.net>
 
 > Types for the TypeScript-ESTree AST spec
 
-License: MIT  
-Homepage: <https://typescript-eslint.io>  
-Repository: <https://github.com/typescript-eslint/typescript-eslint.git>  
+License: MIT
+Homepage: <https://typescript-eslint.io>
+Repository: <https://github.com/typescript-eslint/typescript-eslint.git>
 
 > MIT License
 >
@@ -1747,9 +1747,9 @@ Repository: <https://github.com/typescript-eslint/typescript-eslint.git>
 
 > A parser that converts TypeScript source code into an ESTree compatible form
 
-License: MIT  
-Homepage: <https://typescript-eslint.io/packages/typescript-estree>  
-Repository: <https://github.com/typescript-eslint/typescript-eslint.git>  
+License: MIT
+Homepage: <https://typescript-eslint.io/packages/typescript-estree>
+Repository: <https://github.com/typescript-eslint/typescript-eslint.git>
 
 > MIT License
 >
@@ -1779,9 +1779,9 @@ Repository: <https://github.com/typescript-eslint/typescript-eslint.git>
 
 > ECMAScript parser
 
-License: MIT  
-Homepage: <https://github.com/acornjs/acorn>  
-Repository: <git+https://github.com/acornjs/acorn.git>  
+License: MIT
+Homepage: <https://github.com/acornjs/acorn>
+Repository: <git+https://github.com/acornjs/acorn.git>
 
 > MIT License
 >
@@ -1811,9 +1811,9 @@ Repository: <git+https://github.com/acornjs/acorn.git>
 
 > Modern, fast React.js JSX parser
 
-License: MIT  
-Homepage: <https://github.com/acornjs/acorn-jsx>  
-Repository: <https://github.com/acornjs/acorn-jsx>  
+License: MIT
+Homepage: <https://github.com/acornjs/acorn-jsx>
+Repository: <https://github.com/acornjs/acorn-jsx>
 
 > Copyright (C) 2012-2017 by Ingvar Stepanyan
 >
@@ -1841,9 +1841,9 @@ Repository: <https://github.com/acornjs/acorn-jsx>
 
 > A parser that converts Angular source code into an ESTree-compatible form
 
-License: MIT  
-Homepage: <https://github.com/prettier/angular-estree-parser#readme>  
-Author: Ika <ikatyang@gmail.com> (https://github.com/ikatyang)  
+License: MIT
+Homepage: <https://github.com/prettier/angular-estree-parser#readme>
+Author: Ika <ikatyang@gmail.com> (https://github.com/ikatyang)
 
 > MIT License
 >
@@ -1873,9 +1873,9 @@ Author: Ika <ikatyang@gmail.com> (https://github.com/ikatyang)
 
 > A HTML parser extracted from Angular with some modifications
 
-License: MIT  
-Homepage: <https://github.com/prettier/angular-html-parser/blob/HEAD/packages/angular-html-parser#readme>  
-Author: Ika <ikatyang@gmail.com> (https://github.com/ikatyang)  
+License: MIT
+Homepage: <https://github.com/prettier/angular-html-parser/blob/HEAD/packages/angular-html-parser#readme>
+Author: Ika <ikatyang@gmail.com> (https://github.com/ikatyang)
 
 > MIT License
 >
@@ -1905,7 +1905,7 @@ Author: Ika <ikatyang@gmail.com> (https://github.com/ikatyang)
 
 > A tiny function for deleting ANSI escape sequences from a string.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -1935,8 +1935,8 @@ License: MIT
 
 > Regular expression for matching ANSI escape codes
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -1954,7 +1954,7 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > A tiny function for truncating a string that may contain ANSI escape sequences.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -1984,7 +1984,7 @@ License: MIT
 
 > Read and write files atomically and reliably.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -2014,8 +2014,8 @@ License: MIT
 
 > Throw a given error
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -2048,8 +2048,8 @@ Contributors:
 
 > Match balanced character pairs, like "{" and "}"
 
-License: MIT  
-Repository: <git://github.com/juliangruber/balanced-match.git>  
+License: MIT
+Repository: <git://github.com/juliangruber/balanced-match.git>
 
 > (MIT)
 >
@@ -2081,10 +2081,10 @@ Repository: <git://github.com/juliangruber/balanced-match.git>
 
 > Base64 encoding/decoding in pure JS
 
-License: MIT  
-Homepage: <https://github.com/beatgammit/base64-js>  
-Repository: <git://github.com/beatgammit/base64-js.git>  
-Author: T. Jameson Little <t.jameson.little@gmail.com>  
+License: MIT
+Homepage: <https://github.com/beatgammit/base64-js>
+Repository: <git://github.com/beatgammit/base64-js.git>
+Author: T. Jameson Little <t.jameson.little@gmail.com>
 
 > The MIT License (MIT)
 >
@@ -2114,8 +2114,8 @@ Author: T. Jameson Little <t.jameson.little@gmail.com>
 
 > List of binary file extensions
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -2134,8 +2134,8 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > Brace expansion as known from sh/bash
 
-License: MIT  
-Repository: <git+ssh://git@github.com/juliangruber/brace-expansion.git>  
+License: MIT
+Repository: <git+ssh://git@github.com/juliangruber/brace-expansion.git>
 
 > MIT License
 >
@@ -2167,9 +2167,9 @@ Repository: <git+ssh://git@github.com/juliangruber/brace-expansion.git>
 
 > Bash-like brace expansion, implemented in JavaScript. Safer than other brace expansion libs, with complete support for the Bash 4.3 braces specification, without sacrificing speed.
 
-License: MIT  
-Homepage: <https://github.com/micromatch/braces>  
-Author: Jon Schlinkert (https://github.com/jonschlinkert)  
+License: MIT
+Homepage: <https://github.com/micromatch/braces>
+Author: Jon Schlinkert (https://github.com/jonschlinkert)
 Contributors:
  - Brian Woodward (https://twitter.com/doowb)
  - Elan Shanker (https://github.com/es128)
@@ -2205,10 +2205,10 @@ Contributors:
 
 > Node.js Buffer API, for the browser
 
-License: MIT  
-Homepage: <https://github.com/feross/buffer>  
-Repository: <git://github.com/feross/buffer.git>  
-Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)  
+License: MIT
+Homepage: <https://github.com/feross/buffer>
+Repository: <git://github.com/feross/buffer.git>
+Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)
 Contributors:
  - Romain Beauxis <toots@rastageeks.org>
  - James Halliday <mail@substack.net>
@@ -2241,11 +2241,11 @@ Contributors:
 
 > High Performance Layer 1 / Layer 2 Caching with Keyv Storage
 
-License: MIT  
-Repository: <git+https://github.com/jaredwray/cacheable.git>  
-Author: Jared Wray <me@jaredwray.com>  
+License: MIT
+Repository: <git+https://github.com/jaredwray/cacheable.git>
+Author: Jared Wray <me@jaredwray.com>
 
-> MIT License & © Jared Wray 
+> MIT License & © Jared Wray
 >
 > Permission is hereby granted, free of charge, to any person obtaining a copy
 > of this software and associated documentation files (the "Software"), to
@@ -2271,8 +2271,8 @@ Author: Jared Wray <me@jaredwray.com>
 
 > Convert a dash/dot/underscore/space separated string to camelCase or PascalCase: `foo-bar` → `fooBar`
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -2290,8 +2290,8 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > Count how often a character (or substring) is used in a string
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -2324,8 +2324,8 @@ Contributors:
 
 > Map of named character references
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -2358,8 +2358,8 @@ Contributors:
 
 > HTML legacy character entity information
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -2392,8 +2392,8 @@ Contributors:
 
 > HTML invalid numeric character reference information
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -2426,9 +2426,9 @@ Contributors:
 
 > Get details about the current Continuous Integration environment
 
-License: MIT  
-Homepage: <https://github.com/watson/ci-info>  
-Author: Thomas Watson Steen <w@tson.dk> (https://twitter.com/wa7son)  
+License: MIT
+Homepage: <https://github.com/watson/ci-info>
+Author: Thomas Watson Steen <w@tson.dk> (https://twitter.com/wa7son)
 Contributors:
  - Sibiraj (https://github.com/sibiraj-s)
 
@@ -2460,8 +2460,8 @@ Contributors:
 
 > Replace multiple white-space characters with a single space
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -2494,10 +2494,10 @@ Contributors:
 
 > Computes the longest prefix string that is common to each path, excluding the base component
 
-License: ISC  
-Homepage: <https://github.com/novemberborn/common-path-prefix#readme>  
-Repository: <git+https://github.com/novemberborn/common-path-prefix.git>  
-Author: Mark Wubben (https://novemberborn.net/)  
+License: ISC
+Homepage: <https://github.com/novemberborn/common-path-prefix#readme>
+Repository: <git+https://github.com/novemberborn/common-path-prefix.git>
+Author: Mark Wubben (https://novemberborn.net/)
 
 > ISC License (ISC)
 > Copyright (c) 2016, Mark Wubben
@@ -2520,9 +2520,9 @@ Author: Mark Wubben (https://novemberborn.net/)
 
 > Convert a camelcase or space-separated string to a dash-separated string. ~12 sloc, fast, supports diacritics.
 
-License: MIT  
-Homepage: <https://github.com/jonschlinkert/dashify>  
-Author: Jon Schlinkert (https://github.com/jonschlinkert)  
+License: MIT
+Homepage: <https://github.com/jonschlinkert/dashify>
+Author: Jon Schlinkert (https://github.com/jonschlinkert)
 Contributors:
  - Jeffrey Priebe (https://github.com/jeffreypriebe)
  - Jon Schlinkert (http://twitter.com/jonschlinkert)
@@ -2556,8 +2556,8 @@ Contributors:
 
 > Decode named character references
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -2590,9 +2590,9 @@ Contributors:
 
 > Convert file URLs to paths.
 
-License: MIT  
-Homepage: <https://github.com/fisker/deno-path-from-file-url#readme>  
-Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)  
+License: MIT
+Homepage: <https://github.com/fisker/deno-path-from-file-url#readme>
+Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > MIT License
 >
@@ -2622,7 +2622,7 @@ Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > A tiny fully-featured debounce and throttle implementation.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -2652,8 +2652,8 @@ License: MIT
 
 > Do things in development and nothing otherwise
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -2686,8 +2686,8 @@ Contributors:
 
 > A JavaScript text diff implementation.
 
-License: BSD-3-Clause  
-Repository: <https://github.com/kpdecker/jsdiff.git>  
+License: BSD-3-Clause
+Repository: <https://github.com/kpdecker/jsdiff.git>
 
 > BSD 3-Clause License
 >
@@ -2725,9 +2725,9 @@ Repository: <https://github.com/kpdecker/jsdiff.git>
 
 > EditorConfig File Locator and Interpreter for Node.js
 
-License: MIT  
-Repository: <git://github.com/fisker/editorconfig-core-js-without-wasm.git>  
-Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)  
+License: MIT
+Repository: <git://github.com/fisker/editorconfig-core-js-without-wasm.git>
+Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 Contributors:
  - Hong Xu (topbug.net)
  - Jed Mao (https://github.com/jedmao/)
@@ -2763,10 +2763,10 @@ Contributors:
 
 > A regular expression to match all Emoji-only symbols as per the Unicode Standard.
 
-License: MIT  
-Homepage: <https://mths.be/emoji-regex>  
-Repository: <https://github.com/mathiasbynens/emoji-regex.git>  
-Author: Mathias Bynens (https://mathiasbynens.be/)  
+License: MIT
+Homepage: <https://mths.be/emoji-regex>
+Repository: <https://github.com/mathiasbynens/emoji-regex.git>
+Author: Mathias Bynens (https://mathiasbynens.be/)
 
 > Copyright Mathias Bynens <https://mathiasbynens.be/>
 >
@@ -2795,8 +2795,8 @@ Author: Mathias Bynens (https://mathiasbynens.be/)
 
 > Escape RegExp special characters
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -2814,10 +2814,10 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > Constants and utilities about visitor keys to traverse AST.
 
-License: Apache-2.0  
-Homepage: <https://github.com/eslint/js/blob/main/packages/eslint-visitor-keys/README.md>  
-Repository: <https://github.com/eslint/js.git>  
-Author: Toru Nagashima (https://github.com/mysticatea)  
+License: Apache-2.0
+Homepage: <https://github.com/eslint/js/blob/main/packages/eslint-visitor-keys/README.md>
+Repository: <https://github.com/eslint/js.git>
+Author: Toru Nagashima (https://github.com/mysticatea)
 
 > Apache License
 >                            Version 2.0, January 2004
@@ -3027,10 +3027,10 @@ Author: Toru Nagashima (https://github.com/mysticatea)
 
 > An Esprima-compatible JavaScript parser built on Acorn
 
-License: BSD-2-Clause  
-Homepage: <https://github.com/eslint/js/blob/main/packages/espree/README.md>  
-Repository: <https://github.com/eslint/js.git>  
-Author: Nicholas C. Zakas <nicholas+npm@nczconsulting.com>  
+License: BSD-2-Clause
+Homepage: <https://github.com/eslint/js/blob/main/packages/espree/README.md>
+Repository: <https://github.com/eslint/js.git>
+Author: Nicholas C. Zakas <nicholas+npm@nczconsulting.com>
 
 > BSD 2-Clause License
 >
@@ -3064,9 +3064,9 @@ Author: Nicholas C. Zakas <nicholas+npm@nczconsulting.com>
 
 > Port of jQuery.extend for node.js and the browser
 
-License: MIT  
-Repository: <https://github.com/justmoon/node-extend.git>  
-Author: Stefan Thomas <justmoon@members.fsf.org> (http://www.justmoon.net)  
+License: MIT
+Repository: <https://github.com/justmoon/node-extend.git>
+Author: Stefan Thomas <justmoon@members.fsf.org> (http://www.justmoon.net)
 Contributors:
  - Jordan Harband (https://github.com/ljharb)
 
@@ -3099,8 +3099,8 @@ Contributors:
 
 > It's a very fast and efficient glob library for Node.js
 
-License: MIT  
-Author: Denis Malinochkin (https://mrmlnc.com)  
+License: MIT
+Author: Denis Malinochkin (https://mrmlnc.com)
 
 > The MIT License (MIT)
 >
@@ -3130,7 +3130,7 @@ Author: Denis Malinochkin (https://mrmlnc.com)
 
 > A fast parser and processor for .gitignore files.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -3160,10 +3160,10 @@ License: MIT
 
 > deterministic `JSON.stringify()` - a faster version of substack's json-stable-strigify without jsonify
 
-License: MIT  
-Homepage: <https://github.com/epoberezkin/fast-json-stable-stringify>  
-Repository: <git://github.com/epoberezkin/fast-json-stable-stringify.git>  
-Author: James Halliday <mail@substack.net> (http://substack.net)  
+License: MIT
+Homepage: <https://github.com/epoberezkin/fast-json-stable-stringify>
+Repository: <git://github.com/epoberezkin/fast-json-stable-stringify.git>
+Author: James Halliday <mail@substack.net> (http://substack.net)
 
 > This software is released under the MIT license:
 >
@@ -3193,7 +3193,7 @@ Author: James Halliday <mail@substack.net> (http://substack.net)
 
 > A fast function for calculating where a string should be truncated, given an optional width limit and an ellipsis string.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -3223,7 +3223,7 @@ License: MIT
 
 > A fast function for calculating the visual width of a string once printed to the terminal.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -3253,10 +3253,10 @@ License: MIT
 
 > Fast, in memory work queue
 
-License: ISC  
-Homepage: <https://github.com/mcollina/fastq#readme>  
-Repository: <git+https://github.com/mcollina/fastq.git>  
-Author: Matteo Collina <hello@matteocollina.com>  
+License: ISC
+Homepage: <https://github.com/mcollina/fastq#readme>
+Repository: <git+https://github.com/mcollina/fastq.git>
+Author: Matteo Collina <hello@matteocollina.com>
 
 > Copyright (c) 2015-2020, Matteo Collina <matteo.collina@gmail.com>
 >
@@ -3278,11 +3278,11 @@ Author: Matteo Collina <hello@matteocollina.com>
 
 > A lightweight cache for file metadata, ideal for processes that work on a specific set of files and only need to reprocess files that have changed since the last run
 
-License: MIT  
-Repository: <git+https://github.com/jaredwray/cacheable.git>  
-Author: Jared Wray <me@jaredwray.com>  
+License: MIT
+Repository: <git+https://github.com/jaredwray/cacheable.git>
+Author: Jared Wray <me@jaredwray.com>
 
-> MIT License & © Jared Wray 
+> MIT License & © Jared Wray
 >
 > Permission is hereby granted, free of charge, to any person obtaining a copy
 > of this software and associated documentation files (the "Software"), to
@@ -3308,9 +3308,9 @@ Author: Jared Wray <me@jaredwray.com>
 
 > Fill in a range of numbers or letters, optionally passing an increment or `step` to use, or create a regex-compatible range with `options.toRegex`
 
-License: MIT  
-Homepage: <https://github.com/jonschlinkert/fill-range>  
-Author: Jon Schlinkert (https://github.com/jonschlinkert)  
+License: MIT
+Homepage: <https://github.com/jonschlinkert/fill-range>
+Author: Jon Schlinkert (https://github.com/jonschlinkert)
 Contributors:
  - Edo Rivai (edo.rivai.nl)
  - Jon Schlinkert (http://twitter.com/jonschlinkert)
@@ -3346,8 +3346,8 @@ Contributors:
 
 > Finds the common standard cache directory
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -3366,9 +3366,9 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > Find file or directory by names in a directory.
 
-License: MIT  
-Homepage: <https://github.com/fisker/find-in-directory#readme>  
-Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)  
+License: MIT
+Homepage: <https://github.com/fisker/find-in-directory#readme>
+Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > MIT License
 >
@@ -3398,7 +3398,7 @@ Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > Find, read and parse the first matching file found walking the filesystem upwards.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -3428,7 +3428,7 @@ License: MIT
 
 > Find the path of the first file matching a given name, walking the filesystem upwards.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -3458,8 +3458,8 @@ License: MIT
 
 > Find a file or directory by walking up parent directories — Zero dependencies
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -3477,11 +3477,11 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > A simple key/value storage using files to persist the data
 
-License: MIT  
-Repository: <git+https://github.com/jaredwray/cacheable.git>  
-Author: Jared Wray <me@jaredwray.com>  
+License: MIT
+Repository: <git+https://github.com/jaredwray/cacheable.git>
+Author: Jared Wray <me@jaredwray.com>
 
-> MIT License & © Jared Wray 
+> MIT License & © Jared Wray
 >
 > Permission is hereby granted, free of charge, to any person obtaining a copy
 > of this software and associated documentation files (the "Software"), to
@@ -3507,10 +3507,10 @@ Author: Jared Wray <me@jaredwray.com>
 
 > A super light and fast circular JSON parser.
 
-License: ISC  
-Homepage: <https://github.com/WebReflection/flatted#readme>  
-Repository: <git+https://github.com/WebReflection/flatted.git>  
-Author: Andrea Giammarchi  
+License: ISC
+Homepage: <https://github.com/WebReflection/flatted#readme>
+Repository: <git+https://github.com/WebReflection/flatted.git>
+Author: Andrea Giammarchi
 
 > ISC License
 >
@@ -3534,10 +3534,10 @@ Author: Andrea Giammarchi
 
 > Flatten arbitrarily nested arrays into a non-nested list of non-array items. Maintained for legacy compatibility.
 
-License: MIT  
-Homepage: <https://github.com/mk-pmb/flatten-js/#readme>  
-Repository: <git+https://github.com/mk-pmb/flatten-js.git>  
-Author: Joshua Holbrook <josh.holbrook@gmail.com> (http://jesusabdullah.net)  
+License: MIT
+Homepage: <https://github.com/mk-pmb/flatten-js/#readme>
+Repository: <git+https://github.com/mk-pmb/flatten-js.git>
+Author: Joshua Holbrook <josh.holbrook@gmail.com> (http://jesusabdullah.net)
 Contributors:
  - M.K. (https://github.com/mk-pmb)
 
@@ -3569,10 +3569,10 @@ Contributors:
 
 > Flow types for the Flow-ESTree spec produced by the Flow Rust parser, forked from hermes-estree.
 
-License: MIT  
-Homepage: <https://flow.org>  
-Repository: <https://github.com/facebook/flow.git>  
-Author: Flow Team <flow@fb.com>  
+License: MIT
+Homepage: <https://flow.org>
+Repository: <https://github.com/facebook/flow.git>
+Author: Flow Team <flow@fb.com>
 
 ----------------------------------------
 
@@ -3580,10 +3580,10 @@ Author: Flow Team <flow@fb.com>
 
 > JavaScript parser written in OCaml. Produces ESTree AST
 
-License: MIT  
-Homepage: <https://flow.org>  
-Repository: <git+https://github.com/facebook/flow.git>  
-Author: Flow Team <flow@fb.com>  
+License: MIT
+Homepage: <https://flow.org>
+Repository: <git+https://github.com/facebook/flow.git>
+Author: Flow Team <flow@fb.com>
 
 ----------------------------------------
 
@@ -3591,7 +3591,7 @@ Author: Flow Team <flow@fb.com>
 
 > Wraps a function so that it's only ever executed once.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -3621,7 +3621,7 @@ License: MIT
 
 > Get the package.json of the currently executing bin.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -3651,8 +3651,8 @@ License: MIT
 
 > Determine the East Asian Width of a Unicode character
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -3670,8 +3670,8 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > Get stdin as a string or buffer
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -3689,8 +3689,8 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > Extract the non-magic parent path from a glob string.
 
-License: ISC  
-Author: Gulp Team <team@gulpjs.com> (https://gulpjs.com/)  
+License: ISC
+Author: Gulp Team <team@gulpjs.com> (https://gulpjs.com/)
 Contributors:
  - Elan Shanker (https://github.com/es128)
  - Blaine Bublitz <blaine.bublitz@gmail.com>
@@ -3717,7 +3717,7 @@ Contributors:
 
 > A tiny, PEG-like system for building language grammars with regexes.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -3747,7 +3747,7 @@ License: MIT
 
 > A low-level utility for matching a string against a directed acyclic graph of regexes.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -3777,9 +3777,9 @@ License: MIT
 
 > A Query Language and Runtime which can target any service.
 
-License: MIT  
-Homepage: <https://github.com/graphql/graphql-js>  
-Repository: <git+https://github.com/graphql/graphql-js.git>  
+License: MIT
+Homepage: <https://github.com/graphql/graphql-js>
+Repository: <git+https://github.com/graphql/graphql-js.git>
 
 > MIT License
 >
@@ -3809,8 +3809,8 @@ Repository: <git+https://github.com/graphql/graphql-js.git>
 
 > Browser Compatible Object Hashing
 
-License: MIT  
-Author: Jared Wray <me@jaredwray.com>  
+License: MIT
+Author: Jared Wray <me@jaredwray.com>
 
 > MIT License
 >
@@ -3840,10 +3840,10 @@ Author: Jared Wray <me@jaredwray.com>
 
 > Event Emitting and Middleware Hooks
 
-License: MIT  
-Homepage: <https://github.com/jaredwray/hookified#readme>  
-Repository: <git+https://github.com/jaredwray/hookified.git>  
-Author: Jared Wray <me@jaredwray.com>  
+License: MIT
+Homepage: <https://github.com/jaredwray/hookified#readme>
+Repository: <git+https://github.com/jaredwray/hookified.git>
+Author: Jared Wray <me@jaredwray.com>
 
 > MIT License & © Jared Wray
 >
@@ -3871,9 +3871,9 @@ Author: Jared Wray <me@jaredwray.com>
 
 > Read/write IEEE754 floating point numbers from/to a Buffer or array-like object
 
-License: BSD-3-Clause  
-Repository: <git://github.com/feross/ieee754.git>  
-Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)  
+License: BSD-3-Clause
+Repository: <git://github.com/feross/ieee754.git>
+Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)
 Contributors:
  - Romain Beauxis <toots@rastageeks.org>
 
@@ -3895,9 +3895,9 @@ Contributors:
 
 > Ignore is a manager and filter for .gitignore rules, the one used by eslint, gitbook and many others.
 
-License: MIT  
-Repository: <git@github.com:kaelzhang/node-ignore.git>  
-Author: kael  
+License: MIT
+Repository: <git@github.com:kaelzhang/node-ignore.git>
+Author: kael
 
 > Copyright (c) 2013 Kael Zhang <i@kael.me>, contributors
 > http://kael.me/
@@ -3927,8 +3927,8 @@ Author: kael
 
 > Resolve things like Node.js — ponyfill for `import.meta.resolve`
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -4013,9 +4013,9 @@ Contributors:
 
 > An incremental implementation of MurmurHash3 for JavaScript.
 
-License: MIT  
-Homepage: <https://github.com/fisker/imurmurhash-esm#readme>  
-Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)  
+License: MIT
+Homepage: <https://github.com/fisker/imurmurhash-esm#readme>
+Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > MIT License
 >
@@ -4045,8 +4045,8 @@ Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > Convert a string index to its line and column position
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -4064,32 +4064,32 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > line String/Array#indexOf but return all the indexes in an array
 
-License: MIT  
-Homepage: <https://github.com/dominictarr/indexes-of>  
-Repository: <git://github.com/dominictarr/indexes-of.git>  
-Author: Dominic Tarr <dominic.tarr@gmail.com> (dominictarr.com)  
+License: MIT
+Homepage: <https://github.com/dominictarr/indexes-of>
+Repository: <git://github.com/dominictarr/indexes-of.git>
+Author: Dominic Tarr <dominic.tarr@gmail.com> (dominictarr.com)
 
 > Copyright (c) 2013 Dominic Tarr
 >
-> Permission is hereby granted, free of charge, 
-> to any person obtaining a copy of this software and 
-> associated documentation files (the "Software"), to 
-> deal in the Software without restriction, including 
-> without limitation the rights to use, copy, modify, 
-> merge, publish, distribute, sublicense, and/or sell 
-> copies of the Software, and to permit persons to whom 
-> the Software is furnished to do so, 
+> Permission is hereby granted, free of charge,
+> to any person obtaining a copy of this software and
+> associated documentation files (the "Software"), to
+> deal in the Software without restriction, including
+> without limitation the rights to use, copy, modify,
+> merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom
+> the Software is furnished to do so,
 > subject to the following conditions:
 >
-> The above copyright notice and this permission notice 
+> The above copyright notice and this permission notice
 > shall be included in all copies or substantial portions of the Software.
 >
-> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
-> EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
-> OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
-> IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
-> ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
-> TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+> EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+> OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+> IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
+> ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+> TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 > SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ----------------------------------------
@@ -4098,7 +4098,7 @@ Author: Dominic Tarr <dominic.tarr@gmail.com> (dominictarr.com)
 
 > Browser-friendly inheritance fully compatible with standard node.js inherits()
 
-License: ISC  
+License: ISC
 
 > The ISC License
 >
@@ -4122,7 +4122,7 @@ License: ISC
 
 > A simple, fast and configurable INI parser.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -4152,7 +4152,7 @@ License: MIT
 
 > A very simple isomorphic key-value store with a Map-like API for persisting session data.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -4182,8 +4182,8 @@ License: MIT
 
 > Check if a character is alphabetical
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -4216,8 +4216,8 @@ Contributors:
 
 > Check if a character is alphanumerical
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -4250,8 +4250,8 @@ Contributors:
 
 > Check if a file path is a binary file
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -4270,9 +4270,9 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > Determine if an object is a Buffer
 
-License: MIT  
-Repository: <git://github.com/feross/is-buffer.git>  
-Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)  
+License: MIT
+Repository: <git://github.com/feross/is-buffer.git>
+Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)
 
 > The MIT License (MIT)
 >
@@ -4302,8 +4302,8 @@ Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)
 
 > Check if a character is decimal
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -4336,8 +4336,8 @@ Contributors:
 
 > Check if provided string is an `IdentifierName` as specified in ECMA262 edition 5.1 section 7.6.
 
-License: MIT  
-Author: fisker Cheung <lionkay@gmail.com>  
+License: MIT
+Author: fisker Cheung <lionkay@gmail.com>
 
 > MIT License
 >
@@ -4367,9 +4367,9 @@ Author: fisker Cheung <lionkay@gmail.com>
 
 > Returns true if a string has an extglob.
 
-License: MIT  
-Homepage: <https://github.com/jonschlinkert/is-extglob>  
-Author: Jon Schlinkert (https://github.com/jonschlinkert)  
+License: MIT
+Homepage: <https://github.com/jonschlinkert/is-extglob>
+Author: Jon Schlinkert (https://github.com/jonschlinkert)
 
 > The MIT License (MIT)
 >
@@ -4399,9 +4399,9 @@ Author: Jon Schlinkert (https://github.com/jonschlinkert)
 
 > Returns `true` if the given string looks like a glob pattern or an extglob pattern. This makes it easy to create code that only uses external modules like node-glob when necessary, resulting in much faster code execution and initialization time, and a better user experience.
 
-License: MIT  
-Homepage: <https://github.com/micromatch/is-glob>  
-Author: Jon Schlinkert (https://github.com/jonschlinkert)  
+License: MIT
+Homepage: <https://github.com/micromatch/is-glob>
+Author: Jon Schlinkert (https://github.com/jonschlinkert)
 Contributors:
  - Brian Woodward (https://twitter.com/doowb)
  - Daniel Perez (https://tuvistavie.com)
@@ -4435,8 +4435,8 @@ Contributors:
 
 > Check if a character is hexadecimal
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -4469,9 +4469,9 @@ Contributors:
 
 > Returns true if a number or string value is a finite number. Useful for regex matches, parsing, user input, etc.
 
-License: MIT  
-Homepage: <https://github.com/jonschlinkert/is-number>  
-Author: Jon Schlinkert (https://github.com/jonschlinkert)  
+License: MIT
+Homepage: <https://github.com/jonschlinkert/is-number>
+Author: Jon Schlinkert (https://github.com/jonschlinkert)
 Contributors:
  - Jon Schlinkert (http://twitter.com/jonschlinkert)
  - Olsten Larck (https://i.am.charlike.online)
@@ -4505,8 +4505,8 @@ Contributors:
 
 > Check if a value is a plain object
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
 
 > MIT License
 >
@@ -4524,8 +4524,8 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
 
 > Check if a character is a whitespace character
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -4558,8 +4558,8 @@ Contributors:
 
 > Check if a character is a word character
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -4592,7 +4592,7 @@ Contributors:
 
 > An isomorphic way to get the number of logical cores available.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -4622,7 +4622,7 @@ License: MIT
 
 > An isomorphic setImmediate/setInterval/setTimeout implementation.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -4652,9 +4652,9 @@ License: MIT
 
 > Iterate directory up.
 
-License: MIT  
-Homepage: <https://github.com/fisker/iterate-directory-up#readme>  
-Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)  
+License: MIT
+Homepage: <https://github.com/fisker/iterate-directory-up#readme>
+Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > MIT License
 >
@@ -4682,8 +4682,8 @@ Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 ## jest-docblock@v30.4.0
 
-License: MIT  
-Repository: <https://github.com/jestjs/jest.git>  
+License: MIT
+Repository: <https://github.com/jestjs/jest.git>
 
 > MIT License
 >
@@ -4714,8 +4714,8 @@ Repository: <https://github.com/jestjs/jest.git>
 
 > Tiny JavaScript tokenizer.
 
-License: MIT  
-Author: Simon Lydell  
+License: MIT
+Author: Simon Lydell
 
 > The MIT License (MIT)
 >
@@ -4745,8 +4745,8 @@ Author: Simon Lydell
 
 > YAML 1.2 parser and serializer
 
-License: MIT  
-Author: Vladimir Zapparov <dervus.grim@gmail.com>  
+License: MIT
+Author: Vladimir Zapparov <dervus.grim@gmail.com>
 Contributors:
  - Aleksey V Zapparov <ixti@member.fsf.org> (http://www.ixti.net/)
  - Vitaly Puzrin <vitaly@rcdesign.ru> (https://github.com/puzrin)
@@ -4780,7 +4780,7 @@ Contributors:
 
 > Alternative JSON.stringify function with sorted keys, so the output is stable.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -4810,10 +4810,10 @@ License: MIT
 
 > JSON for Humans
 
-License: MIT  
-Homepage: <http://json5.org/>  
-Repository: <git+https://github.com/json5/json5.git>  
-Author: Aseem Kishore <aseem.kishore@gmail.com>  
+License: MIT
+Homepage: <http://json5.org/>
+Repository: <git+https://github.com/json5/json5.git>
+Author: Aseem Kishore <aseem.kishore@gmail.com>
 Contributors:
  - Max Nanasy <max.nanasy@gmail.com>
  - Andrew Eisenberg <andrew@eisenberg.as>
@@ -4849,7 +4849,7 @@ Contributors:
 
 > A collection of functions for working with different casings.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -4879,9 +4879,9 @@ License: MIT
 
 > Fast math typesetting for the web.
 
-License: MIT  
-Homepage: <https://katex.org>  
-Repository: <https://github.com/KaTeX/KaTeX.git>  
+License: MIT
+Homepage: <https://katex.org>
+Repository: <https://github.com/KaTeX/KaTeX.git>
 
 > The MIT License (MIT)
 >
@@ -4911,10 +4911,10 @@ Repository: <https://github.com/KaTeX/KaTeX.git>
 
 > Simple key-value storage with support for multiple backends
 
-License: MIT  
-Homepage: <https://github.com/jaredwray/keyv>  
-Repository: <git+https://github.com/jaredwray/keyv.git>  
-Author: Jared Wray <me@jaredwray.com> (http://jaredwray.com)  
+License: MIT
+Homepage: <https://github.com/jaredwray/keyv>
+Repository: <git+https://github.com/jaredwray/keyv.git>
+Author: Jared Wray <me@jaredwray.com> (http://jaredwray.com)
 
 > MIT License
 >
@@ -4945,8 +4945,8 @@ Author: Jared Wray <me@jaredwray.com> (http://jaredwray.com)
 
 > Measure the difference between two strings using the Levenshtein distance algorithm
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -4964,7 +4964,7 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > Lodash's memoize function, but in a much smaller package than lodash.memoize's.
 
-License: MIT  
+License: MIT
 
 > The MIT License
 >
@@ -5022,8 +5022,8 @@ License: MIT
 
 > Count the longest repeating streak of a substring
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5056,8 +5056,8 @@ Contributors:
 
 > List of escapable characters in markdown
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5090,8 +5090,8 @@ Contributors:
 
 > Generate a markdown (GFM) table
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5124,8 +5124,8 @@ Contributors:
 
 > mdast utility to find and replace text in a tree
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5158,8 +5158,8 @@ Contributors:
 
 > mdast utility to parse markdown
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5192,8 +5192,8 @@ Contributors:
 
 > mdast extension to parse and serialize GFM (GitHub Flavored Markdown)
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5226,8 +5226,8 @@ Contributors:
 
 > mdast extension to parse and serialize GFM autolink literals
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5260,8 +5260,8 @@ Contributors:
 
 > mdast extension to parse and serialize GFM footnotes
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5294,8 +5294,8 @@ Contributors:
 
 > mdast extension to parse and serialize GFM strikethrough
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5328,8 +5328,8 @@ Contributors:
 
 > mdast extension to parse and serialize GFM tables
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5362,8 +5362,8 @@ Contributors:
 
 > mdast extension to parse and serialize GFM task list items
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5396,8 +5396,8 @@ Contributors:
 
 > mdast extension to parse and serialize math
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5430,8 +5430,8 @@ Contributors:
 
 > mdast utility to check if a node is phrasing content
 
-License: MIT  
-Author: Victor Felder <victor@draft.li> (https://draft.li)  
+License: MIT
+Author: Victor Felder <victor@draft.li> (https://draft.li)
 Contributors:
  - Victor Felder <victor@draft.li> (https://draft.li)
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
@@ -5466,8 +5466,8 @@ Contributors:
 
 > mdast utility to serialize markdown
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5500,8 +5500,8 @@ Contributors:
 
 > mdast utility to get the plain text content of a node
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5534,9 +5534,9 @@ Contributors:
 
 > Merge multiple streams into one stream in sequence or parallel.
 
-License: MIT  
-Homepage: <https://github.com/teambition/merge2>  
-Repository: <git@github.com:teambition/merge2.git>  
+License: MIT
+Homepage: <https://github.com/teambition/merge2>
+Repository: <git@github.com:teambition/merge2.git>
 
 > The MIT License (MIT)
 >
@@ -5566,10 +5566,10 @@ Repository: <git@github.com:teambition/merge2.git>
 
 > A 100% compliant, self-hosted javascript parser with high focus on both performance and stability
 
-License: ISC  
-Homepage: <https://github.com/meriyah/meriyah>  
-Repository: <git+https://github.com/meriyah/meriyah.git>  
-Author: Kenny F. (https://github.com/KFlash)  
+License: ISC
+Homepage: <https://github.com/meriyah/meriyah>
+Repository: <git+https://github.com/meriyah/meriyah.git>
+Author: Kenny F. (https://github.com/KFlash)
 Contributors:
  - Chunpeng Huo (https://github.com/3cp)
 
@@ -5587,8 +5587,8 @@ Contributors:
 
 > small commonmark compliant markdown parser with positional info and concrete tokens
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5621,8 +5621,8 @@ Contributors:
 
 > The CommonMark markdown constructs
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5655,8 +5655,8 @@ Contributors:
 
 > micromark extension to support GFM (GitHub Flavored Markdown)
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5689,8 +5689,8 @@ Contributors:
 
 > micromark extension to support GFM autolink literals
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5723,8 +5723,8 @@ Contributors:
 
 > micromark extension to support GFM footnotes
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5757,8 +5757,8 @@ Contributors:
 
 > micromark extension to support GFM strikethrough
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5791,8 +5791,8 @@ Contributors:
 
 > micromark extension to support GFM tables
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5825,8 +5825,8 @@ Contributors:
 
 > micromark extension to support GFM tagfilter
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5859,8 +5859,8 @@ Contributors:
 
 > micromark extension to support GFM task list items
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5893,8 +5893,8 @@ Contributors:
 
 > micromark extension to support math (`$C_L$`)
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5927,8 +5927,8 @@ Contributors:
 
 > micromark factory to parse destinations (found in resources, definitions)
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5961,8 +5961,8 @@ Contributors:
 
 > micromark factory to parse labels (found in media, definitions)
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -5995,8 +5995,8 @@ Contributors:
 
 > micromark factory to parse markdown space (found in lots of places)
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6029,8 +6029,8 @@ Contributors:
 
 > micromark factory to parse markdown titles (found in resources, definitions)
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6063,8 +6063,8 @@ Contributors:
 
 > micromark factory to parse markdown whitespace (found in lots of places)
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6097,8 +6097,8 @@ Contributors:
 
 > micromark utility to handle character codes
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6131,8 +6131,8 @@ Contributors:
 
 > micromark utility to splice and push with giant arrays
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6165,8 +6165,8 @@ Contributors:
 
 > micromark utility to classify whether a character is whitespace or punctuation
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6199,8 +6199,8 @@ Contributors:
 
 > micromark utility to combine syntax or html extensions
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6233,8 +6233,8 @@ Contributors:
 
 > micromark utility to decode numeric character references
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6267,8 +6267,8 @@ Contributors:
 
 > micromark utility to decode markdown strings
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6301,8 +6301,8 @@ Contributors:
 
 > micromark utility to encode dangerous html characters
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6335,8 +6335,8 @@ Contributors:
 
 > micromark utility with list of html tag names
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6369,8 +6369,8 @@ Contributors:
 
 > micromark utility normalize identifiers (as found in references, definitions)
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6403,8 +6403,8 @@ Contributors:
 
 > micromark utility to resolve subtokens
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6437,8 +6437,8 @@ Contributors:
 
 > micromark utility to sanitize urls
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6471,8 +6471,8 @@ Contributors:
 
 > micromark utility to tokenize subtokens
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6505,8 +6505,8 @@ Contributors:
 
 > micromark utility with symbols
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6539,9 +6539,9 @@ Contributors:
 
 > Glob matching for javascript/node.js. A replacement and faster alternative to minimatch and multimatch.
 
-License: MIT  
-Homepage: <https://github.com/micromatch/micromatch>  
-Author: Jon Schlinkert (https://github.com/jonschlinkert)  
+License: MIT
+Homepage: <https://github.com/micromatch/micromatch>
+Author: Jon Schlinkert (https://github.com/jonschlinkert)
 Contributors:
  - null (https://github.com/DianeLooney)
  - Amila Welihinda (amilajack.com)
@@ -6587,9 +6587,9 @@ Contributors:
 
 > a glob matcher in javascript
 
-License: BlueOak-1.0.0  
-Repository: <git@github.com:isaacs/minimatch>  
-Author: Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me)  
+License: BlueOak-1.0.0
+Repository: <git@github.com:isaacs/minimatch>
+Author: Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me)
 
 > # Blue Oak Model License
 >
@@ -6653,10 +6653,10 @@ Author: Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me)
 
 > parse argument options
 
-License: MIT  
-Homepage: <https://github.com/minimistjs/minimist>  
-Repository: <git://github.com/minimistjs/minimist.git>  
-Author: James Halliday <mail@substack.net> (http://substack.net)  
+License: MIT
+Homepage: <https://github.com/minimistjs/minimist>
+Repository: <git://github.com/minimistjs/minimist.git>
+Author: James Halliday <mail@substack.net> (http://substack.net)
 
 > This software is released under the MIT license:
 >
@@ -6683,9 +6683,9 @@ Author: James Halliday <mail@substack.net> (http://substack.net)
 
 > Read file line by line without buffering the whole file in memory.
 
-License: MIT  
-Repository: <http://github.com/nacholibre/node-readlines.git>  
-Author: Yoan Arnaudov <jonidev@gmail.com>  
+License: MIT
+Repository: <http://github.com/nacholibre/node-readlines.git>
+Author: Yoan Arnaudov <jonidev@gmail.com>
 
 > The MIT License (MIT)
 >
@@ -6714,8 +6714,8 @@ Author: Yoan Arnaudov <jonidev@gmail.com>
 
 > A tiny (116 bytes), secure URL-friendly unique string ID generator
 
-License: MIT  
-Author: Andrey Sitnik <andrey@sitnik.ru>  
+License: MIT
+Author: Andrey Sitnik <andrey@sitnik.ru>
 
 > The MIT License (MIT)
 >
@@ -6744,9 +6744,9 @@ Author: Andrey Sitnik <andrey@sitnik.ru>
 
 > Emojis with narrow width.
 
-License: MIT  
-Homepage: <https://github.com/fisker/narrow-emojis#readme>  
-Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)  
+License: MIT
+Homepage: <https://github.com/fisker/narrow-emojis#readme>
+Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > MIT License
 >
@@ -6776,8 +6776,8 @@ Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > Parse HTML character references: fast, spec-compliant, positional information
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -6810,8 +6810,8 @@ Contributors:
 
 > Parse JSON with more helpful errors
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -6829,8 +6829,8 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > The tiniest and the fastest library for terminal output formatting with ANSI colors
 
-License: ISC  
-Author: Alexey Raspopov  
+License: ISC
+Author: Alexey Raspopov
 
 > ISC License
 >
@@ -6854,9 +6854,9 @@ Author: Alexey Raspopov
 
 > Blazing fast and accurate glob matcher written in JavaScript, with no dependencies and full support for standard and extended Bash glob features, including braces, extglobs, POSIX brackets, and regular expressions.
 
-License: MIT  
-Homepage: <https://github.com/micromatch/picomatch>  
-Author: Jon Schlinkert (https://github.com/jonschlinkert)  
+License: MIT
+Homepage: <https://github.com/micromatch/picomatch>
+Author: Jon Schlinkert (https://github.com/jonschlinkert)
 
 > The MIT License (MIT)
 >
@@ -6886,7 +6886,7 @@ Author: Jon Schlinkert (https://github.com/jonschlinkert)
 
 > A tiny isomorphic batched logger. ~3x faster than regular logging in Node.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -6916,8 +6916,8 @@ License: MIT
 
 > Find the root directory of a Node.js project or npm package
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -6935,14 +6935,14 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > Displays a beginner-friendly message telling your user to upgrade their version of Node
 
-License: MIT  
-Homepage: <https://github.com/typicode/please-upgrade-node#readme>  
-Repository: <git+https://github.com/typicode/please-upgrade-node.git>  
-Author: typicode  
+License: MIT
+Homepage: <https://github.com/typicode/please-upgrade-node#readme>
+Repository: <git+https://github.com/typicode/please-upgrade-node.git>
+Author: typicode
 
 > MIT License
 >
-> Copyright (c) 2017 
+> Copyright (c) 2017
 >
 > Permission is hereby granted, free of charge, to any person obtaining a copy
 > of this software and associated documentation files (the "Software"), to deal
@@ -6968,9 +6968,9 @@ Author: typicode
 
 > Tool for transforming styles with JS plugins
 
-License: MIT  
-Homepage: <https://postcss.org/>  
-Author: Andrey Sitnik <andrey@sitnik.es>  
+License: MIT
+Homepage: <https://postcss.org/>
+Author: Andrey Sitnik <andrey@sitnik.es>
 
 > The MIT License (MIT)
 >
@@ -6999,9 +6999,9 @@ Author: Andrey Sitnik <andrey@sitnik.es>
 
 > LESS parser for PostCSS
 
-License: MIT  
-Homepage: <https://github.com/shellscape/postcss-less>  
-Author: Denys Kniazevych <webschik@gmail.com>  
+License: MIT
+Homepage: <https://github.com/shellscape/postcss-less>
+Author: Denys Kniazevych <webschik@gmail.com>
 
 > The MIT License (MIT)
 >
@@ -7034,10 +7034,10 @@ Author: Denys Kniazevych <webschik@gmail.com>
 
 > A tool for parsing media query lists.
 
-License: MIT  
-Homepage: <https://github.com/dryoma/postcss-media-query-parser>  
-Repository: <git+https://github.com/dryoma/postcss-media-query-parser.git>  
-Author: dryoma  
+License: MIT
+Homepage: <https://github.com/dryoma/postcss-media-query-parser>
+Repository: <git+https://github.com/dryoma/postcss-media-query-parser.git>
+Author: dryoma
 
 ----------------------------------------
 
@@ -7045,8 +7045,8 @@ Author: dryoma
 
 > SCSS parser for PostCSS
 
-License: MIT  
-Author: Andrey Sitnik <andrey@sitnik.ru>  
+License: MIT
+Author: Andrey Sitnik <andrey@sitnik.ru>
 
 > The MIT License (MIT)
 >
@@ -7073,9 +7073,9 @@ Author: Andrey Sitnik <andrey@sitnik.ru>
 
 ## postcss-selector-parser@v2.2.3
 
-License: MIT  
-Homepage: <https://github.com/postcss/postcss-selector-parser>  
-Author: Ben Briggs <beneb.info@gmail.com> (http://beneb.info)  
+License: MIT
+Homepage: <https://github.com/postcss/postcss-selector-parser>
+Author: Ben Briggs <beneb.info@gmail.com> (http://beneb.info)
 
 > Copyright (c) Ben Briggs <beneb.info@gmail.com> (http://beneb.info)
 >
@@ -7106,8 +7106,8 @@ Author: Ben Briggs <beneb.info@gmail.com> (http://beneb.info)
 
 > A CSS property value parser for use with PostCSS
 
-License: MIT  
-Author: Andrew Powell (shellscape) <andrew@shellscape.org> (http://shellscape.org)  
+License: MIT
+Author: Andrew Powell (shellscape) <andrew@shellscape.org> (http://shellscape.org)
 
 > Copyright (c) Andrew Powell <andrew@shellscape.org>
 >
@@ -7138,7 +7138,7 @@ Author: Andrew Powell (shellscape) <andrew@shellscape.org> (http://shellscape.or
 
 > A simple function that makes a counter-based promise, which can be incremented and decremented, and it resolves once its counter reaches zero.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7168,7 +7168,7 @@ License: MIT
 
 > A simple function that makes a promise that can be resolved, rejected or introspected from the outside.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7198,7 +7198,7 @@ License: MIT
 
 > Create a Promise which will resolve with the provided value after a timeout.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7228,10 +7228,10 @@ License: MIT
 
 > Task and Message Queues with Multiple Providers
 
-License: MIT  
-Homepage: <https://github.com/jaredwray/qified#readme>  
-Repository: <git+https://github.com/jaredwray/qified.git>  
-Author: Jared Wray <me@jaredwray.com>  
+License: MIT
+Homepage: <https://github.com/jaredwray/qified#readme>
+Repository: <git+https://github.com/jaredwray/qified.git>
+Author: Jared Wray <me@jaredwray.com>
 
 > MIT License & © Jared Wray
 >
@@ -7259,10 +7259,10 @@ Author: Jared Wray <me@jaredwray.com>
 
 > fast, tiny `queueMicrotask` shim for modern engines
 
-License: MIT  
-Homepage: <https://github.com/feross/queue-microtask>  
-Repository: <git://github.com/feross/queue-microtask.git>  
-Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)  
+License: MIT
+Homepage: <https://github.com/feross/queue-microtask>
+Repository: <git://github.com/feross/queue-microtask.git>
+Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)
 
 > The MIT License (MIT)
 >
@@ -7291,8 +7291,8 @@ Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)
 
 > remark plugin to add support for pandoc footnotes
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -7325,8 +7325,8 @@ Contributors:
 
 > remark plugin to parse and stringify math
 
-License: MIT  
-Author: Junyoung Choi <fluke8259@gmail.com> (https://rokt33r.github.io)  
+License: MIT
+Author: Junyoung Choi <fluke8259@gmail.com> (https://rokt33r.github.io)
 Contributors:
  - Junyoung Choi <fluke8259@gmail.com> (https://rokt33r.github.io)
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
@@ -7337,9 +7337,9 @@ Contributors:
 
 > remark plugin to parse Markdown
 
-License: MIT  
-Homepage: <https://remark.js.org>  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Homepage: <https://remark.js.org>
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
  - Eugene Sharygin <eush77@gmail.com>
@@ -7353,9 +7353,9 @@ Contributors:
 
 > Repeat the given string n times. Fastest implementation for repeating a string.
 
-License: MIT  
-Homepage: <https://github.com/jonschlinkert/repeat-string>  
-Author: Jon Schlinkert (http://github.com/jonschlinkert)  
+License: MIT
+Homepage: <https://github.com/jonschlinkert/repeat-string>
+Author: Jon Schlinkert (http://github.com/jonschlinkert)
 Contributors:
  - Brian Woodward <brian.woodward@gmail.com> (https://github.com/doowb)
  - Jon Schlinkert <jon.schlinkert@sellside.com> (http://twitter.com/jonschlinkert)
@@ -7391,10 +7391,10 @@ Contributors:
 
 > Reuse objects and functions with style
 
-License: MIT  
-Homepage: <https://github.com/mcollina/reusify#readme>  
-Repository: <git+https://github.com/mcollina/reusify.git>  
-Author: Matteo Collina <hello@matteocollina.com>  
+License: MIT
+Homepage: <https://github.com/mcollina/reusify#readme>
+Repository: <git+https://github.com/mcollina/reusify.git>
+Author: Matteo Collina <hello@matteocollina.com>
 
 > The MIT License (MIT)
 >
@@ -7424,10 +7424,10 @@ Author: Matteo Collina <hello@matteocollina.com>
 
 > Run an array of functions in parallel
 
-License: MIT  
-Homepage: <https://github.com/feross/run-parallel>  
-Repository: <git://github.com/feross/run-parallel.git>  
-Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)  
+License: MIT
+Homepage: <https://github.com/feross/run-parallel>
+Repository: <git://github.com/feross/run-parallel.git>
+Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)
 
 > The MIT License (MIT)
 >
@@ -7456,9 +7456,9 @@ Author: Feross Aboukhadijeh <feross@feross.org> (https://feross.org)
 
 > Find closest file or directory by names.
 
-License: MIT  
-Homepage: <https://github.com/fisker/search-closest#readme>  
-Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)  
+License: MIT
+Homepage: <https://github.com/fisker/search-closest#readme>
+Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > MIT License
 >
@@ -7488,10 +7488,10 @@ Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > compare two semver version strings, returning -1, 0, or 1
 
-License: MIT  
-Homepage: <https://github.com/substack/semver-compare>  
-Repository: <git://github.com/substack/semver-compare.git>  
-Author: James Halliday <mail@substack.net> (http://substack.net)  
+License: MIT
+Homepage: <https://github.com/substack/semver-compare>
+Repository: <git://github.com/substack/semver-compare.git>
+Author: James Halliday <mail@substack.net> (http://substack.net)
 
 > This software is released under the MIT license:
 >
@@ -7518,8 +7518,8 @@ Author: James Halliday <mail@substack.net> (http://substack.net)
 
 > Simple HTML Tokenizer is a lightweight JavaScript library that can be used to tokenize the kind of HTML normally found in templates.
 
-License: MIT  
-Repository: <https://github.com/tildeio/simple-html-tokenizer.git>  
+License: MIT
+Repository: <https://github.com/tildeio/simple-html-tokenizer.git>
 
 > Copyright (c) 2014 Yehuda Katz and contributors
 >
@@ -7547,9 +7547,9 @@ Repository: <https://github.com/tildeio/simple-html-tokenizer.git>
 
 > A small, fast, and correct TOML parser/serializer
 
-License: BSD-3-Clause  
-Repository: <github:squirrelchat/smol-toml>  
-Author: Cynthia Rey <cynthia@cynthia.dev>  
+License: BSD-3-Clause
+Repository: <github:squirrelchat/smol-toml>
+Author: Cynthia Rey <cynthia@cynthia.dev>
 
 > Copyright (c) Squirrel Chat et al., All rights reserved.
 >
@@ -7582,7 +7582,7 @@ Author: Cynthia Rey <cynthia@cynthia.dev>
 
 > A library that helps you write tiny, fast and beautiful CLI apps that can automatically check for updates.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7612,8 +7612,8 @@ License: MIT
 
 > Enter/exit a state
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -7646,7 +7646,7 @@ Contributors:
 
 > A tiny library for blocking stdin keypresses, except for Ctrl+C. Useful while displaying animations.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7676,7 +7676,7 @@ License: MIT
 
 > A tiny function for escaping a string to be used as the source in a regex.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7706,8 +7706,8 @@ License: MIT
 
 > Strip ANSI escape codes from a string
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -7725,7 +7725,7 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > Stubborn versions of Node's fs functions that try really hard to do their job.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7755,7 +7755,7 @@ License: MIT
 
 > A small collection of utilities for making functions somewhat resilient against errors.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7785,7 +7785,7 @@ License: MIT
 
 > A library for building tiny and beautiful command line apps.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7815,7 +7815,7 @@ License: MIT
 
 > A tiny library providing the basic ANSI colors for the terminal.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7845,7 +7845,7 @@ License: MIT
 
 > A tiny library for hiding and showing the cursor in the terminal.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7875,7 +7875,7 @@ License: MIT
 
 > A tiny isomorphic parser and resolver for EditorConfig.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7905,7 +7905,7 @@ License: MIT
 
 > A tiny implementation of the Levenshtein edit distance algorithm.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7935,7 +7935,7 @@ License: MIT
 
 > A tiny function for parsing process.argv, a modern rewrite of minimist.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -7965,7 +7965,7 @@ License: MIT
 
 > A simple promisified recursive readdir function.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -8024,7 +8024,7 @@ License: MIT
 
 > A simple, yet beautiful, CLI spinner.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -8054,7 +8054,7 @@ License: MIT
 
 > A tiny function for truncating a string which may containg ANSI escapes, with automatic terminal width detection.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -8084,7 +8084,7 @@ License: MIT
 
 > A small update notifier for NPM packages, useful for CLI apps.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -8114,8 +8114,8 @@ License: MIT
 
 > Force V8 to use fast properties for an object
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https:/sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https:/sindresorhus.com)
 
 > MIT License
 >
@@ -8136,9 +8136,9 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https:/sindresorhus.com)
 
 > Pass two numbers, get a regex-compatible source string for matching ranges. Validated against more than 2.78 million test assertions.
 
-License: MIT  
-Homepage: <https://github.com/micromatch/to-regex-range>  
-Author: Jon Schlinkert (https://github.com/jonschlinkert)  
+License: MIT
+Homepage: <https://github.com/micromatch/to-regex-range>
+Author: Jon Schlinkert (https://github.com/jonschlinkert)
 Contributors:
  - Jon Schlinkert (http://twitter.com/jonschlinkert)
  - Rouven Weßling (www.rouvenwessling.de)
@@ -8171,9 +8171,9 @@ Contributors:
 
 > Trim string whitespace
 
-License: MIT  
-Repository: <https://github.com/Trott/trim.git>  
-Author: TJ Holowaychuk <tj@vision-media.ca>  
+License: MIT
+Repository: <https://github.com/Trott/trim.git>
+Author: TJ Holowaychuk <tj@vision-media.ca>
 
 ----------------------------------------
 
@@ -8181,8 +8181,8 @@ Author: TJ Holowaychuk <tj@vision-media.ca>
 
 > Trim newlines from the start and/or end of a string
 
-License: MIT  
-Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)  
+License: MIT
+Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > MIT License
 >
@@ -8200,8 +8200,8 @@ Author: Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
 
 > Remove final line feeds from a string
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -8234,8 +8234,8 @@ Contributors:
 
 > Middleware: a channel used to convey a liquid
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -8267,9 +8267,9 @@ Contributors:
 
 > Utility functions for working with TypeScript's API. Successor to the wonderful tsutils. 🛠️️
 
-License: MIT  
-Repository: <https://github.com/JoshuaKGoldberg/ts-api-utils>  
-Author: JoshuaKGoldberg <npm@joshuakgoldberg.com>  
+License: MIT
+Repository: <https://github.com/JoshuaKGoldberg/ts-api-utils>
+Author: JoshuaKGoldberg <npm@joshuakgoldberg.com>
 
 > # MIT License
 >
@@ -8298,65 +8298,65 @@ Author: JoshuaKGoldberg <npm@joshuakgoldberg.com>
 
 > TypeScript is a language for application scale JavaScript development
 
-License: Apache-2.0  
-Homepage: <https://www.typescriptlang.org/>  
-Repository: <https://github.com/microsoft/TypeScript.git>  
-Author: Microsoft Corp.  
+License: Apache-2.0
+Homepage: <https://www.typescriptlang.org/>
+Repository: <https://github.com/microsoft/TypeScript.git>
+Author: Microsoft Corp.
 
 > Apache License
-> 
+>
 > Version 2.0, January 2004
-> 
-> http://www.apache.org/licenses/ 
-> 
+>
+> http://www.apache.org/licenses/
+>
 > TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-> 
+>
 > 1. Definitions.
-> 
+>
 > "License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
-> 
+>
 > "Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
-> 
+>
 > "Legal Entity" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, "control" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
-> 
+>
 > "You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
-> 
+>
 > "Source" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
-> 
+>
 > "Object" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
-> 
+>
 > "Work" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
-> 
+>
 > "Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
-> 
+>
 > "Contribution" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, "submitted" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as "Not a Contribution."
-> 
+>
 > "Contributor" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
-> 
+>
 > 2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
-> 
+>
 > 3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
-> 
+>
 > 4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
-> 
+>
 > You must give any other recipients of the Work or Derivative Works a copy of this License; and
-> 
+>
 > You must cause any modified files to carry prominent notices stating that You changed the files; and
-> 
+>
 > You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
-> 
+>
 > If the Work includes a "NOTICE" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License. You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
-> 
+>
 > 5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
-> 
+>
 > 6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
-> 
+>
 > 7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
-> 
+>
 > 8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
-> 
+>
 > 9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
-> 
+>
 > END OF TERMS AND CONDITIONS
 
 ----------------------------------------
@@ -8365,8 +8365,8 @@ Author: Microsoft Corp.
 
 > Clone a constructor without affecting the super-class
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -8398,9 +8398,9 @@ Contributors:
 
 > Interface for parsing, inspecting, transforming, and serializing content through syntax trees
 
-License: MIT  
-Homepage: <https://unifiedjs.com>  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Homepage: <https://unifiedjs.com>
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
  - Junyoung Choi <fluke8259@gmail.com>
@@ -8437,9 +8437,9 @@ Contributors:
 
 > Removes duplicates from a sorted array in place
 
-License: MIT  
-Repository: <git://github.com/mikolalysenko/uniq.git>  
-Author: Mikola Lysenko  
+License: MIT
+Repository: <git://github.com/mikolalysenko/uniq.git>
+Author: Mikola Lysenko
 
 > The MIT License (MIT)
 >
@@ -8469,8 +8469,8 @@ Author: Mikola Lysenko
 
 > unist utility to check if a node passes a test
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
  - Christian Murphy <christian.murphy.42@gmail.com>
@@ -8505,8 +8505,8 @@ Contributors:
 
 > unist utility to remove positions from a tree
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -8539,8 +8539,8 @@ Contributors:
 
 > unist utility to serialize a node, position, or point as a human readable location
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -8573,8 +8573,8 @@ Contributors:
 
 > unist utility to visit nodes
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
  - Eugene Sharygin <eush77@gmail.com>
@@ -8609,8 +8609,8 @@ Contributors:
 
 > unist utility to recursively walk over nodes, with ancestral information
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -8643,9 +8643,9 @@ Contributors:
 
 > Convert between file URL and path.
 
-License: MIT  
-Homepage: <https://github.com/fisker/url-or-path#readme>  
-Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)  
+License: MIT
+Homepage: <https://github.com/fisker/url-or-path#readme>
+Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > MIT License
 >
@@ -8675,8 +8675,8 @@ Author: fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
 
 > Virtual file format for text processing
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
  - Brendan Abbott <brendan.abbott@temando.com>
@@ -8713,8 +8713,8 @@ Contributors:
 
 > vfile utility to convert between positional (line and column-based) and offset (range-based) locations
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
  - Christian Murphy <christian.murphy.42@gmail.com>
@@ -8748,8 +8748,8 @@ Contributors:
 
 > vfile utility to create a virtual message
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -8782,9 +8782,9 @@ Contributors:
 
 > validate and normalize options
 
-License: MIT  
-Homepage: <https://github.com/ikatyang-collab/vnopts#readme>  
-Author: Ika <ikatyang@gmail.com> (https://github.com/ikatyang)  
+License: MIT
+Homepage: <https://github.com/ikatyang-collab/vnopts#readme>
+Author: Ika <ikatyang@gmail.com> (https://github.com/ikatyang)
 
 > MIT License
 >
@@ -8814,10 +8814,10 @@ Author: Ika <ikatyang@gmail.com> (https://github.com/ikatyang)
 
 > a javascript porting of C's wcwidth()
 
-License: MIT  
-Homepage: <http://code.woong.org/wcwidth.js>  
-Repository: <https://github.com/mycoboco/wcwidth.js.git>  
-Author: Woong Jun <woong.jun@gmail.com> (http://code.woong.org/)  
+License: MIT
+Homepage: <http://code.woong.org/wcwidth.js>
+Repository: <https://github.com/mycoboco/wcwidth.js.git>
+Author: Woong Jun <woong.jun@gmail.com> (http://code.woong.org/)
 Contributors:
  - Tim Oxley <secoif@gmail.com> (http://campjs.com/)
 
@@ -8857,7 +8857,7 @@ Contributors:
 
 > A tiny shim for WebWorker (data URI only) that works in Node.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -8887,7 +8887,7 @@ License: MIT
 
 > Execute a function right before the process, or the browser's tab, is about to exit.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -8917,7 +8917,7 @@ License: MIT
 
 > A simple isomorphic library for executing functions inside WebWorkers or Node Threads pools.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -8947,9 +8947,9 @@ License: MIT
 
 > extend like a boss
 
-License: MIT  
-Homepage: <https://github.com/Raynos/xtend>  
-Author: Raynos <raynos2@gmail.com>  
+License: MIT
+Homepage: <https://github.com/Raynos/xtend>
+Author: Raynos <raynos2@gmail.com>
 Contributors:
  - Jake Verbaten
  - Matt Esch
@@ -8981,9 +8981,9 @@ Contributors:
 
 > JavaScript parser and stringifier for YAML
 
-License: ISC  
-Homepage: <https://eemeli.org/yaml/>  
-Author: Eemeli Aro <eemeli@gmail.com>  
+License: ISC
+Homepage: <https://eemeli.org/yaml/>
+Author: Eemeli Aro <eemeli@gmail.com>
 
 > Copyright Eemeli Aro <eemeli@gmail.com>
 >
@@ -9005,9 +9005,9 @@ Author: Eemeli Aro <eemeli@gmail.com>
 
 > A YAML parser that produces output compatible with unist
 
-License: MIT  
-Homepage: <https://github.com/prettier/yaml-unist-parser#readme>  
-Author: Ika <ikatyang@gmail.com> (https://github.com/ikatyang)  
+License: MIT
+Homepage: <https://github.com/prettier/yaml-unist-parser#readme>
+Author: Ika <ikatyang@gmail.com> (https://github.com/ikatyang)
 
 > MIT License
 >
@@ -9037,7 +9037,7 @@ Author: Ika <ikatyang@gmail.com> (https://github.com/ikatyang)
 
 > An absurdly small glob matcher that packs a punch.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -9067,7 +9067,7 @@ License: MIT
 
 > A little utility for escaping globs before passing them to zeptomatch.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -9097,7 +9097,7 @@ License: MIT
 
 > A little utility for exploding a zeptomatch-flavored glob into its dynamic and static parts.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -9127,7 +9127,7 @@ License: MIT
 
 > A little utility for checking if a glob is fully static.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -9157,7 +9157,7 @@ License: MIT
 
 > A little utility for removing escape sequences from a glob.
 
-License: MIT  
+License: MIT
 
 > The MIT License (MIT)
 >
@@ -9187,8 +9187,8 @@ License: MIT
 
 > Handle values based on a property
 
-License: MIT  
-Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)  
+License: MIT
+Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Contributors:
  - Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
@@ -12433,7 +12433,7 @@ Used by:
 
 Full license text:
 
-Copyright (c) <year> <owner> 
+Copyright (c) <year> <owner>
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 
@@ -12568,7 +12568,7 @@ Used by:
 
 Full license text:
 
-Copyright (c) <year> <owner>. 
+Copyright (c) <year> <owner>.
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 
@@ -18668,20 +18668,20 @@ under the original license, see [COPYING](oniguruma/COPYING) for more
 information.
 
 > The MIT License (MIT)
-> 
+>
 > Copyright (c) 2015 Will Speak <will@willspeak.me>, Ivan Ivashchenko
 > <defuz@me.com>, and contributors.
-> 
+>
 > Permission is hereby granted, free of charge, to any person obtaining a copy
 > of this software and associated documentation files (the "Software"), to deal
 > in the Software without restriction, including without limitation the rights
 > to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 > copies of the Software, and to permit persons to whom the Software is
 > furnished to do so, subject to the following conditions:
-> 
+>
 > The above copyright notice and this permission notice shall be included in all
 > copies or substantial portions of the Software.
-> 
+>
 > THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 > IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 > FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -18705,20 +18705,20 @@ remains the property of the original authors and is re-distributed
 under the original license.
 
 > The MIT License (MIT)
-> 
+>
 > Copyright (c) 2015 Will Speak <will@willspeak.me>, Ivan Ivashchenko
 > <defuz@me.com>, and contributors.
-> 
+>
 > Permission is hereby granted, free of charge, to any person obtaining a copy
 > of this software and associated documentation files (the "Software"), to deal
 > in the Software without restriction, including without limitation the rights
 > to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 > copies of the Software, and to permit persons to whom the Software is
 > furnished to do so, subject to the following conditions:
-> 
+>
 > The above copyright notice and this permission notice shall be included in all
 > copies or substantial portions of the Software.
-> 
+>
 > THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 > IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 > FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE

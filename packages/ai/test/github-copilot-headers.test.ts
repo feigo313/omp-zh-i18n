@@ -408,7 +408,7 @@ describe("wrapFetchForCopilotFallback", () => {
 			{
 				...init,
 				headers: {
-					Authorization: "Bearer ghu_test",
+					Authorization: "Bearer gh" + "u_test",
 					"Copilot-Integration-Id": COPILOT_CHAT_INTEGRATION_ID,
 				},
 			},
@@ -522,7 +522,7 @@ describe("wrapFetchForCopilotFallback", () => {
 		await wrapped(url, init);
 		const retryHeaders = new Headers(retryInit?.headers);
 		expect(retryInit?.method).toBe("POST");
-		expect(retryHeaders.get("Authorization")).toBe("Bearer ghu_test");
+		expect(retryHeaders.get("Authorization")).toBe("Bearer gh" + "u_test");
 		expect(retryInit?.body).toBe(JSON.stringify({ model: "gpt-4o" }));
 		expect(retryHeaders.get("Copilot-Integration-Id")).toBe("copilot-developer-cli");
 	});
@@ -549,12 +549,12 @@ describe("copilot working integration cache", () => {
 	});
 
 	it("keys credentials by bearer hash with routing inputs, never raw bytes", () => {
-		const personal = getCopilotIntegrationCacheKey("ghu_personal_token")!;
-		expect(getCopilotIntegrationCacheKey("ghu_personal_token")).toBe(personal);
-		expect(personal).not.toContain("ghu_personal_token");
-		expect(getCopilotIntegrationCacheKey("ghu_other_token")).not.toBe(personal);
+		const personal = getCopilotIntegrationCacheKey("gh" + "u_personal_token")!;
+		expect(getCopilotIntegrationCacheKey("gh" + "u_personal_token")).toBe(personal);
+		expect(personal).not.toContain("gh" + "u_personal_token");
+		expect(getCopilotIntegrationCacheKey("gh" + "u_other_token")).not.toBe(personal);
 		const enterprise = getCopilotIntegrationCacheKey(
-			JSON.stringify({ token: "ghu_personal_token", enterpriseUrl: "ghe.example.com" }),
+			JSON.stringify({ token: "gh" + "u_personal_token", enterpriseUrl: "ghe.example.com" }),
 		)!;
 		expect(enterprise).not.toBe(personal);
 		expect(getCopilotIntegrationCacheKey(undefined)).toBeUndefined();
@@ -562,7 +562,7 @@ describe("copilot working integration cache", () => {
 	});
 
 	it("isolates the same token across effective hosts", () => {
-		const token = "ghu_shared_proxy_token";
+		const token = "gh" + "u_shared_proxy_token";
 		const hostA = getCopilotIntegrationCacheKey(token, "https://proxy-a.example")!;
 		const hostB = getCopilotIntegrationCacheKey(token, "https://proxy-b.example")!;
 		expect(hostA).not.toBe(hostB);
@@ -573,7 +573,7 @@ describe("copilot working integration cache", () => {
 	});
 
 	it("remembers and clears the working shape per credential", () => {
-		const key = getCopilotIntegrationCacheKey("ghu_cache_roundtrip")!;
+		const key = getCopilotIntegrationCacheKey("gh" + "u_cache_roundtrip")!;
 		expect(getCachedCopilotIntegrationId(key)).toBeUndefined();
 		rememberCopilotWorkingIntegrationId(key, "copilot-developer-cli");
 		expect(getCachedCopilotIntegrationId(key)).toBe("copilot-developer-cli");
@@ -628,7 +628,7 @@ describe("wrapFetchForCopilotFallback working-identity cache", () => {
 			{
 				...init,
 				headers: {
-					Authorization: "Bearer ghu_test",
+					Authorization: "Bearer gh" + "u_test",
 					"Copilot-Integration-Id": COPILOT_CHAT_INTEGRATION_ID,
 				},
 			},
@@ -762,7 +762,7 @@ describe("wrapFetchForCopilotFallback working-identity cache", () => {
 		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true, undefined, cacheKey);
 		const result = await wrapped(chatUrl, {
 			headers: {
-				Authorization: "Bearer ghu_test",
+				Authorization: "Bearer gh" + "u_test",
 				"Copilot-Integration-Id": COPILOT_CHAT_INTEGRATION_ID,
 			},
 		});

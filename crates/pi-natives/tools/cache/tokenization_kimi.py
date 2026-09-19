@@ -374,7 +374,7 @@ class TikTokenTokenizer(PreTrainedTokenizer):
         image_prompts = kwargs.pop("image_prompts", None)
         if is_batched and image_prompts is not None:
             raise ValueError("image_prompts is only supported for one chat.")
-        
+
         # by default set thinking effort to max
         kwargs.setdefault("thinking_effort", "max")
 
