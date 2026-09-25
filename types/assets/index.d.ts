@@ -60,3 +60,10 @@ declare module "*.generated.js" {
 	const content: string;
 	export default content;
 }
+
+// axe-core's minified browser build, imported as text by the browser a11y audit
+// (coding-agent src/tools/browser/a11y/audit.ts) and evaluated inside the page.
+declare module "axe-core/axe.min.js" {
+	const content: string;
+	export default content;
+}

@@ -14,6 +14,7 @@ import optionsJs from "../tools/browser/relay/extension-assets/options.js.txt" w
 import thirdPartyNotices from "../tools/browser/relay/extension-assets/THIRD-PARTY-NOTICES.txt" with { type: "text" };
 import { DEFAULT_RELAY_URL } from "../tools/browser/relay/kind";
 import { type RelayServer, startRelayServer } from "../tools/browser/relay/server";
+import { t } from "../i18n";
 
 export const BROWSER_RELAY_ACTIONS = ["serve", "install"] as const;
 export type BrowserRelayAction = (typeof BROWSER_RELAY_ACTIONS)[number];
@@ -54,16 +55,18 @@ async function runInstall(dirOverride: string | undefined): Promise<void> {
 	for (const name in EXTENSION_FILES) {
 		await Bun.write(path.join(dir, name), EXTENSION_FILES[name]!);
 	}
-	console.log(`Installed the OMP Browser Relay extension to ${dir}`);
+	console.log(t("cli.browserRelay.installed", "Installed the OMP Browser Relay extension to {dir}", { dir }));
 	console.log("");
-	console.log("Finish setup in Chrome:");
-	console.log("  1. Open chrome://extensions and enable Developer mode.");
-	console.log(`  2. Click "Load unpacked" and select: ${dir}`);
-	console.log("  3. Enable the mode:  omp config set browser.relay true");
+	console.log(t("cli.browserRelay.finishSetup", "Finish setup in Chrome:"));
+	console.log(t("cli.browserRelay.step1", "  1. Open chrome://extensions and enable Developer mode."));
+	console.log(t("cli.browserRelay.step2", '  2. Click "Load unpacked" and select: {dir}', { dir }));
+	console.log(t("cli.browserRelay.step3", "  3. Enable the mode:  omp config set browser.relay true"));
 	console.log("");
-	console.log("omp starts the relay automatically when the browser prelude needs it;");
-	console.log("run `omp browser-relay` yourself only for --token or --no-group.");
-	console.log("The extension badge shows 'on' once it reaches a relay.");
+	console.log(
+		t("cli.browserRelay.autoStart", "omp starts the relay automatically when the browser prelude needs it;"),
+	);
+	console.log(t("cli.browserRelay.manualStart", "run `omp browser-relay` yourself only for --token or --no-group."));
+	console.log(t("cli.browserRelay.badge", "The extension badge shows 'on' once it reaches a relay."));
 }
 
 async function runServe(args: BrowserRelayCommandArgs): Promise<void> {
@@ -80,34 +83,62 @@ async function runServe(args: BrowserRelayCommandArgs): Promise<void> {
 		// broker (or by hand): losing the bind to a live relay is success.
 		if (err instanceof Error && "code" in err && err.code === "EADDRINUSE") {
 			if (await probeRelayServer(`http://127.0.0.1:${args.port}`)) {
-				console.log(`omp browser relay already running on http://127.0.0.1:${args.port}; nothing to do.`);
+				console.log(
+					t(
+						"cli.browserRelay.alreadyRunning",
+						"omp browser relay already running on http://127.0.0.1:{port}; nothing to do.",
+						{ port: args.port },
+					),
+				);
 				return;
 			}
-			console.error(`Port ${args.port} is in use by something that is not an omp browser relay.`);
+			console.error(
+				t("cli.browserRelay.portInUse", "Port {port} is in use by something that is not an omp browser relay.", {
+					port: args.port,
+				}),
+			);
 			process.exit(1);
 		}
 		throw err;
 	}
 
-	console.log(`omp browser relay listening on http://127.0.0.1:${args.port}`);
-	console.log(`  extension endpoint  ws://127.0.0.1:${args.port}/ext${args.token ? "?token=***" : ""}`);
+	console.log(
+		t("cli.browserRelay.listening", "omp browser relay listening on http://127.0.0.1:{port}", { port: args.port }),
+	);
+	console.log(
+		t("cli.browserRelay.endpoint", "  extension endpoint  ws://127.0.0.1:{port}/ext{token}", {
+			port: args.port,
+			token: args.token ? "?token=***" : "",
+		}),
+	);
 	if (args.port === DEFAULT_RELAY_PORT) {
-		console.log("  enable with         omp config set browser.relay true");
+		console.log(t("cli.browserRelay.enable", "  enable with         omp config set browser.relay true"));
 	} else {
 		console.log(
-			`  enable with         omp config set browser.relay true && omp config set browser.relayUrl http://127.0.0.1:${args.port}`,
+			t(
+				"cli.browserRelay.enableUrl",
+				"  enable with         omp config set browser.relay true && omp config set browser.relayUrl http://127.0.0.1:{port}",
+				{ port: args.port },
+			),
 		);
 	}
-	console.log("Waiting for the OMP Browser Relay extension to connect (omp browser-relay install)...");
+	console.log(
+		t(
+			"cli.browserRelay.waiting",
+			"Waiting for the OMP Browser Relay extension to connect (omp browser-relay install)...",
+		),
+	);
 
 	let announced = false;
 	const readiness = setInterval(() => {
 		if (relay.bridge.ready && !announced) {
 			announced = true;
-			console.log("Extension connected. The omp browser prelude can now drive your tabs.");
+			console.log(
+				t("cli.browserRelay.connected", "Extension connected. The omp browser prelude can now drive your tabs."),
+			);
 		} else if (!relay.bridge.ready && announced) {
 			announced = false;
-			console.log("Extension disconnected; waiting for it to reconnect...");
+			console.log(t("cli.browserRelay.disconnected", "Extension disconnected; waiting for it to reconnect..."));
 		}
 	}, 500);
 

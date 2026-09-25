@@ -149,14 +149,13 @@ async function buildPluginConfigItems(
 	for (const key in schemaSettings) {
 		const schema = schemaSettings[key];
 		const currentValue = settings[key] ?? schema.default;
-		const displayValue =
-			schema.secret && currentValue ? "••••••••" : String(currentValue ?? tuiT("ui.plugins.notSet", "(not set)"));
+		const rawValue = currentValue === undefined || currentValue === null ? "" : String(currentValue);
 
 		if (schema.type === "boolean") {
 			items.push({
 				id: `config:${key}`,
 				label: `  ${key}`,
-				description: schema.description || `Configure ${key}`,
+				description: schema.description || `${tuiT("ui.plugins.configure", "Configure {key}", { key })}`,
 				currentValue: currentValue ? "true" : "false",
 				values: ["true", "false"],
 			});
@@ -164,7 +163,7 @@ async function buildPluginConfigItems(
 			items.push({
 				id: `config:${key}`,
 				label: `  ${key}`,
-				description: schema.description || `Configure ${key}`,
+				description: schema.description || `${tuiT("ui.plugins.configure", "Configure {key}", { key })}`,
 				currentValue: String(currentValue ?? schema.default ?? ""),
 				submenu: (cv, done) =>
 					createConfigEnumPanel(
@@ -185,13 +184,13 @@ async function buildPluginConfigItems(
 			items.push({
 				id: `config:${key}`,
 				label: `  ${key}`,
-				description: schema.description || `Configure ${key}`,
-				currentValue: displayValue,
+				description: schema.description || `${tuiT("ui.plugins.configure", "Configure {key}", { key })}`,
+				currentValue: rawValue,
 				submenu: (cv, done) =>
 					createConfigInputPanel(
 						key,
 						schema,
-						cv === "(not set)" ? "" : cv,
+						cv === "" ? "" : cv,
 						value => {
 							const parsed = schema.type === "number" ? Number(value) : value;
 							const result = onConfigChange(key, parsed);
@@ -411,7 +410,11 @@ export class PluginDetailComponent extends OverlayPanel {
 				items.push({
 					id: `feature:${featName}`,
 					label: `  ${featName}`,
-					description: feat.description || `Enable ${featName} feature`,
+					description:
+						feat.description ||
+						tuiT("ui.plugins.enableFeature", "Enable {name} feature", {
+							name: featName,
+						}),
 					currentValue: isEnabled ? "true" : "false",
 					values: ["true", "false"],
 				});
@@ -505,7 +508,9 @@ export class MarketplacePluginDetailComponent extends OverlayPanel {
 
 		const fallbackName = this.callbacks.parsePluginId(this.plugin.id)?.name ?? this.plugin.id;
 		try {
-			const runtimePlugin = await this.manager.getPlugin(fallbackName, { path: entry.installPath });
+			const runtimePlugin = await this.manager.getPlugin(fallbackName, {
+				path: entry.installPath,
+			});
 			if (!runtimePlugin) return;
 			const configItems = await buildPluginConfigItems(
 				runtimePlugin,
@@ -531,12 +536,16 @@ export class MarketplacePluginDetailComponent extends OverlayPanel {
 		const entry = plugin.entries[0];
 		this.title = plugin.id;
 		const subtitleParts = [`[${plugin.scope}]`];
-		if (plugin.shadowedBy) subtitleParts.push(`${theme.status.shadowed} shadowed by ${plugin.shadowedBy}`);
+		if (plugin.shadowedBy) {
+			subtitleParts.push(
+				`${theme.status.shadowed} ${tuiT("ui.plugins.shadowedBy", "shadowed by")} ${plugin.shadowedBy}`,
+			);
+		}
 
 		const items: SettingItem[] = [
 			{
 				id: "__enabled__",
-				label: "Enabled",
+				label: tuiT("ui.plugins.enabled", "Enabled"),
 				description: tuiT("ui.plugins.enableOrDisableMarketplace", "Enable or disable this marketplace plugin"),
 				currentValue: marketplaceEnabled(plugin) ? "true" : "false",
 				values: ["true", "false"],
@@ -699,7 +708,9 @@ function createConfigInputPanel(
 	onCancel: () => void,
 	requestRender?: () => void,
 ): Component {
-	let typeHint = `Type: ${schema.type}`;
+	let typeHint = tuiT("ui.plugins.typeHint", "Type: {type}", {
+		type: schema.type,
+	});
 	if (schema.type === "number" && (schema.min !== undefined || schema.max !== undefined)) {
 		typeHint += ` (${schema.min ?? ""}..${schema.max ?? ""})`;
 	}
@@ -791,7 +802,10 @@ export class PluginSettingsComponent extends Container {
 
 		const entries: PluginListEntry[] = [
 			...npmPlugins.map((plugin): PluginListEntry => ({ kind: "npm", plugin })),
-			...marketplacePlugins.map((plugin): PluginListEntry => ({ kind: "marketplace", plugin })),
+			...marketplacePlugins.map((plugin): PluginListEntry => ({
+				kind: "marketplace",
+				plugin,
+			})),
 		];
 
 		this.#viewComponent = new PluginListComponent(entries, {

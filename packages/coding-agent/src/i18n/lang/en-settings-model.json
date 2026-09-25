@@ -109,8 +109,6 @@
   "settings.prewalk.enabled.label": "Enable Prewalk",
   "settings.proseOnlyThinking.description": "Omit code blocks from thinking summaries and replace them with an ellipsis",
   "settings.proseOnlyThinking.label": "Prose Only Thinking",
-  "settings.providers.anthropic.serverSideFallback.description": "When a Claude Fable 5 / Mythos 5 request is blocked by Anthropic",
-  "settings.providers.anthropic.serverSideFallback.label": "Anthropic Server-Side Fallback (Fable 5)",
   "settings.providers.autoThinkingModel.description": "Difficulty classifier for the `auto` thinking level: online (the TINY role from /models, else smol) by default, or a local on-device model",
   "settings.providers.autoThinkingModel.label": "Auto Thinking Model",
   "settings.repetitionPenalty.description": "Penalty for repeated tokens (-1 = provider default)",

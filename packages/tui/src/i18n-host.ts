@@ -10,6 +10,11 @@
 
 export type TuiTranslator = (key: string, fallback: string, params?: Record<string, unknown>) => string;
 
+function interpolate(template: string, params?: Record<string, unknown>): string {
+	if (!params) return template;
+	return template.replace(/\{(\w+)\}/g, (match, key) => (params[key] === undefined ? match : String(params[key])));
+}
+
 let translator: TuiTranslator | null = null;
 let languageProvider: (() => string) | null = null;
 
@@ -30,7 +35,7 @@ export function isTuiTranslationActive(): boolean {
 
 /** Resolve a UI string through the host translator, or return the fallback as-is. */
 export function tuiT(key: string, fallback: string, params?: Record<string, unknown>): string {
-	return translator ? translator(key, fallback, params) : fallback;
+	return translator ? translator(key, fallback, params) : interpolate(fallback, params);
 }
 
 /** Active UI language as reported by the host; `"en"` when no host is registered. */

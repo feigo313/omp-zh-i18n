@@ -138,7 +138,12 @@ export class HubFrame {
 		entries: readonly TEntry[],
 		width: number,
 		rows: number,
-		selection: { id: string; focused: boolean; follow: boolean; clamp: boolean },
+		selection: {
+			id: string;
+			focused: boolean;
+			follow: boolean;
+			clamp: boolean;
+		},
 		style: (entry: TEntry, index: number) => SidebarStyle,
 	): string[] {
 		if (selection.follow) {

@@ -1,4 +1,5 @@
 import { Container } from "../tui";
+import { tuiT } from "../i18n-host";
 import { Disclosure } from "../components/disclosure";
 import { Text } from "../components/text";
 import { formatDiagnostics } from "../render/render-utils";
@@ -59,7 +60,11 @@ export class LateDiagnosticsMessageComponent extends Container {
 		this.#disclosure?.dispose();
 		this.#disclosure = undefined;
 
-		const input = this.#diagnosticInput() ?? { errored: false, summary: "", messages: [] };
+		const input = this.#diagnosticInput() ?? {
+			errored: false,
+			summary: "",
+			messages: [],
+		};
 
 		this.#disclosure = new Disclosure({
 			collapsedBody: () => new Text(this.#format(input, false), 1, 0),
@@ -86,7 +91,7 @@ export class LateDiagnosticsMessageComponent extends Container {
 	/** Render one branch of the diagnostic tree, reusing the tool renderer. */
 	#format(input: { errored: boolean; summary: string; messages: string[] }, expanded: boolean): string {
 		return formatDiagnostics(input, expanded, theme, fp => theme.getLangIcon(getLanguageFromPath(fp)), {
-			title: "Late diagnostics",
+			title: tuiT("ui.lateDiagnostics", "Late diagnostics"),
 		}).replace(/^\n+/, "");
 	}
 }

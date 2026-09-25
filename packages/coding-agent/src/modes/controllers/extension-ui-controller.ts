@@ -35,6 +35,7 @@ import { normalizeCustomMessagePayload, USER_INTERRUPT_LABEL } from "../../sessi
 import { disambiguateDisplayLabels, sanitizeCarriageReturns } from "@oh-my-pi/pi-tui/render/render-utils";
 import { setExtensionTerminalTitle, setSessionTerminalTitle } from "../../utils/title-generator";
 import { getEditorCommand, openInEditor } from "../../utils/external-editor";
+import { t } from "../../i18n";
 
 const MAX_WIDGET_LINES = 10;
 const ASK_OTHER_OPTION = "Other (type your own)";
@@ -217,6 +218,7 @@ export class ExtensionUiController {
 			getContextUsage: () => this.ctx.session.getContextUsage(),
 			compact: instructionsOrOptions => this.#compactSession(instructionsOrOptions),
 			getSystemPrompt: () => this.ctx.session.systemPrompt,
+			runEphemeralTurn: args => this.ctx.session.runEphemeralTurn(args),
 		};
 		const commandActions: ExtensionCommandContextActions = {
 			getContextUsage: () => this.ctx.session.getContextUsage(),
@@ -253,7 +255,11 @@ export class ExtensionUiController {
 
 				this.ctx.present([
 					new Spacer(1),
-					new Text(`${theme.fg("accent", `${theme.status.success} New session started`)}`, 1, 1),
+					new Text(
+						`${theme.fg("accent", `${theme.status.success} ${t("cli.extension.newSessionStarted", "New session started")}`)}`,
+						1,
+						1,
+					),
 				]);
 				await this.ctx.reloadTodos();
 				this.ctx.ui.requestRender(true, { clearScrollback: true });
@@ -448,6 +454,7 @@ export class ExtensionUiController {
 			getContextUsage: () => this.ctx.session.getContextUsage(),
 			compact: instructionsOrOptions => this.#compactSession(instructionsOrOptions),
 			getSystemPrompt: () => this.ctx.session.systemPrompt,
+			runEphemeralTurn: args => this.ctx.session.runEphemeralTurn(args),
 		};
 		const commandActions: ExtensionCommandContextActions = {
 			getContextUsage: () => this.ctx.session.getContextUsage(),
@@ -481,7 +488,11 @@ export class ExtensionUiController {
 
 				this.ctx.present([
 					new Spacer(1),
-					new Text(`${theme.fg("accent", `${theme.status.success} New session started`)}`, 1, 1),
+					new Text(
+						`${theme.fg("accent", `${theme.status.success} ${t("cli.extension.newSessionStarted", "New session started")}`)}`,
+						1,
+						1,
+					),
 				]);
 				await this.ctx.reloadTodos();
 				this.ctx.ui.requestRender(true, { clearScrollback: true });
@@ -657,7 +668,7 @@ export class ExtensionUiController {
 					? {
 							isBlocked: () => draftEditor.getText().length > 0,
 							handleInput: (keyData: string) => draftEditor.handleDraftEdit(keyData),
-							hint: "Finish or clear the current prompt to answer",
+							hint: t("cli.extension.finishPrompt", "Finish or clear the current prompt to answer"),
 							// Show the draft's insertion cursor while it owns input; drop it
 							// once the draft clears and the ask controls take over.
 							syncPresentation: () => {
@@ -1218,9 +1229,11 @@ export class ExtensionUiController {
 	}
 
 	showExtensionError(extensionPath: string, error: string): void {
-		const errorText = new Text(`Extension "${extensionPath}" error: ${error}`, 1, 0).setStyleFn(t =>
-			theme.fg("error", t),
-		);
+		const errorText = new Text(
+			t("cli.extension.error", 'Extension "{path}" error: {error}', { path: extensionPath, error }),
+			1,
+			0,
+		).setStyleFn(t => theme.fg("error", t));
 		this.ctx.present(errorText);
 	}
 	async #handleInteractiveCompact(instructionsOrOptions: string | CompactOptions | undefined): Promise<void> {

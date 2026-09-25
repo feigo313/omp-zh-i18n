@@ -59,3 +59,39 @@ packages/*/CHANGELOG.md merge=union
 packages/catalog/src/models.json binary
 packages/catalog/src/compat/rules.json binary
 
+# Files whose trailing whitespace is load-bearing, so the pre-commit
+# `git diff --check` pass must not flag them.
+#
+# This fork localizes the TUI; it does not reformat upstream sources. The
+# entries below keep the vendored/copied files byte-identical to the official
+# tag instead of letting a local hygiene check rewrite them.
+#
+# - `bazel/patches/*.patch` are unified diffs: a context line for a blank
+#   target line is a single space, and stripping it produces an invalid patch
+#   that fails to apply.
+# - `*THIRD-PARTY-NOTICES.txt` is vendored license text carried verbatim.
+# - `README.md` uses Markdown hard line breaks (two trailing spaces).
+# - `*.xkb` are vendored keymap fixtures carried verbatim.
+# - the list below is the upstream v18.3.1 tree as received: it carries
+#   trailing whitespace and space-before-tab indents of its own.
+bazel/patches/*.patch whitespace=-blank-at-eol,-blank-at-eof
+*THIRD-PARTY-NOTICES.txt whitespace=-blank-at-eol,-blank-at-eof
+README.md whitespace=-blank-at-eol
+*.xkb whitespace=-blank-at-eol,-blank-at-eof
+
+crates/pi-builtins/src/cksum.rs whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+crates/pi-builtins/src/grep.rs whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+crates/pi-builtins/src/history.rs whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+crates/pi-builtins/src/mv.rs whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+crates/pi-builtins/src/ps.rs whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+crates/pi-builtins/src/rm.rs whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+crates/pi-builtins/src/sort.rs whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+crates/pi-builtins/src/tail.rs whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+crates/pi-builtins/src/wc.rs whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+crates/pi-natives/tools/cache/tokenization_kimi.py whitespace=-blank-at-eol,-blank-at-eof
+crates/pi-voice/BUILD.bazel whitespace=-blank-at-eol,-blank-at-eof
+crates/vendor/cfg_aliases/BUILD.bazel whitespace=-blank-at-eol,-blank-at-eof
+packages/catalog/src/compat/rules/providers/opencode-go.kdl whitespace=-blank-at-eol,-blank-at-eof
+packages/catalog/src/discovery/cursor-proto.ts whitespace=-blank-at-eol,-blank-at-eof
+packages/catalog/src/discovery/devin-proto.ts whitespace=-blank-at-eol,-blank-at-eof
+

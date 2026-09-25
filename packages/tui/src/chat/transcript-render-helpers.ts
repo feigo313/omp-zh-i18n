@@ -6,11 +6,12 @@
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { type Component } from "../tui";
+import { tuiT } from "../i18n-host";
 import { formatBytes, formatDuration } from "@oh-my-pi/pi-utils";
-import type { JobSnapshot } from "../tools/hub";
-import type { DaemonSnapshot } from "../tools/hub";
+import type { JobSnapshot } from "../tools/wait";
+import type { DaemonSnapshot } from "../tools/daemon";
 import { type CustomMessage, type FileMentionMessage, resolveAbortLabel, shouldRenderAbortReason } from "./messages";
-import { createIrcMessageCard } from "../tools/hub";
+import { createIrcMessageCard } from "../tools/wait";
 import { formatArtifactErrorNotice, type OutputMeta } from "../tools/output-meta";
 import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../render/render-utils";
 import { canonicalizeMessage } from "./thinking-display";
@@ -57,23 +58,30 @@ export function buildAsyncResultBlock(message: CustomOrHookMessage): ToolActivit
 				];
 	const rows: TranscriptStatusRow[] = [];
 	for (const job of jobs) {
-		const jobId = job.jobId ?? "unknown";
-		const typeLabel = job.type ? `[${job.type}]` : "[job]";
+		const jobId = job.jobId ?? tuiT("ui.unknown", "unknown");
+		const typeLabel = job.type ? `[${job.type}]` : `[${tuiT("ui.job", "job")}]`;
 		const duration = typeof job.durationMs === "number" ? formatDuration(job.durationMs) : undefined;
 		rows.push({
 			parts: [
-				theme.fg("success", `${theme.status.done} Background job completed`),
+				theme.fg(
+					"success",
+					`${theme.status.done} ${tuiT("ui.backgroundJobCompleted", "Background job completed")}`,
+				),
 				theme.fg("dim", typeLabel),
 				theme.fg("accent", jobId),
 				duration ? theme.fg("dim", `(${duration})`) : undefined,
 			],
 		});
 		if (job.meta?.artifactError) {
-			rows.push({ parts: [theme.fg("warning", formatArtifactErrorNotice(job.meta.artifactError))] });
+			rows.push({
+				parts: [theme.fg("warning", formatArtifactErrorNotice(job.meta.artifactError))],
+			});
 		}
 	}
 	if (details?.meta?.artifactError) {
-		rows.push({ parts: [theme.fg("warning", formatArtifactErrorNotice(details.meta.artifactError))] });
+		rows.push({
+			parts: [theme.fg("warning", formatArtifactErrorNotice(details.meta.artifactError))],
+		});
 	}
 	return new ToolActivityContainer(new TranscriptStatusBlock(rows));
 }
@@ -88,7 +96,14 @@ export function buildLaunchCompletionBlock(message: CustomOrHookMessage): ToolAc
 	const rows: TranscriptStatusRow[] = [];
 	const daemons = details?.daemons ?? [];
 	if (daemons.length === 0 && typeof message.content === "string") {
-		rows.push({ parts: [theme.fg("dim", `${theme.status.done} ${message.content}`)] });
+		rows.push({
+			parts: [
+				theme.fg(
+					"dim",
+					`${theme.status.done} ${tuiT("ui.supervisedProcessCompleted", "Supervised process completed")}`,
+				),
+			],
+		});
 	}
 	for (const daemon of daemons) {
 		const failed = daemon.state === "failed" || (daemon.exitCode !== undefined && daemon.exitCode !== 0);
@@ -99,8 +114,14 @@ export function buildLaunchCompletionBlock(message: CustomOrHookMessage): ToolAc
 		rows.push({
 			parts: [
 				failed
-					? theme.fg("error", `${theme.status.error} Supervised process failed`)
-					: theme.fg("success", `${theme.status.done} Supervised process completed`),
+					? theme.fg(
+							"error",
+							`${theme.status.error} ${tuiT("ui.supervisedProcessFailed", "Supervised process failed")}`,
+						)
+					: theme.fg(
+							"success",
+							`${theme.status.done} ${tuiT("ui.supervisedProcessCompleted", "Supervised process completed")}`,
+						),
 				theme.fg("accent", daemon.name),
 				daemon.exitCode !== undefined ? theme.fg("dim", `(exit ${daemon.exitCode})`) : undefined,
 				duration ? theme.fg("dim", `(${duration})`) : undefined,
@@ -160,22 +181,28 @@ export function buildIrcMessageCard(message: CustomOrHookMessage, getExpanded: (
 export function buildFileMentionBlock(files: FileMentionMessage["files"], indent: number): TranscriptBlock {
 	const rows: TranscriptStatusRow[] = [];
 	for (const file of files) {
-		let suffix: string;
-		if (file.skippedReason === "tooLarge" || file.skippedReason === "binary") {
-			const size = typeof file.byteSize === "number" ? formatBytes(file.byteSize) : "unknown size";
-			suffix = file.skippedReason === "binary" ? `(skipped: binary, ${size})` : `(skipped: ${size})`;
-		} else {
-			suffix = file.image
-				? "(image)"
-				: file.lineCount === undefined
-					? "(unknown lines)"
-					: `(${file.lineCount} lines)`;
-		}
+		const size =
+			typeof file.byteSize === "number" ? formatBytes(file.byteSize) : tuiT("ui.unknownSize", "unknown size");
 		rows.push({
 			parts: [
-				`${theme.fg("dim", `${theme.tree.last} `)}${theme.fg("muted", "Read")}`,
+				`${theme.fg("dim", `${theme.tree.last} `)}${theme.fg("muted", tuiT("ui.read", "Read"))}`,
 				theme.fg("accent", file.path),
-				theme.fg("dim", suffix),
+				theme.fg(
+					"dim",
+					file.skippedReason === "tooLarge" || file.skippedReason === "binary"
+						? file.skippedReason === "binary"
+							? tuiT("ui.fileSkippedBinary", "(skipped: binary, {size})", {
+									size,
+								})
+							: tuiT("ui.fileSkipped", "(skipped: {size})", { size })
+						: file.image
+							? tuiT("ui.imageFile", "(image)")
+							: file.lineCount === undefined
+								? tuiT("ui.unknownLines", "(unknown lines)")
+								: tuiT("ui.fileLines", "({count} lines)", {
+										count: file.lineCount,
+									}),
+				),
 			],
 			indent,
 		});
@@ -248,7 +275,12 @@ export function splitAssistantMessageToolTimeline(message: AssistantAgentMessage
 		return { beforeTools: message, afterToolCalls, hasToolCalls: false };
 	}
 
-	return { beforeTools: displaySegment(beforeTools), afterToolCalls, hasToolCalls: true, lastToolCallId };
+	return {
+		beforeTools: displaySegment(beforeTools),
+		afterToolCalls,
+		hasToolCalls: true,
+		lastToolCallId,
+	};
 }
 
 /**
@@ -289,10 +321,18 @@ export function resolveAssistantErrorPresentation(
 	}
 	if (message.stopReason === "aborted") {
 		if (!shouldRenderAbortReason(message)) return { kind: "none" };
-		return { kind: "full", text: resolveAbortLabel(message, retryAttempt), isError: true };
+		return {
+			kind: "full",
+			text: resolveAbortLabel(message, retryAttempt),
+			isError: true,
+		};
 	}
 	if (message.stopReason === "error") {
-		return { kind: "full", text: message.errorMessage || "Error", isError: true };
+		return {
+			kind: "full",
+			text: message.errorMessage || "Error",
+			isError: true,
+		};
 	}
 	if (message.errorMessage && shouldRenderAbortReason(message)) {
 		return { kind: "full", text: message.errorMessage, isError: true };

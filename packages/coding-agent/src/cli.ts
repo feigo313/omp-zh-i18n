@@ -34,6 +34,7 @@ import {
 	BLOB_BROKER_WORKER_ARG,
 	COMPUTER_WORKER_ARG,
 	DAEMON_BROKER_WORKER_ARG,
+	IDA_HOST_WORKER_ARG,
 	LSP_MUX_WORKER_ARG,
 	STATS_ACTIVITY_WORKER_ARG,
 	TERMINAL_OUTPUT_WORKER_ARG,
@@ -142,6 +143,7 @@ async function runSmokeTest(): Promise<void> {
 	// Other smoke dependencies stay lazy so normal CLI startup does not load their worker clients.
 	const { smokeTestDaemonBroker } = await import("./launch/client");
 	const { smokeTestLspMux } = await import("./lsp/mux/daemon");
+	const { smokeTestIdaHost } = await import("./ida/client");
 	const { smokeTestBlobBroker } = await import("./blob-broker/daemon");
 	const { smokeTestTerminalOutputWorker } = await import("./launch/terminal-output-worker-client");
 	await smokeTestSyncWorker();
@@ -168,6 +170,7 @@ async function runSmokeTest(): Promise<void> {
 	await smokeTestMnemopiEmbedWorker();
 	await smokeTestDaemonBroker();
 	await smokeTestLspMux();
+	await smokeTestIdaHost();
 	await smokeTestBlobBroker();
 	await smokeTestTerminalOutputWorker();
 	process.stdout.write("smoke-test: ok\n");
@@ -285,6 +288,11 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	if (arg === LSP_MUX_WORKER_ARG) {
 		const { startLspMuxFromEnvironment } = await import("./lsp/mux/server");
 		await startLspMuxFromEnvironment();
+		return true;
+	}
+	if (arg === IDA_HOST_WORKER_ARG) {
+		const { startIdaHostFromEnvironment } = await import("./ida/host");
+		await startIdaHostFromEnvironment();
 		return true;
 	}
 	if (arg === BLOB_BROKER_WORKER_ARG) {
@@ -541,6 +549,19 @@ export async function runCli(argv: string[]): Promise<void> {
 		return;
 	}
 	let stopStartupComposer: (() => void) | undefined;
+
+	// Initialize i18n before any UI surface renders — the speculative startup
+	// composer below paints a first frame, so the dictionaries and the TUI
+	// translator seam must already be in place or that frame is English.
+	// Translation dictionaries are embedded at build time; the seam lets
+	// tui-package components (welcome, settings, overlays) resolve strings
+	// through the same dictionaries without a reverse dependency on this package.
+	const { i18n } = await import("./i18n");
+	await i18n.init();
+	const { setTuiLanguageProvider, setTuiTranslator } = await import("@oh-my-pi/pi-tui/i18n-host");
+	setTuiTranslator(i18n.t.bind(i18n));
+	setTuiLanguageProvider(i18n.getLanguage.bind(i18n));
+
 	if (
 		!process.env.PI_TIMING &&
 		process.stdin.isTTY === true &&
@@ -566,15 +587,6 @@ export async function runCli(argv: string[]): Promise<void> {
 		resolvedArgv[0] === "help";
 	await Promise.all([setFullProcessName(), helpOrVersion ? Promise.resolve() : installNetworkBootstrap()]);
 
-	// Initialize i18n before any UI surface renders. Translation dictionaries are
-	// embedded at build time; the TUI translator seam is wired so tui-package
-	// components (welcome, settings, overlays) resolve strings through the same
-	// dictionaries without a reverse dependency on this package.
-	const { i18n } = await import("./i18n");
-	await i18n.init();
-	const { setTuiTranslator } = await import("@oh-my-pi/pi-tui/i18n-host");
-	setTuiTranslator(i18n.t.bind(i18n));
-
 	if (resolvedArgv[0] === "--smoke-test") {
 		await runSmokeTest();
 		return;
@@ -593,7 +605,14 @@ export async function runCli(argv: string[]): Promise<void> {
 			process.exitCode = 1;
 			return;
 		}
-		await run({ bin: APP_NAME, version: VERSION, argv: resolved.argv, commands, metadataHelp: showHelp });
+		await run({
+			bin: APP_NAME,
+			version: VERSION,
+			argv: resolved.argv,
+			commands,
+			metadataHelp: showHelp,
+			translate: i18n.t.bind(i18n),
+		});
 	} finally {
 		stopStartupComposer?.();
 	}

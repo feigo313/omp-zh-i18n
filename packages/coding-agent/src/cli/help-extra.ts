@@ -1,10 +1,9 @@
 import "@oh-my-pi/pi-utils/env";
-import chalk from "@oh-my-pi/pi-utils/chalk";
 import { APP_NAME, CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils/dirs";
+import { t } from "../i18n";
 
-export function getExtraHelpText(): string {
-	return `${chalk.bold("Environment Variables:")}
-  ${chalk.dim("# Core Providers")}
+const EXTRA_HELP_FALLBACK = `Environment Variables:
+  # Core Providers
   ANTHROPIC_API_KEY          - Anthropic Claude models
   ANTHROPIC_OAUTH_TOKEN      - Anthropic OAuth (takes precedence over API key)
   CLAUDE_CODE_USE_FOUNDRY    - Enable Anthropic Foundry mode (uses Foundry endpoint + mTLS)
@@ -18,7 +17,7 @@ export function getExtraHelpText(): string {
   GEMINI_API_KEY             - Google Gemini models
   COPILOT_GITHUB_TOKEN      - GitHub Copilot
 
-  ${chalk.dim("# Additional LLM Providers")}
+  # Additional LLM Providers
   AZURE_OPENAI_API_KEY       - Azure OpenAI models
   GROQ_API_KEY               - Groq models
   CEREBRAS_API_KEY           - Cerebras models
@@ -37,15 +36,18 @@ export function getExtraHelpText(): string {
   COMMAND_CODE_API_KEY       - Command Code Provider API models
   CHARM_HYPER_API_KEY        - Charm Hyper inference gateway models
   AI_GATEWAY_API_KEY         - Vercel AI Gateway
+  STEPFUN_API_KEY            - StepFun Step models
   WAFER_SERVERLESS_API_KEY   - Wafer Serverless (pay-as-you-go)
   YOLO_AUTO_API_KEY          - Yolo-Auto flat-rate Qwen models
+  SINGULARITYAPI_DEV_API_KEY - SingularityAPI universal gateway (300+ models)
+  SINGULARITYAPI_TECH_API_KEY - SingularityAPI reserved DeepSeek lanes
 
-  ${chalk.dim("# Cloud Providers")}
+  # Cloud Providers
   AWS_PROFILE                - AWS Bedrock (or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY)
   GOOGLE_CLOUD_PROJECT       - Google Vertex AI (requires GOOGLE_CLOUD_LOCATION)
   GOOGLE_APPLICATION_CREDENTIALS - Service account for Vertex AI
 
-  ${chalk.dim("# Search & Tools")}
+  # Search & Tools
   EXA_API_KEY                - Exa web search
   BRAVE_API_KEY              - Brave web search
   PERPLEXITY_API_KEY         - Perplexity web search API key (optional; anonymous fallback)
@@ -57,7 +59,7 @@ export function getExtraHelpText(): string {
   ANTHROPIC_SEARCH_BASE_URL  - Anthropic web search base URL (override; pairs with ANTHROPIC_SEARCH_API_KEY)
   TYPESAFE_API_KEY           - TypeSafe System One judgments (auto thinking, unexpected-stop, AI staging, eval judge())
 
-  ${chalk.dim("# Configuration")}
+  # Configuration
   OMP_PROFILE                 - Named profile for isolated agent state (same as --profile)
   Use \`omp --profile <name> --alias <command>\` to create a shell shortcut for a profile
   PI_CODING_AGENT_DIR        - Session storage directory (default: ~/${CONFIG_DIR_NAME}/agent)
@@ -67,8 +69,8 @@ export function getExtraHelpText(): string {
   PI_PLAN_MODEL              - Override planning model (see --plan)
   PI_NO_PTY                  - Disable PTY-based interactive bash execution
   For complete environment variable reference, see:
-  ${chalk.dim("docs/environment-variables.md")}
-${chalk.bold("Available Tools (default-enabled unless noted):")}
+  docs/environment-variables.md
+Available Tools (default-enabled unless noted):
   read          - Read file contents
   bash          - Execute bash commands
   edit          - Edit files with find/replace
@@ -85,10 +87,16 @@ ${chalk.bold("Available Tools (default-enabled unless noted):")}
   web_search    - Search the web
   ask           - Ask user questions (interactive mode only)
 
-${chalk.bold("Plugin Options:")}
+Plugin Options:
   --plugin-dir <path>        Load plugin from directory (repeatable)
 
-${chalk.bold("Useful Commands:")}
+Useful Commands:
   omp agents unpack           - Export bundled subagents to ~/.omp/agent/agents (default)
   omp agents unpack --project - Export bundled subagents to ./.omp/agents`;
+
+export function getExtraHelpText(): string {
+	return t("cli.help.extra", EXTRA_HELP_FALLBACK, {
+		appName: APP_NAME,
+		configDir: CONFIG_DIR_NAME,
+	});
 }

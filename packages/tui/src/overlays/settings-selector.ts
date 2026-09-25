@@ -44,7 +44,7 @@ import { type ComposerPreviewStatusSource, ComposerShapePreview } from "./compos
 import { getComposerShapeOptions } from "./composer-shape-registry";
 import { bottomBorder, divider, row, topBorder } from "../chrome/overlay-box";
 import { PluginSettingsComponent, type PluginSettingsHost } from "./plugin-settings";
-import { getSettingDef, getSettingsForTab, type SettingDef, type SubmenuSettingDef } from "./settings-defs";
+import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
 
 // Translation bridge: the fork's settings hooks were written against the
 // coding-agent i18n runtime; here they resolve through the injected host
@@ -99,7 +99,7 @@ function createSettingsTextField(
 		secret,
 		initialValue: currentValue || undefined,
 		empty: "submit",
-		hint: "  Enter to save · Esc to cancel · Clear field to unset",
+		hint: tuiT("ui.settings.saveHint", "  Enter to save · Esc to cancel · Clear field to unset"),
 		onSubmit,
 		onCancel,
 		requestRender,
@@ -135,7 +135,7 @@ function createSettingsSelectField(
 		onSelectionChange,
 		onSubmit: onSelect,
 		onCancel,
-		hint: "  Enter to select · Esc to go back",
+		hint: tuiT("ui.settings.selectHint", "  Enter to select · Esc to go back"),
 		footer,
 		requestRender,
 	});
@@ -398,7 +398,7 @@ class ProviderLimitsSubmenu extends Container {
 					"Enter a positive number. Decimals round down. Clear the field to make this provider unlimited.",
 				initialValue: limits[provider]?.toString() ?? undefined,
 				empty: "submit",
-				hint: "  Enter to save · Esc to cancel · Clear field to unset",
+				hint: tuiT("ui.settings.saveHint", "  Enter to save · Esc to cancel · Clear field to unset"),
 				validate: value => {
 					if (value.trim() === "") return undefined;
 					const limit = Number(value.trim());
@@ -963,7 +963,7 @@ export class SettingsSelectorComponent implements Component {
 			case "submenu":
 				return {
 					...item,
-					currentValue: this.#getSubmenuCurrentValue(def.path, currentValue, def),
+					currentValue: this.#getSubmenuCurrentValue(def.path, currentValue),
 					submenu: (cv, done) => this.#createSubmenu(def, cv, done),
 				};
 
@@ -1008,7 +1008,7 @@ export class SettingsSelectorComponent implements Component {
 		return !Object.is(currentValue, defaultValue);
 	}
 
-	#getSubmenuCurrentValue(path: string, value: unknown, def?: SubmenuSettingDef): string {
+	#getSubmenuCurrentValue(path: string, value: unknown): string {
 		const rawValue = String(value ?? "");
 		if (path === "compaction.thresholdPercent" && (rawValue === "-1" || rawValue === "")) {
 			return "default";
@@ -1016,9 +1016,6 @@ export class SettingsSelectorComponent implements Component {
 		if (path === "compaction.thresholdTokens" && (rawValue === "-1" || rawValue === "")) {
 			return "default";
 		}
-		const option = def?.options.find(item => item.value === rawValue);
-		if (option?.label) return option.label;
-		if (path === "theme.dark" || path === "theme.light") return i18n.t(`themes.${rawValue}.label`, rawValue);
 		return rawValue;
 	}
 
@@ -1157,9 +1154,10 @@ export class SettingsSelectorComponent implements Component {
 			this.#formatTextInputEditValue(def.path, this.#context.settings.get(def.path)),
 			def.secret,
 			value => {
-				// Empty string clears the setting; undefined-typed string settings
-				// store "" which the browser.ts expandPath ignores (no-op fallback).
-				this.#setSettingValue(def.path, value);
+				// An empty field removes the persisted value, so the default (or an
+				// environment fallback) applies again instead of a pinned "".
+				if (value === "") this.#context.settings.unset(def.path);
+				else this.#setSettingValue(def.path, value);
 				this.#callbacks.onChange(def.path, this.#context.settings.get(def.path));
 				wrappedDone(this.#formatTextInputValue(def, this.#context.settings.get(def.path)));
 			},

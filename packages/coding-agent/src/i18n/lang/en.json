@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "16.2.2",
-    "lastUpdated": "2026-06-28",
+    "version": "18.2.6-zh",
+    "lastUpdated": "2026-09-25",
     "completeness": 100,
     "description": "English translation file (reference)"
   },
@@ -69,10 +69,6 @@
   },
   "cli": {
     "version": "Version",
-    "help": "Help",
-    "usage": "Usage",
-    "options": "Options",
-    "commands": "Commands",
-    "examples": "Examples"
+    "help": "Help"
   }
 }

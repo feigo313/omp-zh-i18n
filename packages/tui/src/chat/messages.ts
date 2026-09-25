@@ -1,6 +1,7 @@
 import type { AssistantMessage, ImageContent, MessageAttribution, TextContent } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { COLLAB_PROMPT_MESSAGE_TYPE } from "@oh-my-pi/pi-wire";
+import { tuiT } from "../i18n-host";
 import type { OutputMeta } from "../tools/output-meta";
 import type { BranchSummaryMessage, CompactionSummaryMessage } from "@oh-my-pi/pi-agent-core/compaction/messages";
 
@@ -130,9 +131,9 @@ export function resolveAbortLabel(
 		return message.errorMessage!;
 	}
 	if (retryAttempt > 0) {
-		return `Aborted after ${retryAttempt} retry attempt${retryAttempt > 1 ? "s" : ""}`;
+		return tuiT("ui.abortedAfterRetries", "Aborted after {count} retry attempt(s)", { count: retryAttempt });
 	}
-	return "Operation aborted";
+	return tuiT("ui.operationAborted", "Operation aborted");
 }
 
 /** True when a persisted or extension-supplied value can be sent as custom-message content. */

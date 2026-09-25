@@ -13,11 +13,11 @@ import * as path from "node:path";
 
 import { getAgentDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import enJson from "./lang/en.json" with { type: "json" };
+import enCli from "./lang/en-cli.json" with { type: "json" };
 import enCommands from "./lang/en-commands.json" with { type: "json" };
 import enSettingsAppearance from "./lang/en-settings-appearance.json" with { type: "json" };
 import enSettingsContext from "./lang/en-settings-context.json" with { type: "json" };
 import enSettingsFiles from "./lang/en-settings-files.json" with { type: "json" };
-import enSettingsFull from "./lang/en-settings-full.json" with { type: "json" };
 import enSettingsInteraction from "./lang/en-settings-interaction.json" with { type: "json" };
 import enSettingsMemory from "./lang/en-settings-memory.json" with { type: "json" };
 import enSettingsModel from "./lang/en-settings-model.json" with { type: "json" };
@@ -26,6 +26,7 @@ import enSettingsShell from "./lang/en-settings-shell.json" with { type: "json" 
 import enSettingsTasks from "./lang/en-settings-tasks.json" with { type: "json" };
 import enSettingsTools from "./lang/en-settings-tools.json" with { type: "json" };
 // 静态导入翻译文件（编译时嵌入到二进制）
+import zhCli from "./lang/zh-cli.json" with { type: "json" };
 import zhCommands from "./lang/zh-commands.json" with { type: "json" };
 import zhHotkeys from "./lang/zh-hotkeys.json" with { type: "json" };
 import zhRuntime from "./lang/zh-runtime.json" with { type: "json" };
@@ -44,11 +45,18 @@ import zhUi from "./lang/zh-ui.json" with { type: "json" };
 
 /** 包内 bundled 翻译目录 */
 const BUNDLED_LAN_DIR = path.join(import.meta.dir, "lang");
+const LEGACY_TRANSLATION_FILES = new Set(["en-settings-full.json"]);
+const SUPPORTED_LANGUAGES = new Set(["en", "zh"]);
+
+function normalizeLanguage(language: string): "en" | "zh" {
+	return SUPPORTED_LANGUAGES.has(language) && language === "zh" ? "zh" : "en";
+}
 
 /**
  * 编译时嵌入的翻译文件（用于二进制分发）
  */
 const EMBEDDED_TRANSLATIONS: Record<string, TranslationFile> = {
+	"zh-cli.json": zhCli,
 	"zh-commands.json": zhCommands,
 	"zh-hotkeys.json": zhHotkeys,
 	"zh-runtime.json": zhRuntime,
@@ -64,11 +72,11 @@ const EMBEDDED_TRANSLATIONS: Record<string, TranslationFile> = {
 	"zh-settings-tools.json": zhSettingsTools,
 	"zh-tips.json": zhTips,
 	"zh-ui.json": zhUi,
+	"en-cli.json": enCli,
 	"en-commands.json": enCommands,
 	"en-settings-appearance.json": enSettingsAppearance,
 	"en-settings-context.json": enSettingsContext,
 	"en-settings-files.json": enSettingsFiles,
-	"en-settings-full.json": enSettingsFull,
 	"en-settings-interaction.json": enSettingsInteraction,
 	"en-settings-memory.json": enSettingsMemory,
 	"en-settings-model.json": enSettingsModel,
@@ -78,6 +86,8 @@ const EMBEDDED_TRANSLATIONS: Record<string, TranslationFile> = {
 	"en-settings-tools.json": enSettingsTools,
 	"en.json": enJson,
 };
+
+export const EMBEDDED_TRANSLATION_FILES = Object.freeze(Object.keys(EMBEDDED_TRANSLATIONS));
 
 /**
  * 翻译字典类型
@@ -94,6 +104,8 @@ export interface TranslationMeta {
 	upstream_commit?: string;
 	lastUpdated?: string;
 	completeness?: number;
+	description?: string;
+	language?: string;
 }
 
 /**
@@ -151,7 +163,7 @@ class I18nManager {
 	async #detectLanguage(): Promise<string> {
 		// 环境变量优先
 		if (process.env.OMP_LANG) {
-			return process.env.OMP_LANG;
+			return normalizeLanguage(process.env.OMP_LANG);
 		}
 
 		// 从 config.yml 读取
@@ -182,16 +194,17 @@ class I18nManager {
 	 * 先加载包内 bundled 翻译，再用用户目录覆盖
 	 */
 	async #loadTranslation(lang: string, target: TranslationFile): Promise<void> {
-		// 1. 加载包内 bundled 翻译（仅默认路径时）
+		// 1. Load a complete bundled dictionary first. A partial directory load
+		// must not be treated as a successful language load.
 		if (this.#useBundled) {
-			// 先尝试从目录加载（源码开发模式）
-			const dirLoaded = await this.#loadTranslationFromDir(lang, BUNDLED_LAN_DIR, target);
-			// 如果目录加载失败（编译后的二进制），使用嵌入的翻译
+			const bundled: TranslationFile = {};
+			const dirLoaded = await this.#loadTranslationFromDir(lang, BUNDLED_LAN_DIR, bundled);
 			if (!dirLoaded) {
-				this.#loadEmbeddedTranslations(lang, target);
+				this.#loadEmbeddedTranslations(lang, bundled);
 			}
+			this.#mergeTranslations(target, bundled);
 		}
-		// 2. 加载用户目录翻译
+		// 2. 用户目录翻译是可选的部分覆盖；加载失败时保留 bundled 内容。
 		await this.#loadTranslationFromDir(lang, this.#lanDir, target);
 	}
 
@@ -199,7 +212,7 @@ class I18nManager {
 	 * 从嵌入的翻译文件加载（编译后的二进制使用）
 	 */
 	#loadEmbeddedTranslations(lang: string, target: TranslationFile): void {
-		for (const [filename, content] of Object.entries(EMBEDDED_TRANSLATIONS)) {
+		for (const [filename, content] of Object.entries(EMBEDDED_TRANSLATIONS).sort(([a], [b]) => a.localeCompare(b))) {
 			if (filename.startsWith(`${lang}-`) || filename === `${lang}.json`) {
 				this.#mergeTranslations(target, content);
 			}
@@ -213,10 +226,18 @@ class I18nManager {
 	async #loadTranslationFromDir(lang: string, dir: string, target: TranslationFile): Promise<boolean> {
 		try {
 			const files = await fs.readdir(dir);
-			const langFiles = files.filter(f => f.startsWith(`${lang}-`) && f.endsWith(".json"));
+			const langFiles = files
+				.filter(
+					f =>
+						f.endsWith(".json") &&
+						!LEGACY_TRANSLATION_FILES.has(f) &&
+						(f === `${lang}.json` || f.startsWith(`${lang}-`)),
+				)
+				.sort((a, b) => a.localeCompare(b));
 
 			if (langFiles.length === 0) return false;
 
+			let complete = true;
 			for (const file of langFiles) {
 				try {
 					const filePath = path.join(dir, file);
@@ -224,10 +245,11 @@ class I18nManager {
 					const parsed = JSON.parse(content) as TranslationFile;
 					this.#mergeTranslations(target, parsed);
 				} catch (error) {
+					complete = false;
 					logger.warn(`Failed to load translation file: ${file}`, { error });
 				}
 			}
-			return true;
+			return complete;
 		} catch (error) {
 			// 目录不存在时静默失败
 			if (!isEnoent(error)) {
@@ -264,8 +286,9 @@ class I18nManager {
 	 */
 	t(key: string, fallback?: string, params?: Record<string, unknown>): string {
 		if (!this.#initialized) {
-			// 同步访问时使用未初始化的状态，返回 key
-			return fallback || key;
+			// 同步访问时使用未初始化的状态，返回带插值的 fallback 或 key
+			const result = fallback || key;
+			return params ? this.#interpolate(result, params) : result;
 		}
 
 		// 先尝试直接查找扁平 key
@@ -322,10 +345,11 @@ class I18nManager {
 	 * 设置语言（用于运行时切换，需要重新加载）
 	 */
 	async setLanguage(lang: string): Promise<void> {
-		this.#lang = lang;
+		const normalized = normalizeLanguage(lang);
+		this.#lang = normalized;
 		this.#dict = {};
 		this.#initialized = false;
-		await this.#loadTranslation(lang, this.#dict);
+		await this.#loadTranslation(normalized, this.#dict);
 		this.#initialized = true;
 
 		// Note: callers must invalidate caches (settings-defs, prompt-loader)

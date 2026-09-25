@@ -26,6 +26,7 @@ diff --git a/toolchain/zig-wrapper.zig b/toolchain/zig-wrapper.zig
 @@ -267,6 +267,32 @@
      if (run_mode == RunMode.cc)
          try resolveColonLibraries(arena, cwd, &args);
+ 
 +    // Compile-only steps (-c/-E/-S) get a private throwaway cache: concurrent
 +    // zig processes sharing one cache corrupt it (ziglang/zig#18763), and the
 +    // cache is worthless for plain compiles. Links keep the shared cache for
@@ -61,6 +62,7 @@ diff --git a/toolchain/defs.bzl b/toolchain/defs.bzl
 @@ -278,6 +278,12 @@
          )
          repository_ctx.symlink("tools/zig-wrapper{}".format(exe), tool_path)
+ 
 +    # omp: opt into the repo contents cache — the fetch is deterministic
 +    # given the pinned zig archive and the wrapper source above.
 +    if hasattr(repository_ctx, "repo_metadata"):

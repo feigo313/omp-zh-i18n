@@ -14,7 +14,7 @@ import { BUILTIN_LIFECYCLE_SLASH_COMMANDS } from "./builtin-lifecycle";
 import { BUILTIN_MARKETPLACE_SLASH_COMMANDS, reloadTuiPluginState } from "./builtin-marketplace";
 import { BUILTIN_MODE_SLASH_COMMANDS } from "./builtin-modes";
 import { BUILTIN_SESSION_SLASH_COMMANDS } from "./builtin-session";
-import { interceptSlashCommand } from "../i18n/interceptor";
+import { BUILTIN_SKILLS_SLASH_COMMANDS } from "./builtin-skills";
 import { parseSlashCommand } from "./helpers/parse";
 import type {
 	BuiltinSlashCommand,
@@ -42,6 +42,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	...BUILTIN_SESSION_SLASH_COMMANDS,
 	...BUILTIN_LIFECYCLE_SLASH_COMMANDS,
 	...BUILTIN_MARKETPLACE_SLASH_COMMANDS,
+	...BUILTIN_SKILLS_SLASH_COMMANDS,
 	...BUILTIN_CONTROL_SLASH_COMMANDS,
 ];
 
@@ -73,25 +74,13 @@ function materializeTuiBuiltinSlashCommand(
 	cmd: BuiltinSlashCommand,
 	runtime?: TuiSlashCommandRuntime,
 ): TuiBuiltinSlashCommand {
-	const translated = interceptSlashCommand({
-		name: cmd.name,
-		description: cmd.description,
-		subcommands: cmd.subcommands,
-	});
-	const materialized: TuiBuiltinSlashCommand = {
-		...cmd,
-		description: translated.description,
-		subcommands: cmd.subcommands?.map((sub, index) => ({
-			...sub,
-			description: translated.subcommands?.[index]?.description ?? sub.description,
-		})),
-	};
-	if (materialized.subcommands) {
+	const materialized: TuiBuiltinSlashCommand = { ...cmd };
+	if (cmd.subcommands) {
 		materialized.getArgumentCompletions =
-			materialized.name === "mcp" && runtime
-				? buildMcpArgumentCompletions(materialized.subcommands, runtime)
-				: buildArgumentCompletions(materialized.subcommands);
-		materialized.getInlineHint = buildSubcommandInlineHint(materialized.subcommands);
+			cmd.name === "mcp" && runtime
+				? buildMcpArgumentCompletions(cmd.subcommands, runtime)
+				: buildArgumentCompletions(cmd.subcommands);
+		materialized.getInlineHint = buildSubcommandInlineHint(cmd.subcommands);
 	} else if (cmd.name === "move") {
 		materialized.getArgumentCompletions = buildDirectoryArgumentCompletions();
 		if (cmd.inlineHint) materialized.getInlineHint = buildStaticInlineHint(cmd.inlineHint);

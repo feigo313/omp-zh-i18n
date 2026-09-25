@@ -185,3 +185,36 @@ describe("run() usage errors", () => {
 		expect(out).toContain("$ omp bench MODELS... [FLAGS]");
 	});
 });
+
+describe("run() translated help", () => {
+	it("uses the injected translator for sections and command metadata", async () => {
+		const commands: CommandEntry[] = [
+			{ name: "good", load: async () => GoodCommand, help: { description: "prints good things" } },
+		];
+		const writes: string[] = [];
+		const stdoutSpy = spyOn(process.stdout, "write").mockImplementation(chunk => {
+			writes.push(String(chunk));
+			return true;
+		});
+		try {
+			await run({
+				bin: "omp",
+				version: "0.0.0",
+				argv: ["--help"],
+				commands,
+				translate: (key, fallback) => {
+					if (key === "cli.help.usage") return "用法：";
+					if (key === "cli.help.commands") return "命令：";
+					if (key === "cli.commands.good.description") return "打印好东西";
+					return fallback;
+				},
+			});
+		} finally {
+			stdoutSpy.mockRestore();
+		}
+		const output = writes.join("");
+		expect(output).toContain("用法：");
+		expect(output).toContain("命令：");
+		expect(output).toContain("打印好东西");
+	});
+});

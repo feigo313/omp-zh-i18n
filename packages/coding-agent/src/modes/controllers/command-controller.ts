@@ -54,7 +54,12 @@ import {
 	type SessionWorktree,
 } from "../../session/session-worktree";
 import { formatShakeSummary, type ShakeMode, type ShakeResult } from "../../session/shake-types";
-import { formatActiveAccountLabel, limitMatchesActiveAccount } from "../../slash-commands/helpers/active-oauth-account";
+import {
+	codexUsagePlan,
+	formatActiveAccountLabel,
+	formatCodexUsageReportLabel,
+	limitMatchesActiveAccount,
+} from "../../slash-commands/helpers/active-oauth-account";
 import { formatProviderName } from "@oh-my-pi/pi-tui/chrome/format";
 import { formatCompactQuota } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import { outputMeta } from "../../tools/output-meta";
@@ -63,14 +68,24 @@ import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-uti
 import {
 	getChangelogPath,
 	parseChangelog,
-	RECENT_CHANGELOG_ENTRY_LIMIT,
+	parseChangelogView,
 	renderChangelogEntries,
+	selectChangelogEntries,
 } from "../../utils/changelog";
 import { copyToClipboard } from "../../utils/clipboard";
 import { openPath } from "../../utils/open";
 import { setSessionTerminalTitle } from "../../utils/title-generator";
-import { collapseSharedUsageReports, formatLimitTitle } from "@oh-my-pi/pi-tui/overlays/usage-display";
+import {
+	collapseSharedUsageReports,
+	formatLimitTitle,
+	summarizeUsageResetCredits,
+} from "@oh-my-pi/pi-tui/overlays/usage-display";
 import { formatRemainingOnlyTotal, isUsedOnlyAbsoluteAmount } from "@oh-my-pi/pi-tui/prompt/usage-amounts";
+import { t } from "../../i18n";
+
+import { cfgDisplayCollapseCompacted, cfgTerminalShowImages } from "../settings";
+import { cfgProviderAppendOnlyContext } from "../../session/settings";
+import { cfgShareRedactSecrets, cfgShareServerUrl, cfgShareStore } from "../../commands/settings";
 
 function formatCreditValue(value: number): string {
 	return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -151,17 +166,23 @@ export class CommandController {
 				return;
 			}
 
-			const filePath = await this.ctx.session.exportToHtml(outputPath, useUserThemes);
+			// The viewed session: the focused subagent's transcript (plus its own
+			// subagents) from a focused view, otherwise the main session.
+			const filePath = await this.ctx.viewSession.exportToHtml(outputPath, useUserThemes);
 			this.ctx.showStatus(`Session exported to: ${filePath}`);
 			this.openInBrowser(filePath);
 		} catch (error: unknown) {
-			this.ctx.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
+			this.ctx.showError(
+				t("cli.command.failedExport", "Failed to export session: {error}", {
+					error: error instanceof Error ? error.message : "Unknown error",
+				}),
+			);
 		}
 	}
 	async handleTraceCommand(): Promise<void> {
 		const sessionFile = this.ctx.session.sessionFile;
 		if (!sessionFile) {
-			this.ctx.showWarning("No session file yet — send a message first.");
+			this.ctx.showWarning(t("cli.command.noSessionFile", "No session file yet — send a message first."));
 			return;
 		}
 		try {
@@ -171,9 +192,13 @@ export class CommandController {
 			const { hostname, port } = await startServer();
 			const url = `${formatStatsDashboardUrl(hostname, port)}/#/traces?s=${encodeURIComponent(sessionFile)}`;
 			this.openInBrowser(url);
-			this.ctx.showStatus(`Trace: ${url}`);
+			this.ctx.showStatus(t("cli.command.trace", "Trace: {url}", { url }));
 		} catch (error: unknown) {
-			this.ctx.showError(`Failed to open trace: ${error instanceof Error ? error.message : "Unknown error"}`);
+			this.ctx.showError(
+				t("cli.command.failedTrace", "Failed to open trace: {error}", {
+					error: error instanceof Error ? error.message : "Unknown error",
+				}),
+			);
 		}
 	}
 
@@ -181,7 +206,7 @@ export class CommandController {
 		try {
 			const formatted = this.ctx.session.formatSessionAsText();
 			if (!formatted) {
-				this.ctx.showError("No messages to dump yet.");
+				this.ctx.showError(t("cli.command.noMessages", "No messages to dump yet."));
 				return;
 			}
 			// Build the LLM request JSON sidecar first so its path (and a
@@ -197,12 +222,16 @@ export class CommandController {
 				? `${formatted}\n\n---\nLLM request JSON: ${sidecarPath}\nThis file persists on disk and may contain raw context/secrets — treat accordingly.`
 				: formatted;
 			await copyToClipboard(doc);
-			const statusParts = ["Session copied to clipboard"];
+			const statusParts = [t("cli.command.sessionCopied", "Session copied to clipboard")];
 			if (sidecarPath) statusParts.push(`LLM request JSON: ${sidecarPath}`);
 			if (sidecarError) statusParts.push(`LLM request JSON unavailable: ${sidecarError}`);
 			this.ctx.showStatus(statusParts.join("\n"));
 		} catch (error: unknown) {
-			this.ctx.showError(`Failed to copy session: ${error instanceof Error ? error.message : "Unknown error"}`);
+			this.ctx.showError(
+				t("cli.command.failedCopy", "Failed to copy session: {error}", {
+					error: error instanceof Error ? error.message : "Unknown error",
+				}),
+			);
 		}
 	}
 
@@ -232,7 +261,7 @@ export class CommandController {
 			const renderedLines = this.ctx.chatContainer.render(width).map(line => replaceTabs(Bun.stripANSI(line)));
 			const rendered = renderedLines.join("\n").trimEnd();
 			if (!rendered) {
-				this.ctx.showError("No messages to dump yet.");
+				this.ctx.showError(t("cli.command.noMessages", "No messages to dump yet."));
 				return;
 			}
 			const tmpPath = path.join(os.tmpdir(), `${Snowflake.next()}-tmp.txt`);
@@ -308,10 +337,10 @@ export class CommandController {
 		// server; the key rides in the link fragment and never leaves the client.
 		try {
 			const result = await shareSession(this.ctx.session.sessionManager, {
-				serverUrl: this.ctx.settings.get("share.serverUrl"),
-				store: this.ctx.settings.get("share.store"),
+				serverUrl: cfgShareServerUrl.get(this.ctx.settings),
+				store: cfgShareStore.get(this.ctx.settings),
 				state: this.ctx.session.state,
-				obfuscator: this.ctx.settings.get("share.redactSecrets") ? this.ctx.session.obfuscator : undefined,
+				obfuscator: cfgShareRedactSecrets.get(this.ctx.settings) ? this.ctx.session.obfuscator : undefined,
 			});
 			if (loader.signal.aborted) return;
 			restoreEditor();
@@ -346,10 +375,7 @@ export class CommandController {
 			info += `${theme.fg("dim", "No model selected")}\n`;
 		} else {
 			const authMode = resolveProviderAuthMode(this.ctx.session.modelRegistry.authStorage, model.provider);
-			const openaiWebsocketSetting = this.ctx.settings.get("providers.openaiWebsockets") ?? "auto";
-			const preferOpenAICodexWebsockets =
-				openaiWebsocketSetting === "on" ? true : openaiWebsocketSetting === "off" ? false : undefined;
-			const credentialSource = this.ctx.session.modelRegistry.authStorage.describeCredentialSource(
+			const credentialSource = this.ctx.session.modelRegistry.authStorage.keys.describe(
 				model.provider,
 				stats.sessionId,
 			);
@@ -358,7 +384,7 @@ export class CommandController {
 				sessionId: stats.sessionId,
 				authMode,
 				credentialSource,
-				preferWebsockets: preferOpenAICodexWebsockets,
+				preferWebsockets: this.ctx.session.preferWebsockets,
 				providerSessionState: this.ctx.session.providerSessionState,
 			});
 			info += renderProviderSection(providerDetails, theme);
@@ -380,7 +406,7 @@ export class CommandController {
 		info += `${theme.fg("dim", "Total:")} ${stats.totalMessages}\n\n`;
 		// Append-only context
 		{
-			const setting = this.ctx.settings.get("provider.appendOnlyContext") ?? "auto";
+			const setting = cfgProviderAppendOnlyContext.get(this.ctx.settings);
 			const model = this.ctx.session.model;
 			const mode = shouldEnableAppendOnlyContext(setting, model);
 			const activeLabel = mode ? theme.fg("success", "active") : theme.fg("dim", "inactive");
@@ -466,7 +492,10 @@ export class CommandController {
 	async handleAdvisorStatusCommand(): Promise<void> {
 		const stats = this.ctx.session.getAdvisorStats();
 		if (!stats.configured) {
-			this.ctx.presentCommandOutput([new Spacer(1), new Text("Advisor is disabled.", 1, 0)]);
+			this.ctx.presentCommandOutput([
+				new Spacer(1),
+				new Text(t("cli.command.advisorDisabled", "Advisor is disabled."), 1, 0),
+			]);
 			return;
 		}
 		// Fetch live quota data (cached 5 min by the auth-gateway) so we can show
@@ -483,10 +512,7 @@ export class CommandController {
 		// Resolve the active OAuth identity for each advisor's provider so quota
 		// filtering matches the credential actually in use (not sibling accounts).
 		const resolveActiveAdvisorAccount = (provider: string, sessionId?: string): OAuthAccountIdentity | undefined =>
-			this.ctx.session.modelRegistry.authStorage.getOAuthAccountIdentity(
-				provider,
-				sessionId ?? this.ctx.session.sessionId,
-			);
+			this.ctx.session.modelRegistry.authStorage.oauth.identity(provider, sessionId ?? this.ctx.session.sessionId);
 		const nowMs = Date.now();
 		// Roster view: show every configured advisor with its status, even when
 		// none are live (all paused/no-model). The old code returned a generic
@@ -644,16 +670,31 @@ export class CommandController {
 		this.ctx.showUsageDashboard(usageReports);
 	}
 
-	async handleChangelogCommand(showFull = false): Promise<void> {
+	async handleChangelogCommand(args = ""): Promise<void> {
+		const view = parseChangelogView(args);
+		if ("error" in view) {
+			this.ctx.showWarning(view.error);
+			return;
+		}
 		const changelogPath = getChangelogPath();
 		const allEntries = await parseChangelog(changelogPath);
-		const entriesToShow = showFull ? allEntries : allEntries.slice(0, RECENT_CHANGELOG_ENTRY_LIMIT);
+		const entriesToShow = selectChangelogEntries(allEntries, view);
 		const changelogMarkdown =
 			entriesToShow.length > 0 ? renderChangelogEntries(entriesToShow).markdown : "No changelog entries found.";
-		const title = showFull ? "Full Changelog" : "Recent Changes";
-		const hint = showFull
-			? ""
-			: `\n\n${theme.fg("dim", "Use")} ${theme.bold("/changelog full")} ${theme.fg("dim", "to view the complete changelog.")}`;
+		const shown = entriesToShow.length;
+		const titleCount = shown > 0 ? shown : view.kind === "last" ? view.count : shown;
+		const title =
+			view.kind === "full"
+				? "Full Changelog"
+				: view.kind === "last"
+					? titleCount === 1
+						? "Last Release"
+						: `Last ${titleCount} Releases`
+					: "Recent Changes";
+		const hint =
+			view.kind === "full"
+				? ""
+				: `\n\n${theme.fg("dim", "Use")} ${theme.bold("/changelog full")} ${theme.fg("dim", "to view the complete changelog.")}`;
 
 		const block = new TranscriptBlock();
 		block.addChild(new DynamicBorder());
@@ -1031,7 +1072,10 @@ export class CommandController {
 		}
 	}
 
-	async #runNewSessionFlow(options?: NewSessionOptions, label: string = "New session started"): Promise<void> {
+	async #runNewSessionFlow(
+		options?: NewSessionOptions,
+		label: string = t("cli.command.newSessionStarted", "New session started"),
+	): Promise<void> {
 		this.ctx.clearTransientSessionUi();
 
 		if (this.ctx.session.isCompacting) {
@@ -1068,7 +1112,12 @@ export class CommandController {
 	async handleFreshCommand(): Promise<void> {
 		const result = this.ctx.session.freshSession();
 		if (!result) {
-			this.ctx.showWarning("Wait for the current response to finish or abort it before refreshing provider state.");
+			this.ctx.showWarning(
+				t(
+					"cli.command.waitBeforeRefresh",
+					"Wait for the current response to finish or abort it before refreshing provider state.",
+				),
+			);
 			return;
 		}
 		const stateLabel = result.closedProviderSessions === 1 ? "provider state" : "provider states";
@@ -1086,7 +1135,12 @@ export class CommandController {
 		}
 		const result = await this.ctx.session.resetSessionContext();
 		if (!result) {
-			this.ctx.showWarning("Wait for the current response to finish or abort it before resetting the context.");
+			this.ctx.showWarning(
+				t(
+					"cli.command.waitBeforeReset",
+					"Wait for the current response to finish or abort it before resetting the context.",
+				),
+			);
 			return;
 		}
 		// Drop the rendered transcript so the UI matches the now-empty model
@@ -1118,7 +1172,9 @@ export class CommandController {
 
 	async handleForkCommand(): Promise<void> {
 		if (this.ctx.session.isStreaming) {
-			this.ctx.showWarning("Wait for the current response to finish or abort it before forking.");
+			this.ctx.showWarning(
+				t("cli.command.waitBeforeFork", "Wait for the current response to finish or abort it before forking."),
+			);
 			return;
 		}
 		if (this.ctx.loadingAnimation) {
@@ -1129,7 +1185,7 @@ export class CommandController {
 
 		const success = await this.ctx.session.fork();
 		if (!success) {
-			this.ctx.showError("Fork failed (session not persisted or cancelled)");
+			this.ctx.showError(t("cli.command.forkFailed", "Fork failed (session not persisted or cancelled)"));
 			return;
 		}
 
@@ -1140,7 +1196,14 @@ export class CommandController {
 		const shortPath = sessionFile ? sessionFile.split("/").pop() : "new session";
 		this.ctx.present([
 			new Spacer(1),
-			new Text(`${theme.fg("accent", `${theme.status.success} Session forked to ${shortPath}`)}`, 1, 1),
+			new Text(
+				theme.fg(
+					"accent",
+					`${theme.status.success} ${t("cli.command.sessionForked", "Session forked to {path}", { path: shortPath })}`,
+				),
+				1,
+				1,
+			),
 		]);
 	}
 
@@ -1155,7 +1218,9 @@ export class CommandController {
 	 */
 	async handleMoveCommand(targetPath?: string): Promise<void> {
 		if (this.ctx.session.isStreaming) {
-			this.ctx.showWarning("Wait for the current response to finish or abort it before moving.");
+			this.ctx.showWarning(
+				t("cli.command.waitBeforeMove", "Wait for the current response to finish or abort it before moving."),
+			);
 			return;
 		}
 
@@ -1174,7 +1239,7 @@ export class CommandController {
 
 		const unquoted = stripOuterDoubleQuotes(input);
 		if (!unquoted) {
-			this.ctx.showError("Usage: /move <path>");
+			this.ctx.showError(t("cli.command.moveUsage", "Usage: /move <path>"));
 			return;
 		}
 
@@ -1198,21 +1263,31 @@ export class CommandController {
 				parentExists = false;
 			}
 			if (!parentExists) {
-				this.ctx.showError(`Cannot create "${path.basename(resolvedPath)}": parent directory does not exist`);
+				this.ctx.showError(
+					t("cli.command.cannotCreateDir", 'Cannot create "{name}": parent directory does not exist', {
+						name: path.basename(resolvedPath),
+					}),
+				);
 				return;
 			}
 		}
 		const moved = await this.#withSessionMove(async () => {
 			if (!isDirectory) {
 				const confirmed = await this.ctx.showHookConfirm(
-					"Create directory?",
-					`"${path.basename(resolvedPath)}" does not exist. Create it?`,
+					t("cli.command.createDirTitle", "Create directory?"),
+					t("cli.command.createDirBody", '"{name}" does not exist. Create it?', {
+						name: path.basename(resolvedPath),
+					}),
 				);
 				if (!confirmed) return false;
 				try {
 					await fs.mkdir(resolvedPath, { recursive: true });
 				} catch (err) {
-					this.ctx.showError(`Failed to create directory: ${err instanceof Error ? err.message : String(err)}`);
+					this.ctx.showError(
+						t("cli.command.createDirFailed", "Failed to create directory: {error}", {
+							error: err instanceof Error ? err.message : String(err),
+						}),
+					);
 					return false;
 				}
 			}
@@ -1221,7 +1296,14 @@ export class CommandController {
 		if (moved) {
 			this.ctx.present([
 				new Spacer(1),
-				new Text(`${theme.fg("accent", `${theme.status.success} Moved to ${resolvedPath}`)}`, 1, 1),
+				new Text(
+					theme.fg(
+						"accent",
+						`${theme.status.success} ${t("cli.command.movedTo", "Moved to {path}", { path: resolvedPath })}`,
+					),
+					1,
+					1,
+				),
 			]);
 		}
 	}
@@ -1410,7 +1492,7 @@ export class CommandController {
 					truncation: meta?.truncation,
 					artifactError: meta?.artifactError,
 					images: result.images,
-					showImages: this.ctx.settings.get("terminal.showImages"),
+					showImages: cfgTerminalShowImages.get(this.ctx.settings),
 				});
 			}
 			try {
@@ -1604,7 +1686,7 @@ export class CommandController {
 			// intentional replacement, so drop the stale pre-compaction scrollback
 			// instead of repainting the shrunken frame below it. With collapse
 			// disabled the full history stays inline and scrollback is kept.
-			if (this.ctx.settings.get("display.collapseCompacted")) {
+			if (cfgDisplayCollapseCompacted.get(this.ctx.settings)) {
 				this.ctx.ui.requestRender(true, { clearScrollback: true });
 			} else {
 				this.ctx.ui.requestRender();
@@ -1741,7 +1823,7 @@ const BAR_WIDTH_MAX = 24;
 const COLUMN_WIDTH_MIN = 4;
 
 function renderJobLine(job: AsyncJobSnapshotItem, now: number): string {
-	const duration = formatDuration(Math.max(0, now - job.startTime));
+	const duration = formatDuration(Math.max(0, (job.endTime ?? now) - job.startTime));
 	const status = formatJobStatus(job.status);
 	return `${theme.fg("dim", job.id)} ${theme.fg("dim", `[${job.type}]`)} ${status} ${theme.fg("dim", `(${duration})`)}`;
 }
@@ -1772,16 +1854,16 @@ function formatNumber(value: number, maxFractionDigits = 1): string {
 }
 
 function resolveProviderAuthMode(authStorage: AuthStorage, provider: string): string {
-	if (authStorage.hasOAuth(provider)) {
+	if (authStorage.credentials.hasOAuth(provider)) {
 		return "oauth";
 	}
-	if (authStorage.has(provider)) {
+	if (authStorage.credentials.has(provider)) {
 		return "api key";
 	}
 	if (getEnvApiKey(provider)) {
 		return "env api key";
 	}
-	if (authStorage.hasAuth(provider)) {
+	if (authStorage.keys.source(provider) !== undefined) {
 		return "runtime/fallback";
 	}
 	return "unknown";
@@ -1811,7 +1893,7 @@ function formatWindowSuffix(label: string, windowLabel: string, uiTheme: Theme):
 	return uiTheme.fg("dim", `(${windowLabel})`);
 }
 
-/** ` (org)` suffix when the report is org-attributed — two subscriptions can share one email. */
+/** ` (org)` suffix for providers whose orgName is an organization. */
 function orgSuffix(report: UsageReport): string {
 	const orgName = report.metadata?.orgName;
 	const orgId = report.metadata?.orgId;
@@ -1819,30 +1901,50 @@ function orgSuffix(report: UsageReport): string {
 	return org ? ` (${org})` : "";
 }
 
-function formatAccountLabel(limit: UsageLimit, report: UsageReport, index: number): string {
+/** Keep the existing TUI `(plan)` layout while using the live Codex usage plan. */
+function formatCodexTuiLabel(report: UsageReport, peers: readonly UsageReport[], base: string): string {
+	const identity = formatCodexUsageReportLabel(report, peers, base, undefined, false);
+	const plan = codexUsagePlan(report);
+	return plan ? `${identity} (${plan})` : identity;
+}
+
+function formatAccountLabel(
+	limit: UsageLimit,
+	report: UsageReport,
+	peers: readonly UsageReport[],
+	index: number,
+): string {
+	const codex = report.provider === "openai-codex";
 	const email = report.metadata?.email;
-	if (typeof email === "string" && email) return `${email}${orgSuffix(report)}`;
+	if (typeof email === "string" && email)
+		return codex ? formatCodexTuiLabel(report, peers, email) : `${email}${orgSuffix(report)}`;
 	const accountId =
 		typeof report.metadata?.accountId === "string" && report.metadata.accountId
 			? report.metadata.accountId
 			: limit.scope.accountId || undefined;
-	if (accountId) return `${accountId}${orgSuffix(report)}`;
+	if (accountId) return codex ? formatCodexTuiLabel(report, peers, accountId) : `${accountId}${orgSuffix(report)}`;
 	const projectId =
 		typeof report.metadata?.projectId === "string" && report.metadata.projectId
 			? report.metadata.projectId
 			: limit.scope.projectId || undefined;
-	if (projectId) return projectId;
-	return `account ${index + 1}`;
+	const base = typeof projectId === "string" && projectId ? projectId : `account ${index + 1}`;
+	return codex ? formatCodexTuiLabel(report, peers, base) : base;
 }
 
-function formatUnlimitedReportLabel(report: UsageReport, index: number): string {
+function formatUnlimitedReportLabel(report: UsageReport, peers: readonly UsageReport[], index: number): string {
 	const email = report.metadata?.email;
-	if (typeof email === "string" && email) return `${email}${orgSuffix(report)}`;
+	if (typeof email === "string" && email)
+		return report.provider === "openai-codex"
+			? formatCodexTuiLabel(report, peers, email)
+			: `${email}${orgSuffix(report)}`;
 	const accountId = report.metadata?.accountId;
-	if (typeof accountId === "string" && accountId) return `${accountId}${orgSuffix(report)}`;
+	if (typeof accountId === "string" && accountId)
+		return report.provider === "openai-codex"
+			? formatCodexTuiLabel(report, peers, accountId)
+			: `${accountId}${orgSuffix(report)}`;
 	const projectId = report.metadata?.projectId;
-	if (typeof projectId === "string" && projectId) return projectId;
-	return `account ${index + 1}`;
+	const base = typeof projectId === "string" && projectId ? projectId : `account ${index + 1}`;
+	return report.provider === "openai-codex" ? formatCodexTuiLabel(report, peers, base) : base;
 }
 
 function formatResetShort(limit: UsageLimit, nowMs: number): string | undefined {
@@ -1857,6 +1959,7 @@ function formatResetShort(limit: UsageLimit, nowMs: number): string | undefined 
 function formatAccountHeaderRow(
 	limits: UsageLimit[],
 	reports: UsageReport[],
+	peers: readonly UsageReport[],
 	nowMs: number,
 	columnWidth: number,
 	uiTheme: Theme,
@@ -1866,11 +1969,12 @@ function formatAccountHeaderRow(
 		const reset = formatResetShort(limit, nowMs);
 		const report = reports[index];
 		const active = report !== undefined && limitMatchesActiveAccount(report, limit, activeAccount);
-		const label = formatAccountLabel(limit, report, index);
+		const label = formatAccountLabel(limit, report, peers, index);
 		return {
 			label: active ? `● ${label}` : label,
 			suffix: reset ? `(${reset})` : "",
 			active,
+			daybreak: report?.metadata?.daybreak === true,
 		};
 	});
 	const maxSuffixWidth = parts.reduce((max, p) => Math.max(max, visibleWidth(p.suffix)), 0);
@@ -1880,19 +1984,21 @@ function formatAccountHeaderRow(
 	// If suffix can't share the cell with at least `x…`, fall back to whole-label truncation.
 	if (prefixBudget < 2) {
 		return parts.map(p => {
-			const full = p.suffix ? `${p.label} ${p.suffix}` : p.label;
+			const full = `${p.label}${p.daybreak ? " daybreak" : ""}${p.suffix ? ` ${p.suffix}` : ""}`;
 			const cell = padColumn(truncateJobLabel(full, columnWidth), columnWidth);
 			return p.active ? uiTheme.fg("accent", cell) : cell;
 		});
 	}
 
 	return parts.map(p => {
-		const prefix = truncateJobLabel(p.label, prefixBudget);
+		// Keep the full badge visible by taking its columns from the account label.
+		const badge = p.daybreak && prefixBudget >= 10 ? " daybreak" : "";
+		const label = truncateJobLabel(p.label, prefixBudget - visibleWidth(badge));
+		const prefix = `${p.active ? uiTheme.fg("accent", label) : label}${badge ? uiTheme.fg("success", badge) : ""}`;
 		const prefixCell = prefix + " ".repeat(prefixBudget - visibleWidth(prefix));
-		const styledPrefix = p.active ? uiTheme.fg("accent", prefixCell) : prefixCell;
-		if (!p.suffix) return styledPrefix + " ".repeat(maxSuffixWidth + gap);
+		if (!p.suffix) return prefixCell + " ".repeat(maxSuffixWidth + gap);
 		const suffixPad = " ".repeat(maxSuffixWidth - visibleWidth(p.suffix));
-		return `${styledPrefix} ${suffixPad}${uiTheme.fg("dim", p.suffix)}`;
+		return `${prefixCell} ${suffixPad}${uiTheme.fg("dim", p.suffix)}`;
 	});
 }
 
@@ -2089,7 +2195,33 @@ export function renderUsageReports(
 		}
 
 		lines.push(uiTheme.bold(uiTheme.fg("accent", providerName)));
-		const activeAccountLabel = formatActiveAccountLabel(activeAccount);
+		const activeReport =
+			provider === "openai-codex" && activeAccount
+				? ((activeAccount.accountId
+						? providerReports.find(
+								report =>
+									report.metadata?.orgId === activeAccount.orgId &&
+									report.metadata?.accountId === activeAccount.accountId,
+							)
+						: undefined) ??
+					providerReports.find(
+						report =>
+							report.metadata?.orgId === activeAccount.orgId &&
+							!!activeAccount.email &&
+							report.metadata?.email === activeAccount.email &&
+							(!activeAccount.accountId || !report.metadata?.accountId),
+					))
+				: undefined;
+		const activeAccountLabel =
+			provider === "openai-codex"
+				? activeReport
+					? formatCodexTuiLabel(
+							activeReport,
+							providerReports,
+							activeAccount?.email || activeAccount?.accountId || "account",
+						)
+					: activeAccount?.email || activeAccount?.accountId || activeAccount?.projectId
+				: formatActiveAccountLabel(activeAccount);
 		if (activeAccountLabel) {
 			lines.push(`  ${uiTheme.fg("accent", "in use by this session:")} ${activeAccountLabel}`);
 		}
@@ -2112,37 +2244,53 @@ export function renderUsageReports(
 
 		const resetAccountLines: string[] = [];
 		for (const report of providerReports) {
-			const count = report.resetCredits?.availableCount ?? 0;
-			if (count <= 0) continue;
-			const label =
+			const resets = summarizeUsageResetCredits(report.resetCredits, nowMs);
+			if (!resets || resets.bankedCount <= 0) continue;
+			const identityLabel =
 				typeof report.metadata?.email === "string" && report.metadata.email
 					? report.metadata.email
 					: typeof report.metadata?.accountId === "string" && report.metadata.accountId
 						? report.metadata.accountId
 						: "account";
+			const orgName = report.metadata?.orgName;
+			const orgId = report.metadata?.orgId;
+			const orgLabel =
+				typeof orgName === "string" && orgName ? orgName : typeof orgId === "string" ? orgId : undefined;
+			const rawLabel =
+				provider === "openai-codex"
+					? formatCodexTuiLabel(report, providerReports, identityLabel)
+					: orgLabel && orgLabel !== identityLabel
+						? `${identityLabel} (${orgLabel})`
+						: identityLabel;
+			const label = sanitizeText(rawLabel.replace(/[\r\n\t]+/g, " "));
+			const activeOrg = activeAccount?.orgId;
+			const reportOrg = typeof report.metadata?.orgId === "string" ? report.metadata.orgId : undefined;
+			const orgMatches = !activeOrg && !reportOrg ? true : activeOrg === reportOrg;
 			const isActive =
-				!!activeAccount &&
-				((!!activeAccount.accountId && activeAccount.accountId === report.metadata?.accountId) ||
-					(!!activeAccount.email && activeAccount.email === report.metadata?.email));
+				provider === "openai-codex"
+					? activeReport === report
+					: orgMatches &&
+						!!activeAccount &&
+						((!!activeAccount.accountId && activeAccount.accountId === report.metadata?.accountId) ||
+							(!!activeAccount.email && activeAccount.email === report.metadata?.email));
+			const availability =
+				resets.redeemableCount === resets.bankedCount ? "" : ` · ${resets.redeemableCount} usable now`;
 			resetAccountLines.push(
-				`    • ${label}: ${count} saved reset${count === 1 ? "" : "s"}${isActive ? " (active)" : ""}`,
+				`    • ${label}: ${resets.bankedCount} saved reset${resets.bankedCount === 1 ? "" : "s"}${availability}${isActive ? " (active)" : ""}`,
 			);
-			const credits = report.resetCredits?.credits;
-			if (credits) {
-				for (const credit of credits) {
-					if (credit.expiresAt) {
-						const expiryMs = Date.parse(credit.expiresAt);
-						if (!Number.isNaN(expiryMs)) {
-							const remaining = expiryMs - nowMs;
-							const expiryDate = credit.expiresAt.slice(0, 10);
-							if (remaining > 0) {
-								resetAccountLines.push(`        expires in ${formatDuration(remaining)} (${expiryDate})`);
-							} else {
-								resetAccountLines.push(`        expired (${expiryDate})`);
-							}
-						}
-					}
+			if (resets.soonestExpiry) {
+				const expiryMs = Date.parse(resets.soonestExpiry);
+				const remaining = expiryMs - nowMs;
+				const expiryDate = resets.soonestExpiry.slice(0, 10);
+				if (remaining > 0) {
+					resetAccountLines.push(`        soonest expires in ${formatDuration(remaining)} (${expiryDate})`);
+				} else {
+					resetAccountLines.push(`        expired (${expiryDate})`);
 				}
+			}
+			if (resets.redeemableCount === 0 && resets.unavailableReason) {
+				const reason = sanitizeText(resets.unavailableReason.replace(/[\r\n\t]+/g, " "));
+				resetAccountLines.push(`        unavailable: ${reason}`);
 			}
 		}
 		if (resetAccountLines.length > 0) {
@@ -2201,6 +2349,7 @@ export function renderUsageReports(
 			const accountLabels = formatAccountHeaderRow(
 				sortedLimits,
 				sortedReports,
+				providerReports,
 				nowMs,
 				sectionColumnWidth,
 				uiTheme,
@@ -2226,11 +2375,12 @@ export function renderUsageReports(
 		// Render accounts with no rate limits (e.g. business/enterprise plans).
 		const unlimitedReports = providerReports.filter(report => report.limits.length === 0);
 		for (const report of unlimitedReports) {
-			const label = formatUnlimitedReportLabel(report, 0);
-			const tier = report.metadata?.planType;
+			const label = formatUnlimitedReportLabel(report, providerReports, 0);
+			const tier = report.provider === "openai-codex" ? undefined : report.metadata?.planType;
 			const tierSuffix = typeof tier === "string" && tier ? ` ${uiTheme.fg("dim", `(${tier})`)}` : "";
+			const daybreakSuffix = report.metadata?.daybreak === true ? uiTheme.fg("success", " daybreak") : "";
 			lines.push(
-				`${uiTheme.fg("success", uiTheme.status.success)} ${label}${tierSuffix} ${uiTheme.fg("dim", "-- no limits")}`,
+				`${uiTheme.fg("success", uiTheme.status.success)} ${label}${daybreakSuffix}${tierSuffix} ${uiTheme.fg("dim", "-- no limits")}`,
 			);
 		}
 		// No per-provider footer; global header shows last check.

@@ -7,6 +7,7 @@
  * stay in their respective files.
  */
 
+import { tuiT } from "../i18n-host";
 import { Loader } from "../components/loader";
 import { Text } from "../components/text";
 import { Container, type TUI } from "../tui";
@@ -59,7 +60,7 @@ export function buildExecutionFrame(
 		ui,
 		spinner => theme.fg(colorKey, spinner),
 		text => theme.fg("muted", text),
-		`Running… (esc to cancel)`,
+		tuiT("ui.runningCancel", "Running… (esc to cancel)"),
 		getSymbolTheme().spinnerFrames,
 	);
 
@@ -84,12 +85,19 @@ export function buildStatusFooter(opts: {
 	const parts: string[] = [];
 
 	if (opts.hiddenLineCount > 0 && !opts.suppressHiddenCount) {
-		parts.push(theme.fg("dim", `… ${opts.hiddenLineCount} more lines (ctrl+o to expand)`));
+		parts.push(
+			theme.fg(
+				"dim",
+				tuiT("ui.moreLines", "… {count} more lines (ctrl+o to expand)", {
+					count: opts.hiddenLineCount,
+				}),
+			),
+		);
 	}
 	if (opts.status === "cancelled") {
-		parts.push(theme.fg("warning", "(cancelled)"));
+		parts.push(theme.fg("warning", tuiT("ui.cancelled", "(cancelled)")));
 	} else if (opts.status === "error") {
-		parts.push(theme.fg("error", `(exit ${opts.exitCode})`));
+		parts.push(theme.fg("error", tuiT("ui.exitCode", "(exit {code})", { code: opts.exitCode })));
 	}
 	if (opts.truncation) {
 		parts.push(theme.fg("warning", formatTruncationMetaNotice(opts.truncation)));

@@ -3,7 +3,7 @@ import type { Component } from "../tui";
 import { padding, replaceTabs, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils";
 import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
 import { theme } from "../theme/theme";
-import { tuiT } from "../i18n-host";
+import { tuiLanguage, tuiT } from "../i18n-host";
 import tipsText from "./tips.txt" with { type: "text" };
 
 /** Tips embedded at build time, one per line; blanks dropped. */
@@ -81,13 +81,19 @@ function resolveTips(): readonly string[] {
 }
 
 let _tips: readonly string[] | null = null;
+let _tipsLanguage = "";
 function getTips(): readonly string[] {
-	if (_tips === null) _tips = resolveTips();
+	const language = tuiLanguage();
+	if (_tips === null || _tipsLanguage !== language) {
+		_tips = resolveTips();
+		_tipsLanguage = language;
+	}
 	return _tips;
 }
 
 export function invalidateTipsCache(): void {
 	_tips = null;
+	_tipsLanguage = "";
 }
 
 /**
@@ -268,10 +274,13 @@ export class WelcomeComponent implements Component {
 		this.#requestRender();
 		this.#animTimer = setInterval(() => {
 			const elapsed = performance.now() - (this.#animStart ?? 0);
+			const requestRender = this.#requestRender;
 			if (elapsed >= INTRO_MS) {
 				this.#stopAnimation();
 			}
-			this.#requestRender?.();
+			// Stopping clears the callback, but the settled frame must still paint
+			// so an oversized startup header can retire into native scrollback.
+			requestRender?.();
 		}, INTRO_TICK_MS);
 	}
 
@@ -681,7 +690,10 @@ function introLogoFrame(progress: number): string[] {
 	const phase = ((((1 - eased) * INTRO_SWEEPS) % 1) + 1) % 1;
 	const shinePos = (((progress * INTRO_SHINE_TRAVERSALS) % 1) + 1) % 1;
 	const shineStrength = (1 - eased) ** 1.5;
-	return gradientLogo(PI_LOGO, phase, { strength: shineStrength, pos: shinePos });
+	return gradientLogo(PI_LOGO, phase, {
+		strength: shineStrength,
+		pos: shinePos,
+	});
 }
 
 /** Resting gradient frame, cached for re-renders outside of the intro. */

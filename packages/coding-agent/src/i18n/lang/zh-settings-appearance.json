@@ -73,8 +73,6 @@
   "settings.symbolPreset.options.unicode.label": "Unicode",
   "settings.task.showResolvedModelBadge.description": "在任务组件状态栏中显示每个子代理实际使用的模型 ID",
   "settings.task.showResolvedModelBadge.label": "显示已解析的模型徽章",
-  "settings.task.softRequestBudgetNotice.description": "当子代理超过软请求预算时注入一条引导通知。默认关闭；启用后会在 1.5x 优雅中止保护前要求子代理收尾。",
-  "settings.task.softRequestBudgetNotice.label": "软请求预算通知",
   "settings.terminal.showImages.description": "在终端中内联渲染图片",
   "settings.terminal.showImages.label": "显示内联图片",
   "settings.terminal.showProgress.description": "agent 或上下文维护运行时发出 OSC 9;4 进度指示",

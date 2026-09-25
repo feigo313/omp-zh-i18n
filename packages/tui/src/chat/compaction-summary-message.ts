@@ -1,3 +1,4 @@
+import { tuiT } from "../i18n-host";
 import { Box } from "../components/box";
 import { Disclosure } from "../components/disclosure";
 import { type Component } from "../tui";
@@ -55,7 +56,9 @@ class DividerSummary implements Component {
 		const label = this.#label();
 		// sep.dot ships pre-padded (" · "); trim so the hint joins with single spaces.
 		const hint = `${theme.sep.dot.trim()} ctrl+o`;
-		const plainWidth = Bun.stringWidth(`${label} ${hint}`, { countAnsiEscapeCodes: false });
+		const plainWidth = Bun.stringWidth(`${label} ${hint}`, {
+			countAnsiEscapeCodes: false,
+		});
 		// ` label hint ` framed by rules on both sides.
 		const remaining = width - plainWidth - 2;
 		if (remaining < 4) {
@@ -166,7 +169,7 @@ export class CompactionSummaryMessageComponent extends SummaryMessageComponent {
 
 function compactionLabel(message: CompactionSummaryMessage): string {
 	const name = (message.method && COMPACTION_METHOD_LABELS[message.method]) || "compacted";
-	let label = `${theme.icon.camera} ${name}`;
+	let label = `${theme.icon.camera} ${tuiT(`ui.compaction.${name}`, name)}`;
 	const amount = compactionAmount(message);
 	if (amount) label += `${theme.sep.dot}${amount}`;
 	if (message.warning) label += ` ${theme.fg("warning", theme.icon.warning)}`;
@@ -181,10 +184,12 @@ function compactionDetailMarkdown(message: CompactionSummaryMessage): string {
 				: `Compacted from ${message.tokensBefore.toLocaleString()} tokens`
 			: message.tokensAfter !== undefined
 				? `Compacted to ${message.tokensAfter.toLocaleString()} tokens`
-				: "Compacted context";
+				: tuiT("ui.compaction.contextCompacted", "Compacted context");
 	const frameCount = message.images?.length ?? 0;
 	const frameNote =
-		frameCount > 0 ? `\n\n_${frameCount} snapcompact frame${frameCount === 1 ? "" : "s"} attached_` : "";
+		frameCount > 0
+			? `\n\n_${tuiT("ui.compaction.framesAttached", `${frameCount} snapcompact frame${frameCount === 1 ? "" : "s"} attached`, { count: frameCount })}_`
+			: "";
 	const warningNote = message.warning ? `\n\n${theme.icon.warning} **Warning:** ${message.warning}` : "";
 	return `**${tokenLine}**${warningNote}\n\n${message.summary}${frameNote}`;
 }

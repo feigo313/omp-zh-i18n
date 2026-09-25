@@ -1,4 +1,5 @@
 import type { BackgroundTanDispatchDetails, CustomMessage } from "./messages";
+import { tuiT } from "../i18n-host";
 import { replaceTabs } from "../render/render-utils";
 import { theme } from "../theme";
 import type { TranscriptBlock } from "../chrome/transcript-container";
@@ -20,12 +21,12 @@ function previewWork(work: string): string {
  */
 export function createBackgroundTanDispatchBlock(message: CustomMessage<unknown>): TranscriptBlock {
 	const details = (message as CustomMessage<Partial<BackgroundTanDispatchDetails>>).details;
-	const jobId = details?.jobId ?? "unknown";
+	const jobId = details?.jobId ?? tuiT("ui.unknown", "unknown");
 	const work = details?.work ? previewWork(details.work) : undefined;
 	return new TranscriptStatusBlock([
 		{
 			parts: [
-				theme.fg("muted", `${theme.icon.output} Tangent dispatched`),
+				theme.fg("muted", `${theme.icon.output} ${tuiT("ui.tangentDispatched", "Tangent dispatched")}`),
 				theme.fg("dim", "[task]"),
 				theme.fg("accent", jobId),
 				work ? theme.fg("dim", `${theme.format.dash} ${work}`) : undefined,

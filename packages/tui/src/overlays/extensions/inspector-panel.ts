@@ -12,6 +12,7 @@ import { KeyValueList } from "../../components/key-value-list";
 import { Section } from "../../components/section";
 import { renderTableRow } from "../../components/table";
 import { theme } from "../../theme";
+import { tuiT } from "../../i18n-host";
 import { divider } from "../../chrome/overlay-box";
 import { expandKeyHint, PREVIEW_LIMITS, replaceTabs, shortenPath } from "../../render/render-utils";
 import {
@@ -351,7 +352,7 @@ export class InspectorPanel implements Component {
 			description: data.description,
 			surface,
 			contents: [],
-			preview: { heading: "Rule", text: data.content },
+			preview: { heading: tuiT("ui.extensions.inspector.rule", "Rule"), text: data.content },
 			config: [],
 		};
 	}
@@ -378,7 +379,7 @@ export class InspectorPanel implements Component {
 			runtimeExtra: runtimeExtra.length > 0 ? runtimeExtra : undefined,
 			surface,
 			contents: [],
-			preview: { heading: "Instruction", text: data.content },
+			preview: { heading: tuiT("ui.extensions.inspector.instruction", "Instruction"), text: data.content },
 			config: [],
 		};
 	}
@@ -396,7 +397,7 @@ export class InspectorPanel implements Component {
 			description: data.description,
 			surface,
 			contents: [],
-			preview: { heading: "Template", text: data.body },
+			preview: { heading: tuiT("ui.extensions.inspector.template", "Template"), text: data.body },
 			config: [],
 		};
 	}
@@ -418,7 +419,7 @@ export class InspectorPanel implements Component {
 			description: ext.description,
 			surface: [],
 			contents: [],
-			preview: { heading: "Prompt", text: data.content },
+			preview: { heading: tuiT("ui.extensions.inspector.prompt", "Prompt"), text: data.content },
 			config: [],
 		};
 	}
@@ -429,7 +430,7 @@ export class InspectorPanel implements Component {
 			description: ext.description,
 			surface: [],
 			contents: [],
-			preview: { heading: "Preview", text: data.content },
+			preview: { heading: tuiT("ui.extensions.inspector.preview", "Preview"), text: data.content },
 			config: [],
 		};
 	}
@@ -447,7 +448,7 @@ export class InspectorPanel implements Component {
 			description: ext.description,
 			surface,
 			contents: [],
-			preview: { heading: "Instruction", text: data.content },
+			preview: { heading: tuiT("ui.extensions.inspector.instruction", "Instruction"), text: data.content },
 			config: [],
 		};
 	}

@@ -1,4 +1,5 @@
 import type { TextContent } from "@oh-my-pi/pi-ai";
+import { tuiT } from "../i18n-host";
 import { type Component } from "../tui";
 import { Box } from "../components/box";
 import { Disclosure } from "../components/disclosure";
@@ -159,7 +160,7 @@ export class SkillMessageComponent extends Container {
 		const chip = skillChipStyle(label, bubbleReset());
 		const parts = [details?.path ? fileHyperlink(details.path, chip, { line: 1 }) : chip];
 		if (typeof details?.lineCount === "number") {
-			parts.push(theme.fg("muted", `${details.lineCount} ${details.lineCount === 1 ? "line" : "lines"}`));
+			parts.push(theme.fg("muted", tuiT("ui.lineCount", "{count} line(s)", { count: details.lineCount })));
 		}
 		return parts.join("  ");
 	}
@@ -168,7 +169,12 @@ export class SkillMessageComponent extends Container {
 	#promptSection(bubble: UserBubbleOptions): Component[] {
 		const text = this.#extractText();
 		if (!text) return [];
-		return [new Spacer(1), new Text(theme.fg("muted", "prompt"), 0, 0), new Spacer(1), this.#markdown(text, bubble)];
+		return [
+			new Spacer(1),
+			new Text(theme.fg("muted", tuiT("ui.prompt", "prompt")), 0, 0),
+			new Spacer(1),
+			this.#markdown(text, bubble),
+		];
 	}
 
 	#extractText(): string {

@@ -12,13 +12,10 @@
 import * as fs from "node:fs";
 import { parseArgs as nodeParseArgs } from "node:util";
 
-/**
- * Streaming startup marker, enabled by `PI_DEBUG_STARTUP`. Local copy of
- * `logger.startupMarker` so the minimal `--version`/bootstrap import graph
- * stays free of the winston-backed logger module. Synchronous on purpose:
- * a command module whose import hangs (dlopen, fs on a dead mount) must
- * still leave its `:start` marker behind.
- */
+export type CliTextTranslator = (key: string, fallback: string, params?: Record<string, unknown>) => string;
+
+const identityTextTranslator: CliTextTranslator = (_key, fallback) => fallback;
+
 function startupMarker(text: string): void {
 	if (!process.env.PI_DEBUG_STARTUP) return;
 	try {
@@ -153,6 +150,7 @@ export interface CliConfig<TCommand extends CommandMetadata = CommandCtor> {
 	version: string;
 	/** All registered commands keyed by their canonical name. */
 	commands: Map<string, TCommand>;
+	translate?: CliTextTranslator;
 }
 
 /** Minimal Command base matching the oclif surface we use. */
@@ -292,28 +290,156 @@ export abstract class Command {
 // Help rendering
 // ---------------------------------------------------------------------------
 
+function translateDescription(translate: CliTextTranslator, keys: string[], fallback: string): string {
+	return keys.reduce((text, key) => translate(key, text), fallback);
+}
+
+function translateCommandMetadata(id: string, command: CommandMetadata, translate: CliTextTranslator): CommandMetadata {
+	return {
+		...command,
+		description: command.description
+			? translateDescription(
+					translate,
+					[`cli.commands.${id}.description`, `commands.${id}.description`],
+					command.description,
+				)
+			: command.description,
+		args: command.args
+			? Object.fromEntries(
+					Object.entries(command.args).map(([name, descriptor]) => [
+						name,
+						{
+							...descriptor,
+							description: descriptor.description
+								? translateDescription(
+										translate,
+										[`cli.commands.${id}.args.${name}.description`, `args.${name}.description`],
+										descriptor.description,
+									)
+								: descriptor.description,
+						},
+					]),
+				)
+			: command.args,
+		flags: command.flags
+			? Object.fromEntries(
+					Object.entries(command.flags).map(([name, descriptor]) => [
+						name,
+						{
+							...descriptor,
+							description: descriptor.description
+								? translateDescription(
+										translate,
+										[`cli.commands.${id}.flags.${name}.description`, `flags.${name}.description`],
+										descriptor.description,
+									)
+								: descriptor.description,
+						},
+					]),
+				)
+			: command.flags,
+		examples: command.examples?.map((example, exampleIndex) =>
+			example
+				.split("\n")
+				.map((line, lineIndex) => {
+					if (!line.startsWith("# ")) return line;
+					const key = `cli.commands.${id}.examples.${exampleIndex}.${lineIndex}`;
+					return `# ${translate(key, line.slice(2))}`;
+				})
+				.join("\n"),
+		),
+	};
+}
+
+function renderCommandBody(
+	lines: string[],
+	command: CommandMetadata,
+	commandId: string,
+	translate: CliTextTranslator,
+): void {
+	const argDefs = command.args ?? {};
+	const flagDefs = command.flags ?? {};
+
+	// Arguments
+	const argEntries = Object.entries(argDefs);
+	if (argEntries.length > 0) {
+		lines.push(translate("cli.help.arguments", "ARGUMENTS"));
+		const maxLen = Math.max(...argEntries.map(([n]) => n.length));
+		for (const [name, desc] of argEntries) {
+			const parts = [name.toUpperCase().padEnd(maxLen + 2)];
+			if (desc.description) {
+				parts.push(translate(`cli.commands.${commandId}.args.${name}.description`, desc.description));
+			}
+			if (desc.options) parts.push(`(${[...desc.options].join("|")})`);
+			lines.push(`  ${parts.join(" ")}`);
+		}
+		lines.push("");
+	}
+
+	// Flags
+	const flagEntries = Object.entries(flagDefs);
+	if (flagEntries.length > 0) {
+		lines.push(translate("cli.help.flags", "FLAGS"));
+		const formatted: [string, string][] = [];
+		for (const [name, desc] of flagEntries) {
+			const charPart = desc.char ? `-${desc.char}, ` : "    ";
+			const namePart = `--${name}`;
+			const typePart = desc.kind === "boolean" ? "" : desc.kind === "integer" ? "=<int>" : "=<value>";
+			const description = desc.description
+				? translate(`cli.commands.${commandId}.flags.${name}.description`, desc.description)
+				: "";
+			formatted.push([`  ${charPart}${namePart}${typePart}`, description]);
+		}
+		const maxLeft = Math.max(...formatted.map(([left]) => left.length));
+		for (const [left, right] of formatted) {
+			lines.push(`${left.padEnd(maxLeft + 2)}${right}`);
+		}
+		lines.push("");
+	}
+
+	// Examples
+	if (command.examples && command.examples.length > 0) {
+		lines.push(translate("cli.help.examples", "EXAMPLES"));
+		for (const example of command.examples) {
+			for (const line of example.split("\n")) {
+				lines.push(`  ${line}`);
+			}
+		}
+		lines.push("");
+	}
+}
+
 /** Render full root help: header, default command details, subcommand list. */
 export function renderRootHelp(config: CliConfig<CommandMetadata>): void {
 	const { bin, version, commands } = config;
+	const translate = config.translate ?? identityTextTranslator;
 	const lines: string[] = [];
 	lines.push(`${bin} v${version}\n`);
-	lines.push("USAGE");
+	lines.push(translate("cli.help.usage", "USAGE"));
 	lines.push(`  $ ${bin} [COMMAND]\n`);
 
 	// Show the default command's flags/args/examples inline.
 	// The default command is the one marked hidden (it's the implicit entry point).
-	const defaultCmd = [...commands.values()].find(command => command.hidden);
-	if (defaultCmd) {
-		renderCommandBody(lines, defaultCmd);
+	const defaultEntry = [...commands.entries()].find(([, command]) => command.hidden);
+	if (defaultEntry) {
+		const [defaultId, defaultCommand] = defaultEntry;
+		renderCommandBody(lines, translateCommandMetadata(defaultId, defaultCommand, translate), defaultId, translate);
 	}
 
 	// List visible subcommands
-	const visible = [...commands.entries()].filter(([, C]) => !C.hidden);
+	const visible = [...commands.entries()].filter(([, command]) => !command.hidden);
 	if (visible.length > 0) {
-		lines.push("COMMANDS");
-		const maxLen = Math.max(...visible.map(([n]) => n.length));
+		lines.push(translate("cli.help.commands", "COMMANDS"));
+		const maxLen = Math.max(...visible.map(([name]) => name.length));
 		for (const [name, command] of visible.sort((a, b) => a[0].localeCompare(b[0]))) {
-			lines.push(`  ${name.padEnd(maxLen + 2)}${command.description ?? ""}`);
+			const description = command.description
+				? translateDescription(
+						translate,
+						[`cli.commands.${name}.description`, `commands.${name}.description`],
+						command.description,
+					)
+				: "";
+			lines.push(`  ${name.padEnd(maxLen + 2)}${description}`);
 		}
 		lines.push("");
 	}
@@ -344,61 +470,19 @@ export function commandUsageLine(bin: string, id: string, Cmd: CommandCtor): str
 }
 
 /** Render help for a single command. */
-export function renderCommandHelp(bin: string, id: string, Cmd: CommandCtor): void {
+export function renderCommandHelp(
+	bin: string,
+	id: string,
+	Cmd: CommandCtor,
+	translate: CliTextTranslator = identityTextTranslator,
+): void {
+	const metadata = translateCommandMetadata(id, Cmd, translate);
 	const lines: string[] = [];
-	if (Cmd.description) lines.push(`${Cmd.description}\n`);
-	lines.push("USAGE");
+	if (metadata.description) lines.push(`${metadata.description}\n`);
+	lines.push(translate("cli.help.usage", "USAGE"));
 	lines.push(`  ${commandUsageLine(bin, id, Cmd)}\n`);
-	renderCommandBody(lines, Cmd);
+	renderCommandBody(lines, metadata, id, translate);
 	process.stdout.write(lines.join("\n"));
-}
-
-function renderCommandBody(lines: string[], command: CommandMetadata): void {
-	const argDefs = command.args ?? {};
-	const flagDefs = command.flags ?? {};
-
-	// Arguments
-	const argEntries = Object.entries(argDefs);
-	if (argEntries.length > 0) {
-		lines.push("ARGUMENTS");
-		const maxLen = Math.max(...argEntries.map(([n]) => n.length));
-		for (const [name, desc] of argEntries) {
-			const parts = [name.toUpperCase().padEnd(maxLen + 2)];
-			if (desc.description) parts.push(desc.description);
-			if (desc.options) parts.push(`(${[...desc.options].join("|")})`);
-			lines.push(`  ${parts.join(" ")}`);
-		}
-		lines.push("");
-	}
-
-	// Flags
-	const flagEntries = Object.entries(flagDefs);
-	if (flagEntries.length > 0) {
-		lines.push("FLAGS");
-		const formatted: [string, string][] = [];
-		for (const [name, desc] of flagEntries) {
-			const charPart = desc.char ? `-${desc.char}, ` : "    ";
-			const namePart = `--${name}`;
-			const typePart = desc.kind === "boolean" ? "" : desc.kind === "integer" ? "=<int>" : "=<value>";
-			formatted.push([`  ${charPart}${namePart}${typePart}`, desc.description ?? ""]);
-		}
-		const maxLeft = Math.max(...formatted.map(([l]) => l.length));
-		for (const [left, right] of formatted) {
-			lines.push(`${left.padEnd(maxLeft + 2)}${right}`);
-		}
-		lines.push("");
-	}
-
-	// Examples
-	if (command.examples && command.examples.length > 0) {
-		lines.push("EXAMPLES");
-		for (const ex of command.examples) {
-			for (const line of ex.split("\n")) {
-				lines.push(`  ${line}`);
-			}
-		}
-		lines.push("");
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -422,6 +506,8 @@ export interface RunOptions {
 	help?: (config: CliConfig) => Promise<void> | void;
 	/** Lightweight help renderer backed by static command metadata. */
 	metadataHelp?: (config: CliConfig<CommandMetadata>) => Promise<void> | void;
+	/** Optional host-provided translator for human-readable CLI text. */
+	translate?: CliTextTranslator;
 }
 
 /** Find a command entry by exact name or alias. */
@@ -436,7 +522,7 @@ function findEntry(commands: CommandEntry[], id: string): CommandEntry | undefin
  * No filesystem scanning, no plugin system, no package.json reading.
  */
 export async function run(opts: RunOptions): Promise<void> {
-	const { bin, version, argv } = opts;
+	const { bin, version, argv, translate = identityTextTranslator } = opts;
 
 	const commandId = argv[0] ?? "";
 	const commandArgv = argv.slice(1);
@@ -469,9 +555,9 @@ export async function run(opts: RunOptions): Promise<void> {
 		const entry = findEntry(opts.commands, commandId);
 		if (entry) {
 			const Cmd = await loadEntry(entry);
-			renderCommandHelp(bin, entry.name, Cmd);
+			renderCommandHelp(bin, entry.name, Cmd, translate);
 		} else {
-			process.stderr.write(`Unknown command: ${commandId}\n`);
+			process.stderr.write(`${translate("cli.errors.unknownCommand", "Unknown command")}: ${commandId}\n`);
 		}
 		return;
 	}
@@ -480,13 +566,15 @@ export async function run(opts: RunOptions): Promise<void> {
 	const entry = findEntry(opts.commands, commandId);
 
 	if (!entry) {
-		process.stderr.write(`Error: command ${commandId} not found\n`);
+		process.stderr.write(
+			`${translate("cli.errors.commandNotFound", "Error: command")} ${commandId} ${translate("cli.errors.notFound", "not found")}\n`,
+		);
 		process.exitCode = 1;
 		return;
 	}
 
 	const Cmd = await loadEntry(entry);
-	const config: CliConfig = { bin, version, commands: new Map([[entry.name, Cmd]]) };
+	const config: CliConfig = { bin, version, commands: new Map([[entry.name, Cmd]]), translate };
 	const instance = new Cmd(commandArgv, config);
 	try {
 		await instance.run();
@@ -496,9 +584,11 @@ export async function run(opts: RunOptions): Promise<void> {
 		// process-level catch would dump a minified `dist/cli.js` code frame over a
 		// plain argument error (issue #5369).
 		if (error instanceof CliUsageError) {
-			process.stderr.write(`error: ${error.message}\n\n`);
-			process.stderr.write(`USAGE\n  ${commandUsageLine(bin, entry.name, Cmd)}\n`);
-			process.stderr.write(`\nRun \`${bin} ${entry.name} --help\` for details.\n`);
+			process.stderr.write(`${translate("cli.errors.usage", "error")}: ${error.message}\n\n`);
+			process.stderr.write(`${translate("cli.help.usage", "USAGE")}\n  ${commandUsageLine(bin, entry.name, Cmd)}\n`);
+			process.stderr.write(
+				`\n${translate("cli.errors.runHelp", "Run")} \`${bin} ${entry.name} --help\` ${translate("cli.errors.forDetails", "for details")}.\n`,
+			);
 			process.exitCode = 1;
 			return;
 		}
@@ -517,7 +607,7 @@ async function loadEntry(entry: CommandEntry): Promise<CommandCtor> {
 /** Load every command constructor for backward-compatible custom help callbacks. */
 async function loadAllCommands(opts: RunOptions): Promise<CliConfig> {
 	const loaded = await Promise.all(opts.commands.map(async entry => [entry.name, await loadEntry(entry)] as const));
-	return { bin: opts.bin, version: opts.version, commands: new Map(loaded) };
+	return { bin: opts.bin, version: opts.version, commands: new Map(loaded), translate: opts.translate };
 }
 
 /** Resolve static command metadata for lightweight root help. */
@@ -525,5 +615,5 @@ async function loadAllCommandMetadata(opts: RunOptions): Promise<CliConfig<Comma
 	const loaded = await Promise.all(
 		opts.commands.map(async entry => [entry.name, entry.help ?? (await loadEntry(entry))] as const),
 	);
-	return { bin: opts.bin, version: opts.version, commands: new Map(loaded) };
+	return { bin: opts.bin, version: opts.version, commands: new Map(loaded), translate: opts.translate };
 }

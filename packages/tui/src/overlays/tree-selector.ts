@@ -11,6 +11,7 @@ import {
 	truncateToWidth,
 } from "../index";
 import { isRecord, sanitizeText } from "@oh-my-pi/pi-utils";
+import { tuiT } from "../i18n-host";
 /** Available session-tree display filters. */
 export const TREE_FILTER_MODES = ["default", "no-tools", "user-only", "labeled-only", "all"] as const;
 /** Session-tree display filter. */
@@ -31,11 +32,20 @@ export type SessionTreeEntry = { id: string; parentId: string | null } & (
 	| { type: "compaction"; tokensBefore: number }
 	| { type: "branch_summary"; summary: string }
 	| { type: "model_change"; model: string }
-	| { type: "model_usage"; purpose: string; role?: string; provider: string; model: string }
+	| {
+			type: "model_usage";
+			purpose: string;
+			role?: string;
+			provider: string;
+			model: string;
+	  }
 	| { type: "thinking_level_change"; thinkingLevel?: string | null }
 	| { type: "custom"; customType: string }
 	| { type: "label"; label?: string }
-	| { type: "service_tier_change"; serviceTier: Partial<Record<string, string>> | null }
+	| {
+			type: "service_tier_change";
+			serviceTier: Partial<Record<string, string>> | null;
+	  }
 	| { type: "title_change"; title: string }
 	| { type: "mode_change"; mode: string }
 	| { type: "credential_pin"; provider: string }
@@ -109,7 +119,10 @@ function advisorTreeDisplay(details: unknown): AdvisorTreeDisplay {
 			if (severity && !severities.includes(severity)) severities.push(severity);
 		}
 	}
-	return { qualifier: [...advisors, ...severities].join(", "), text: notes.join(" ") };
+	return {
+		qualifier: [...advisors, ...severities].join(", "),
+		text: notes.join(" "),
+	};
 }
 
 /**
@@ -235,8 +248,15 @@ class TreeList implements Component {
 				if (Array.isArray(content)) {
 					for (const block of content) {
 						if (typeof block === "object" && block !== null && "type" in block && block.type === "toolCall") {
-							const tc = block as { id: string; name: string; arguments: Record<string, unknown> };
-							this.#toolCallMap.set(tc.id, { name: tc.name, arguments: tc.arguments });
+							const tc = block as {
+								id: string;
+								name: string;
+								arguments: Record<string, unknown>;
+							};
+							this.#toolCallMap.set(tc.id, {
+								name: tc.name,
+								arguments: tc.arguments,
+							});
 						}
 					}
 				}
@@ -494,13 +514,13 @@ class TreeList implements Component {
 	#getFilterLabel(): string {
 		switch (this.#filterMode) {
 			case "no-tools":
-				return " [no-tools]";
+				return ` [${tuiT("ui.treeSelector.noToolsFilter", "no-tools")}]`;
 			case "user-only":
-				return " [user]";
+				return ` [${tuiT("ui.treeSelector.userFilter", "user")}]`;
 			case "labeled-only":
-				return " [labeled]";
+				return ` [${tuiT("ui.treeSelector.labeledFilter", "labeled")}]`;
 			case "all":
-				return " [all]";
+				return ` [${tuiT("ui.treeSelector.allFilter", "all")}]`;
 			default:
 				return "";
 		}
@@ -519,21 +539,53 @@ class TreeList implements Component {
 			//    `model_change` + `thinking_level_change` (both hidden by the default filter)
 			//    read as "broken /tree" — see #1909.
 			if (totalCount === 0) {
-				lines.push(truncateToWidth(theme.fg("muted", "No entries found"), width));
+				lines.push(
+					truncateToWidth(theme.fg("muted", tuiT("ui.treeSelector.noEntriesFound", "  No entries found")), width),
+				);
 				lines.push(truncateToWidth(theme.fg("muted", `(0/0)${this.#getFilterLabel()}`), width));
 			} else if (this.#searchQuery.length > 0) {
-				lines.push(truncateToWidth(theme.fg("muted", `No entries match search "${this.#searchQuery}"`), width));
-				lines.push(truncateToWidth(theme.fg("muted", "Press Backspace to clear the search"), width));
-				lines.push(truncateToWidth(theme.fg("muted", `(0/${totalCount})${this.#getFilterLabel()}`), width));
-			} else {
-				const filterLabel = this.#getFilterLabel().trim() || "[default]";
 				lines.push(
 					truncateToWidth(
-						theme.fg("muted", `${totalCount} entries hidden by the current filter ${filterLabel}`),
+						theme.fg(
+							"muted",
+							tuiT("ui.treeSelector.noSearchMatches", '  No entries match search "{query}"', {
+								query: this.#searchQuery,
+							}),
+						),
 						width,
 					),
 				);
-				lines.push(truncateToWidth(theme.fg("muted", "Press Alt+A to show all, Alt+D for default"), width));
+				lines.push(
+					truncateToWidth(
+						theme.fg("muted", tuiT("ui.treeSelector.pressBackspaceTo", "  Press Backspace to clear the search")),
+						width,
+					),
+				);
+				lines.push(truncateToWidth(theme.fg("muted", `(0/${totalCount})${this.#getFilterLabel()}`), width));
+			} else {
+				const filterLabel =
+					this.#getFilterLabel().trim() || `[${tuiT("ui.treeSelector.defaultFilter", "default")}]`;
+				lines.push(
+					truncateToWidth(
+						theme.fg(
+							"muted",
+							tuiT("ui.treeSelector.entriesHidden", "  {count} entries hidden by the current filter {filter}", {
+								count: totalCount,
+								filter: filterLabel,
+							}),
+						),
+						width,
+					),
+				);
+				lines.push(
+					truncateToWidth(
+						theme.fg(
+							"muted",
+							tuiT("ui.treeSelector.pressAltaTo", "  Press Alt+A to show all, Alt+D for default"),
+						),
+						width,
+					),
+				);
 				lines.push(truncateToWidth(theme.fg("muted", `(0/${totalCount})${this.#getFilterLabel()}`), width));
 			}
 			return lines;
@@ -660,28 +712,36 @@ class TreeList implements Component {
 				if (role === "user") {
 					const msgWithContent = msg as { content?: unknown };
 					const content = normalize(this.#extractContent(msgWithContent.content));
-					result = theme.fg("accent", "user: ") + content;
+					result = theme.fg("accent", `${tuiT("ui.treeSelector.userRole", "user:")} `) + content;
 				} else if (role === "developer") {
 					const msgWithContent = msg as { content?: unknown };
 					const content = normalize(this.#extractContent(msgWithContent.content));
-					result = theme.fg("dim", "developer: ") + theme.fg("muted", content);
+					result =
+						theme.fg("dim", `${tuiT("ui.treeSelector.developerRole", "developer:")} `) +
+						theme.fg("muted", content);
 				} else if (role === "assistant") {
 					const presentation = resolveAssistantErrorPresentation(msg);
+					const assistantLabel = `${tuiT("ui.treeSelector.assistantRole", "assistant:")} `;
 					if (presentation.kind === "compact-recovered") {
-						result = theme.fg("success", "assistant: ") + theme.fg("dim", presentation.text);
+						result = theme.fg("success", assistantLabel) + theme.fg("dim", presentation.text);
 						break;
 					}
-					const msgWithContent = msg as { content?: unknown; stopReason?: string; errorMessage?: string };
+					const msgWithContent = msg as {
+						content?: unknown;
+						stopReason?: string;
+						errorMessage?: string;
+					};
 					const textContent = normalize(this.#extractContent(msgWithContent.content));
 					if (textContent) {
-						result = theme.fg("success", "assistant: ") + textContent;
+						result = theme.fg("success", assistantLabel) + textContent;
 					} else if (presentation.kind === "full") {
 						result =
-							theme.fg("success", "assistant: ") + theme.fg("error", normalize(presentation.text).slice(0, 80));
+							theme.fg("success", assistantLabel) + theme.fg("error", normalize(presentation.text).slice(0, 80));
 					} else if (msgWithContent.stopReason === "aborted") {
-						result = theme.fg("success", "assistant: ") + theme.fg("muted", "(aborted)");
+						result = theme.fg("success", assistantLabel) + theme.fg("muted", tuiT("ui.aborted", "(aborted)"));
 					} else {
-						result = theme.fg("success", "assistant: ") + theme.fg("muted", "(no content)");
+						result =
+							theme.fg("success", assistantLabel) + theme.fg("muted", tuiT("ui.noContent", "(no content)"));
 					}
 				} else if (role === "toolResult") {
 					const toolMsg = msg as { toolCallId?: string; toolName?: string };
@@ -702,7 +762,9 @@ class TreeList implements Component {
 			case "custom_message": {
 				if (entry.customType === "advisor") {
 					const { qualifier, text } = advisorTreeDisplay(entry.details);
-					const label = qualifier ? `advisor (${qualifier}): ` : "advisor: ";
+					const label = qualifier
+						? `${tuiT("ui.treeSelector.advisorRole", "advisor")} (${qualifier}): `
+						: `${tuiT("ui.treeSelector.advisorRole", "advisor")}: `;
 					result = theme.fg("customMessageLabel", label) + normalize(text);
 					break;
 				}
@@ -712,31 +774,45 @@ class TreeList implements Component {
 			}
 			case "compaction": {
 				const tokens = Math.round(entry.tokensBefore / 1000);
-				result = theme.fg("borderAccent", `[compaction: ${tokens}k tokens]`);
+				result = theme.fg(
+					"borderAccent",
+					`[${tuiT("ui.treeSelector.compaction", "compaction: {tokens}k tokens", { tokens })}]`,
+				);
 				break;
 			}
 			case "branch_summary":
-				result = theme.fg("warning", `[branch summary]: `) + normalize(entry.summary);
+				result =
+					theme.fg("warning", `[${tuiT("ui.treeSelector.branchSummary", "branch summary")}]: `) +
+					normalize(entry.summary);
 				break;
 			case "model_change":
-				result = theme.fg("dim", `[model: ${entry.model}]`);
+				result = theme.fg("dim", `[${tuiT("ui.treeSelector.model", "model")}: ${entry.model}]`);
 				break;
 			case "model_usage": {
 				const purpose = sanitizeTreeField(entry.purpose);
 				const role = sanitizeTreeField(entry.role ?? "");
 				const provider = sanitizeTreeField(entry.provider);
 				const model = sanitizeTreeField(entry.model);
-				result = theme.fg("dim", `[model usage: ${purpose} ${role ? `${role} ` : ""}${provider}/${model}]`);
+				result = theme.fg(
+					"dim",
+					`[${tuiT("ui.treeSelector.modelUsage", "model usage")}: ${purpose} ${role ? `${role} ` : ""}${provider}/${model}]`,
+				);
 				break;
 			}
 			case "thinking_level_change":
-				result = theme.fg("dim", `[thinking: ${entry.thinkingLevel ?? ThinkingLevel.Off}]`);
+				result = theme.fg(
+					"dim",
+					`[${tuiT("ui.treeSelector.thinking", "thinking")}: ${entry.thinkingLevel ?? ThinkingLevel.Off}]`,
+				);
 				break;
 			case "custom":
-				result = theme.fg("dim", `[custom: ${entry.customType}]`);
+				result = theme.fg("dim", `[${tuiT("ui.treeSelector.custom", "custom")}: ${entry.customType}]`);
 				break;
 			case "label":
-				result = theme.fg("dim", `[label: ${entry.label ?? "(cleared)"}]`);
+				result = theme.fg(
+					"dim",
+					`[${tuiT("ui.treeSelector.label", "label")}: ${entry.label ?? tuiT("ui.treeSelector.cleared", "(cleared)")}]`,
+				);
 				break;
 			case "service_tier_change": {
 				// Per-family map, or null when the session went back to the default.
@@ -744,18 +820,18 @@ class TreeList implements Component {
 					? Object.entries(entry.serviceTier)
 							.map(([family, tier]) => `${family}:${tier}`)
 							.join(" ")
-					: "(default)";
-				result = theme.fg("dim", `[service tier: ${tiers}]`);
+					: tuiT("ui.treeSelector.default", "(default)");
+				result = theme.fg("dim", `[${tuiT("ui.treeSelector.serviceTier", "service tier")}: ${tiers}]`);
 				break;
 			}
 			case "title_change":
-				result = theme.fg("dim", `[title: ${normalize(entry.title)}]`);
+				result = theme.fg("dim", `[${tuiT("ui.treeSelector.title", "title")}: ${normalize(entry.title)}]`);
 				break;
 			case "mode_change":
-				result = theme.fg("dim", `[mode: ${entry.mode}]`);
+				result = theme.fg("dim", `[${tuiT("ui.treeSelector.mode", "mode")}: ${entry.mode}]`);
 				break;
 			case "credential_pin":
-				result = theme.fg("dim", `[credential pin: ${entry.provider}]`);
+				result = theme.fg("dim", `[${tuiT("ui.treeSelector.credentialPin", "credential pin")}: ${entry.provider}]`);
 				break;
 			default:
 				// Bookkeeping entries with nothing worth spelling out still get their
@@ -979,10 +1055,11 @@ class SearchLine implements Component {
 
 	render(width: number): readonly string[] {
 		const query = this.treeList.getSearchQuery();
+		const searchLabel = `${tuiT("ui.treeSelector.search", "Search:")} `;
 		if (query) {
-			return [truncateToWidth(`${theme.fg("muted", "Search:")} ${theme.fg("accent", query)}`, width)];
+			return [truncateToWidth(`${theme.fg("muted", searchLabel)}${theme.fg("accent", query)}`, width)];
 		}
-		return [truncateToWidth(theme.fg("muted", "Search:"), width)];
+		return [truncateToWidth(theme.fg("muted", searchLabel.trimEnd()), width)];
 	}
 
 	handleInput(_keyData: string): void {}
@@ -1008,9 +1085,13 @@ class LabelInput implements Component {
 
 	render(width: number): readonly string[] {
 		const lines: string[] = [];
-		lines.push(truncateToWidth(theme.fg("muted", "Label (empty to remove):"), width));
+		lines.push(
+			truncateToWidth(theme.fg("muted", tuiT("ui.treeSelector.labelPrompt", "Label (empty to remove):")), width),
+		);
 		lines.push(...this.#input.render(width));
-		lines.push(truncateToWidth(theme.fg("dim", "enter: save  esc: cancel"), width));
+		lines.push(
+			truncateToWidth(theme.fg("dim", tuiT("ui.treeSelector.labelHint", "enter: save  esc: cancel")), width),
+		);
 		return lines;
 	}
 
@@ -1044,7 +1125,7 @@ export class TreeSelectorComponent extends OverlayPanel {
 		private readonly onLabelChangeCallback?: (entryId: string, label: string | undefined) => void,
 		initialFilterMode: FilterMode = "default",
 	) {
-		super("Session Tree");
+		super(tuiT("ui.treeSelector.sessionTree", "Session Tree"));
 		// The outer panel has eight fixed rows around the tree list: top/bottom
 		// borders, the two spacers, help, search, and section divider.
 		const PANEL_CHROME_ROWS = 8;
@@ -1068,7 +1149,10 @@ export class TreeSelectorComponent extends OverlayPanel {
 			new TruncatedText(
 				theme.fg(
 					"muted",
-					"Enter: switch. Alt+↑/↓: previous/next turn. PgUp/PgDn (←/→): page. Home/End: first/last item. Shift+Enter: summarize & switch. Shift+L: label. Ctrl+O: filter. Alt+D/T/U/L/A: filter. Type to search",
+					tuiT(
+						"ui.treeSelector.help",
+						"Enter: switch. Alt+↑/↓: previous/next turn. PgUp/PgDn (←/→): page. Home/End: first/last item. Shift+Enter: summarize & switch. Shift+L: label. Ctrl+O: filter. Alt+D/T/U/L/A: filter. Type to search",
+					),
 				),
 				0,
 				0,

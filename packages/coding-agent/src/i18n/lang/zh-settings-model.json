@@ -109,8 +109,6 @@
   "settings.prewalk.enabled.label": "启用预走查",
   "settings.proseOnlyThinking.description": "从思考摘要中省略代码块并用省略号替代",
   "settings.proseOnlyThinking.label": "仅正文思考",
-  "settings.providers.anthropic.serverSideFallback.description": "当 Claude Fable 5 / Mythos 5 请求被 Anthropic 的安全分类器阻止时，在 Claude Opus 4.8 服务端重试。选择启用以保留回退前行为。",
-  "settings.providers.anthropic.serverSideFallback.label": "Anthropic 服务端回退 (Fable 5)",
   "settings.providers.autoThinkingModel.description": "auto 思考级别的难度分类器模型",
   "settings.providers.autoThinkingModel.label": "自动 思考 模型",
   "settings.repetitionPenalty.description": "对重复 token 的惩罚（-1 = 提供方默认）",

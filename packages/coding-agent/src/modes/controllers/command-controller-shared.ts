@@ -13,6 +13,7 @@ import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
 import { DynamicBorder } from "@oh-my-pi/pi-tui/chrome/dynamic-border";
 import { TranscriptBlock } from "@oh-my-pi/pi-tui/chrome/transcript-container";
 import { parseCommandArgs } from "../../utils/command-args";
+import { t } from "../../i18n";
 import type { InteractiveModeContext } from "../types";
 
 export type ScopeValue = "project" | "user";
@@ -24,7 +25,7 @@ export type ScopeFlagResult = { ok: true; scope: ScopeValue } | { ok: false; err
  */
 export function readScopeFlag(value: string | undefined): ScopeFlagResult {
 	if (!value || (value !== "project" && value !== "user")) {
-		return { ok: false, error: "Invalid --scope value. Use project or user." };
+		return { ok: false, error: t("cli.mcp.invalidScope", "Invalid --scope value. Use project or user.") };
 	}
 	return { ok: true, scope: value };
 }
@@ -61,7 +62,7 @@ export function parseRemoveArgs(rest: string): ParseRemoveResult {
 			i += 2;
 			continue;
 		}
-		return { ok: false, error: `Unknown option: ${token}` };
+		return { ok: false, error: t("cli.mcp.unknownOption", "Unknown option: {option}", { option: token }) };
 	}
 
 	return { ok: true, value: { name, scope } };

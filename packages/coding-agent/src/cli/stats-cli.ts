@@ -9,6 +9,7 @@ import { formatDuration, formatNumber, formatPercent } from "@oh-my-pi/pi-utils"
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { formatCost } from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
 import { openPath } from "../utils/open";
+import { t } from "../i18n";
 
 /**
  * Single-line TTY progress bar. On a non-TTY stream we just stay quiet -
@@ -98,7 +99,7 @@ export async function runStatsCommand(cmd: StatsCommandArgs): Promise<void> {
 	// Start the dashboard server
 	const { hostname, port } = await startServer(cmd.port, cmd.host);
 	const url = formatStatsDashboardUrl(hostname, port);
-	console.log(chalk.green(`Dashboard available at: ${url}`));
+	console.log(chalk.green(t("cli.stats.dashboard", "Dashboard available at: {url}", { url })));
 
 	// Open browser
 	openPath(url);
@@ -123,16 +124,33 @@ async function printStatsSummary(): Promise<void> {
 
 	console.log(chalk.bold("\n=== AI Usage Statistics ===\n"));
 
-	console.log(chalk.bold("Overall:"));
-	console.log(`  Requests: ${formatNumber(overall.totalRequests)} (${formatNumber(overall.failedRequests)} errors)`);
-	console.log(`  Error Rate: ${formatPercent(overall.errorRate)}`);
-	console.log(`  Total Tokens: ${formatNumber(overall.totalInputTokens + overall.totalOutputTokens)}`);
-	console.log(`  Input Tokens: ${formatNumber(overall.totalInputTokens)}`);
-	console.log(`  Output Tokens: ${formatNumber(overall.totalOutputTokens)}`);
-	console.log(`  Cache Rate: ${formatPercent(overall.cacheRate)}`);
-	console.log(`  Cache Savings: ${formatPercent(overall.cacheSavings)}`);
-	console.log(`  Total Cost: ${formatCost(overall.totalCost)}`);
-	console.log(`  Premium Requests: ${formatNumber(normalizePremiumRequests(overall.totalPremiumRequests ?? 0))}`);
+	console.log(chalk.bold(t("cli.stats.overall", "Overall:")));
+	console.log(
+		t("cli.stats.requests", "  Requests: {requests} ({errors} errors)", {
+			requests: formatNumber(overall.totalRequests),
+			errors: formatNumber(overall.failedRequests),
+		}),
+	);
+	console.log(t("cli.stats.errorRate", "  Error Rate: {value}", { value: formatPercent(overall.errorRate) }));
+	console.log(
+		t("cli.stats.totalTokens", "  Total Tokens: {value}", {
+			value: formatNumber(overall.totalInputTokens + overall.totalOutputTokens),
+		}),
+	);
+	console.log(
+		t("cli.stats.inputTokens", "  Input Tokens: {value}", { value: formatNumber(overall.totalInputTokens) }),
+	);
+	console.log(
+		t("cli.stats.outputTokens", "  Output Tokens: {value}", { value: formatNumber(overall.totalOutputTokens) }),
+	);
+	console.log(t("cli.stats.cacheRate", "  Cache Rate: {value}", { value: formatPercent(overall.cacheRate) }));
+	console.log(t("cli.stats.cacheSavings", "  Cache Savings: {value}", { value: formatPercent(overall.cacheSavings) }));
+	console.log(t("cli.stats.totalCost", "  Total Cost: {value}", { value: formatCost(overall.totalCost) }));
+	console.log(
+		t("cli.stats.premiumRequests", "  Premium Requests: {value}", {
+			value: formatNumber(normalizePremiumRequests(overall.totalPremiumRequests ?? 0)),
+		}),
+	);
 	console.log(`  Avg Duration: ${overall.avgDuration !== null ? formatDuration(overall.avgDuration) : "-"}`);
 	console.log(`  Avg TTFT: ${overall.avgTtft !== null ? formatDuration(overall.avgTtft) : "-"}`);
 	if (overall.avgTokensPerSecond !== null) {

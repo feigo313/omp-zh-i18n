@@ -4,7 +4,6 @@
  * Handles `omp update` to check for and install updates.
  * Uses the installer that owns the active omp executable when it can be detected.
  */
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -16,30 +15,28 @@ import { withFileLock } from "@oh-my-pi/pi-utils/file-lock";
 import { $ } from "bun";
 import { settings } from "../config/settings";
 import { theme } from "@oh-my-pi/pi-tui/theme";
+import { t } from "../i18n";
 import {
 	isTimeoutError,
 	isUnsupportedProxyError,
 	unsupportedProxyMessage,
 	withTimeoutSignal,
 } from "../utils/fetch-timeout";
+import {
+	DEFAULT_NPM_REGISTRY,
+	loadNpmRegistryResolver,
+	type NpmRegistry,
+	type NpmRegistryResolver,
+	npmRegistryPackageUrl,
+} from "./npm-registry";
+
+import { cfgUpdateChannel } from "../modes/settings";
 
 const REPO = "can1357/oh-my-pi";
 const PACKAGE = "@oh-my-pi/pi-coding-agent";
 const HOMEBREW_FORMULA = "can1357/tap/omp";
 const MISE_TOOL = "github:can1357/oh-my-pi";
 const NIX_STORE_DIR = "/nix/store";
-/**
- * Official npm registry origin.
- *
- * Pinned across both the version check and the bun install step so the two
- * agree on which catalog they are talking to. A user's bun may be pointed at
- * an unofficial mirror (corporate proxy, Taobao, etc.) that lags the upstream
- * registry by minutes-to-hours, in which case `getLatestRelease` would resolve
- * a version the mirror has not yet replicated and the install would fail with
- * `No version matching "X" found for specifier "<pkg>" (but package exists)`.
- * See #1686.
- */
-const NPM_REGISTRY = "https://registry.npmjs.org/";
 const GITHUB_API = "https://api.github.com";
 const RELEASE_METADATA_TIMEOUT_MS = 30_000;
 const BINARY_DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
@@ -97,6 +94,11 @@ export interface ReleaseInfo {
 	dist?: ReleaseDist;
 	/** npm names to install, resolved after following any `omp.rename` pointers. */
 	packages: ReleasePackages;
+	/**
+	 * Registry URL the version was resolved from; bun/npm installs pin to it
+	 * so the install sees the same catalog as the check. See #1686.
+	 */
+	registry: string;
 }
 
 export interface ReleaseBinaryAsset {
@@ -354,7 +356,7 @@ export async function downloadVerifiedBinary(options: VerifiedBinaryDownloadOpti
 		throw new Error(`Download failed: ${response.statusText}`);
 	}
 
-	const hash = createHash("sha256");
+	const hash = new Bun.SHA256();
 	let size = 0;
 	const verifier = new Transform({
 		transform(chunk, _encoding, callback) {
@@ -807,33 +809,64 @@ const MAX_RENAME_HOPS = 3;
 
 async function fetchLatestManifest(
 	pkg: string,
+	registry: NpmRegistry,
 	timeoutMs: number,
 	channel: UpdateChannel,
 ): Promise<{ version: string; manifest: Record<string, unknown> }> {
-	let response: Response;
-	try {
-		response = await fetch(`${NPM_REGISTRY}${pkg}/${channel === "canary" ? "canary" : "latest"}`, {
-			signal: withTimeoutSignal(timeoutMs),
-		});
-	} catch (err) {
-		if (isTimeoutError(err)) {
-			throw new Error(`Timed out fetching release info for ${pkg} after ${Math.round(timeoutMs / 1000)}s`, {
-				cause: err,
-			});
+	const tag = channel === "canary" ? "canary" : "latest";
+	const headers: Record<string, string> = { accept: "application/json" };
+	if (registry.authorization) headers.authorization = registry.authorization;
+	const origin = registry.url === DEFAULT_NPM_REGISTRY ? "" : ` from ${registry.url} (${registry.source})`;
+	const get = async (url: string): Promise<Response> => {
+		try {
+			return await fetch(url, { headers, signal: withTimeoutSignal(timeoutMs) });
+		} catch (err) {
+			if (isTimeoutError(err)) {
+				throw new Error(
+					`Timed out fetching release info for ${pkg}${origin} after ${Math.round(timeoutMs / 1000)}s`,
+					{ cause: err },
+				);
+			}
+			if (isUnsupportedProxyError(err)) throw new Error(unsupportedProxyMessage(), { cause: err });
+			throw err;
 		}
-		if (isUnsupportedProxyError(err)) throw new Error(unsupportedProxyMessage(), { cause: err });
-		throw err;
+	};
+	const noCanary = () =>
+		new Error(`No canary release has been published for ${pkg} yet. Try \`${APP_NAME} update --stable\`.`);
+
+	let response = await get(npmRegistryPackageUrl(registry, pkg, tag));
+	let data: unknown;
+	if (!response.ok && origin && [400, 404, 405].includes(response.status)) {
+		// Not every registry implementation serves npmjs's `/<pkg>/<dist-tag>`
+		// shortcut; the full packument is the one endpoint all of them share.
+		response = await get(npmRegistryPackageUrl(registry, pkg));
+		if (response.ok) {
+			const packument: unknown = await response.json();
+			const distTags = isRecord(packument) ? packument["dist-tags"] : undefined;
+			const version = isRecord(distTags) ? distTags[tag] : undefined;
+			if (typeof version !== "string") {
+				if (channel === "canary") throw noCanary();
+				throw new Error(`Malformed npm registry response for ${pkg}${origin}: missing dist-tags.${tag}`);
+			}
+			const versions = isRecord(packument) ? packument.versions : undefined;
+			data = isRecord(versions) ? versions[version] : undefined;
+			if (!isRecord(data)) {
+				throw new Error(`Malformed npm registry response for ${pkg}${origin}: missing versions.${version}`);
+			}
+		}
 	}
 	if (!response.ok) {
-		if (response.status === 404 && channel === "canary") {
-			throw new Error(`No canary release has been published for ${pkg} yet. Try \`${APP_NAME} update --stable\`.`);
-		}
-		throw new Error(`Failed to fetch release info for ${pkg}: ${response.statusText}`);
+		if (response.status === 404 && channel === "canary") throw noCanary();
+		const authHint =
+			response.status === 401 || response.status === 403 ? "; check the registry credentials in your .npmrc" : "";
+		throw new Error(
+			`Failed to fetch release info for ${pkg}${origin}: ${response.status} ${response.statusText}${authHint}`,
+		);
 	}
 
-	const data: unknown = await response.json();
+	data ??= await response.json();
 	if (!isRecord(data) || typeof data.version !== "string") {
-		throw new Error(`Malformed npm registry response for ${pkg}: missing version`);
+		throw new Error(`Malformed npm registry response for ${pkg}${origin}: missing version`);
 	}
 	return { version: data.version, manifest: data };
 }
@@ -844,22 +877,29 @@ async function fetchLatestManifest(
  * npm name. Version, dist, and install names all come from the final manifest
  * in the chain. Uses npm instead of GitHub API to avoid unauthenticated rate
  * limiting.
+ *
+ * The registry comes from the user's npm/bun configuration
+ * ({@link loadNpmRegistryResolver}), so a configured feed is honored for every
+ * install method, including standalone binaries.
  */
 export async function getLatestRelease(
-	options: { timeoutMs?: number; channel?: UpdateChannel } = {},
+	options: { timeoutMs?: number; channel?: UpdateChannel; registries?: NpmRegistryResolver } = {},
 ): Promise<ReleaseInfo> {
 	const timeoutMs = options.timeoutMs ?? RELEASE_METADATA_TIMEOUT_MS;
 	const channel = options.channel ?? "stable";
+	const registries = options.registries ?? (await loadNpmRegistryResolver());
 	const packages: ReleasePackages = { ...CURRENT_PACKAGES };
 	const visited = new Set([packages.pkg]);
-	let latest = await fetchLatestManifest(packages.pkg, timeoutMs, channel);
+	let registry = registries(packages.pkg);
+	let latest = await fetchLatestManifest(packages.pkg, registry, timeoutMs, channel);
 	for (let hop = 0; hop < MAX_RENAME_HOPS; hop++) {
 		const rename = resolveReleaseRename(latest.manifest);
 		if (!rename || visited.has(rename.pkg)) break;
 		visited.add(rename.pkg);
 		packages.pkg = rename.pkg;
 		if (rename.natives) packages.natives = rename.natives;
-		latest = await fetchLatestManifest(packages.pkg, timeoutMs, channel);
+		registry = registries(packages.pkg);
+		latest = await fetchLatestManifest(packages.pkg, registry, timeoutMs, channel);
 	}
 
 	return {
@@ -867,6 +907,7 @@ export async function getLatestRelease(
 		version: latest.version,
 		dist: resolveReleaseDist(latest.manifest),
 		packages,
+		registry: registry.url,
 	};
 }
 
@@ -1254,7 +1295,7 @@ function printVerificationResult(result: InstalledVersionVerification, expectedV
 		return;
 	}
 	console.log(chalk.yellow(`\nWarning: ${formatVerificationFailure(result, expectedVersion)}`));
-	console.log(chalk.yellow(`You may need to reinstall: ${installerHint()}`));
+	console.log(chalk.yellow(t("cli.update.reinstall", "You may need to reinstall: {hint}", { hint: installerHint() })));
 }
 
 /** Verify the PATH-resolved launcher and print the outcome. */
@@ -1425,13 +1466,15 @@ function buildVersionedPackageInstallArgs(
 /**
  * Build the bun argv used to globally install a specific omp version.
  *
- * The version is selected by hitting {@link NPM_REGISTRY} directly in
- * {@link getLatestRelease}, so the install MUST observe the same catalog:
+ * The version is selected by querying the resolved registry in
+ * {@link getLatestRelease} ({@link ReleaseInfo.registry}), so the install
+ * MUST observe the same catalog:
  *
- * - `--registry=${NPM_REGISTRY}` pins the install to the official registry
- *   regardless of the user's bunfig/`.npmrc`. A mirror (corporate proxy,
- *   Taobao, …) that hasn't yet replicated the release would otherwise reject
- *   a version the upstream registry already advertises.
+ * - `--registry=<release registry>` pins the install to the registry the
+ *   check used. That is the user's configured feed when one is set, and
+ *   {@link DEFAULT_NPM_REGISTRY} otherwise, so a bun whose own resolution
+ *   differs (project bunfig, lagging mirror) cannot reject a version the
+ *   check already advertised.
  * - `--no-cache` tells bun to ignore its on-disk manifest snapshot so it
  *   re-fetches metadata from that registry on every invocation.
  *
@@ -1456,18 +1499,21 @@ export function buildBunInstallArgs(
 	expectedVersion: string,
 	nativeTag: string = currentNativeTag(),
 	packages: ReleasePackages = CURRENT_PACKAGES,
+	options: { registry?: string } = {},
 ): string[] {
 	return [
 		"install",
 		"-g",
 		"--no-cache",
-		`--registry=${NPM_REGISTRY}`,
+		`--registry=${options.registry ?? DEFAULT_NPM_REGISTRY}`,
 		...buildVersionedPackageInstallArgs(expectedVersion, nativeTag, packages),
 	];
 }
 
 /**
  * Build the npm argv used to update npm-managed global installs.
+ * Pins `--registry` to the checked registry for the same reason as
+ * {@link buildBunInstallArgs}.
  *
  * `force` is set only for rename migrations: npm refuses to write the `omp`
  * bin while the old package still owns it (`EEXIST`), and the migration
@@ -1478,13 +1524,13 @@ export function buildNpmInstallArgs(
 	expectedVersion: string,
 	nativeTag: string = currentNativeTag(),
 	packages: ReleasePackages = CURRENT_PACKAGES,
-	flags: { force?: boolean } = {},
+	flags: { force?: boolean; registry?: string } = {},
 ): string[] {
 	return [
 		"install",
 		"-g",
 		...(flags.force ? ["--force"] : []),
-		`--registry=${NPM_REGISTRY}`,
+		`--registry=${flags.registry ?? DEFAULT_NPM_REGISTRY}`,
 		...buildVersionedPackageInstallArgs(expectedVersion, nativeTag, packages),
 	];
 }
@@ -1554,10 +1600,15 @@ function packageManagerMigrationSteps(manager: "bun" | "npm", release: ReleaseIn
 	return {
 		async install() {
 			if (manager === "bun") {
-				const args = buildBunInstallArgs(release.version, nativeTag, release.packages);
+				const args = buildBunInstallArgs(release.version, nativeTag, release.packages, {
+					registry: release.registry,
+				});
 				return (await $`bun ${args}`.nothrow()).exitCode;
 			}
-			const args = buildNpmInstallArgs(release.version, nativeTag, release.packages, { force: true });
+			const args = buildNpmInstallArgs(release.version, nativeTag, release.packages, {
+				force: true,
+				registry: release.registry,
+			});
 			return (await $`npm ${args}`.nothrow()).exitCode;
 		},
 		async removeOld() {
@@ -1591,7 +1642,13 @@ function packageManagerMigrationSteps(manager: "bun" | "npm", release: ReleaseIn
  *    and verify again; only a repeated failure aborts, with a recovery hint.
  */
 export async function migrateRenamedInstall(release: ReleaseInfo, steps: RenameMigrationSteps): Promise<void> {
-	console.log(chalk.dim(`npm package renamed to ${release.packages.pkg}; migrating this install.`));
+	console.log(
+		chalk.dim(
+			t("cli.update.packageRenamed", "npm package renamed to {package}; migrating this install.", {
+				package: release.packages.pkg,
+			}),
+		),
+	);
 	const installExit = await steps.install();
 	if (installExit !== 0) {
 		throw new Error(
@@ -1628,12 +1685,14 @@ export async function migrateRenamedInstall(release: ReleaseInfo, steps: RenameM
  * verified and reported its own result.
  */
 async function updateViaBun(release: ReleaseInfo): Promise<InstalledVersionVerification | undefined> {
-	console.log(chalk.dim("Updating via bun..."));
+	console.log(chalk.dim(t("cli.update.updatingBun", "Updating via bun...")));
 	let verification: InstalledVersionVerification | undefined;
 	if (release.packages.pkg !== PACKAGE) {
 		await migrateRenamedInstall(release, packageManagerMigrationSteps("bun", release));
 	} else {
-		const args = buildBunInstallArgs(release.version, currentNativeTag(), release.packages);
+		const args = buildBunInstallArgs(release.version, currentNativeTag(), release.packages, {
+			registry: release.registry,
+		});
 		const result = await $`bun ${args}`.nothrow();
 		if (result.exitCode !== 0) {
 			throw new Error(`bun install failed with exit code ${result.exitCode}`);
@@ -1652,12 +1711,14 @@ async function updateViaBun(release: ReleaseInfo): Promise<InstalledVersionVerif
 }
 
 async function updateViaNpm(release: ReleaseInfo): Promise<InstalledVersionVerification | undefined> {
-	console.log(chalk.dim("Updating via npm..."));
+	console.log(chalk.dim(t("cli.update.updatingNpm", "Updating via npm...")));
 	if (release.packages.pkg !== PACKAGE) {
 		await migrateRenamedInstall(release, packageManagerMigrationSteps("npm", release));
 		return undefined;
 	}
-	const args = buildNpmInstallArgs(release.version, currentNativeTag(), release.packages);
+	const args = buildNpmInstallArgs(release.version, currentNativeTag(), release.packages, {
+		registry: release.registry,
+	});
 	const result = await $`npm ${args}`.nothrow();
 	if (result.exitCode !== 0) {
 		throw new Error(`npm install failed with exit code ${result.exitCode}`);
@@ -1847,7 +1908,7 @@ export async function updateViaBinaryAt(
 		options.githubToken,
 		options.allowPrerelease,
 	);
-	console.log(chalk.dim(`Downloading ${binaryName}…`));
+	console.log(chalk.dim(t("cli.update.downloading", "Downloading {binary}…", { binary: binaryName })));
 	await downloadVerifiedBinary({
 		url: asset.url,
 		targetPath: tempPath,
@@ -1855,14 +1916,14 @@ export async function updateViaBinaryAt(
 		expectedDigest: asset.digest,
 		fetchImpl: options.fetchImpl,
 	});
-	console.log(chalk.dim(`Verified ${asset.digest}`));
+	console.log(chalk.dim(t("cli.update.verified", "Verified {digest}", { digest: asset.digest })));
 
 	// Serialize the target swap and stale-artifact sweep per target so two
 	// overlapping `omp update` runs never replace the same binary concurrently
 	// or reclaim each other's live backup/temp files. The download above writes
 	// to a unique temp path and is safe to overlap; only the swap is shared.
 	const verification = await withFileLock(targetPath, async () => {
-		console.log(chalk.dim("Installing update..."));
+		console.log(chalk.dim(t("cli.update.installing", "Installing update...")));
 		const result = await replaceBinaryForUpdate({
 			targetPath,
 			tempPath,
@@ -1885,7 +1946,7 @@ export async function updateViaBinaryAt(
 		return result;
 	});
 	printVerifiedVersion(expectedVersion, verification.path ?? targetPath);
-	console.log(chalk.dim(`Restart ${APP_NAME} to use the new version`));
+	console.log(chalk.dim(t("cli.update.restart", "Restart {app} to use the new version", { app: APP_NAME })));
 }
 
 /**
@@ -1940,7 +2001,7 @@ export async function updateViaShimTakeover(
 		options.githubToken,
 		options.allowPrerelease,
 	);
-	console.log(chalk.dim(`Downloading ${binaryName}…`));
+	console.log(chalk.dim(t("cli.update.downloading", "Downloading {binary}…", { binary: binaryName })));
 	await downloadVerifiedBinary({
 		url: asset.url,
 		targetPath: tempPath,
@@ -1948,7 +2009,7 @@ export async function updateViaShimTakeover(
 		expectedDigest: asset.digest,
 		fetchImpl: options.fetchImpl,
 	});
-	console.log(chalk.dim(`Verified ${asset.digest}`));
+	console.log(chalk.dim(t("cli.update.verified", "Verified {digest}", { digest: asset.digest })));
 	const forwarded: Array<{ launcher: string; original: string }> = [];
 	const stuck: string[] = [];
 	// Serialize the launcher swap and artifact sweep so two overlapping updates
@@ -2023,7 +2084,7 @@ export async function updateViaShimTakeover(
 		);
 	}
 	printVerifiedVersion(expectedVersion);
-	console.log(chalk.dim(`Restart ${APP_NAME} to use the new version`));
+	console.log(chalk.dim(t("cli.update.restart", "Restart {app} to use the new version", { app: APP_NAME })));
 }
 
 /**
@@ -2042,7 +2103,7 @@ function installerHint(): string {
 /** Persisted channel, or undefined when settings are unavailable (SDK/test embedding without `Settings.init()`). */
 function readPersistedChannel(): UpdateChannel | undefined {
 	try {
-		return settings.get("update.channel");
+		return cfgUpdateChannel.get(settings);
 	} catch {
 		return undefined;
 	}
@@ -2051,7 +2112,7 @@ function readPersistedChannel(): UpdateChannel | undefined {
 /** Persist an explicit channel switch; tolerated as a no-op when settings are unavailable. */
 function persistChannel(channel: UpdateChannel): void {
 	try {
-		settings.set("update.channel", channel);
+		cfgUpdateChannel.set(settings, channel);
 	} catch {
 		// Outside a CLI host the explicit flag still applied for this run.
 	}
@@ -2065,18 +2126,20 @@ export async function runUpdateCommand(opts: {
 	check: boolean;
 	channel?: UpdateChannel;
 }): Promise<void> {
-	console.log(chalk.dim(`Current version: ${VERSION}`));
+	console.log(chalk.dim(t("cli.update.currentVersion", "Current version: {version}", { version: VERSION })));
 	const persistedChannel = readPersistedChannel() ?? "stable";
 	const channel = opts.channel ?? persistedChannel;
 	const isChannelSwitch = opts.channel !== undefined && opts.channel !== persistedChannel;
-	if (channel === "canary") console.log(chalk.dim("Current channel: canary"));
+	if (channel === "canary") console.log(chalk.dim(t("cli.update.currentChannel", "Current channel: canary")));
 
 	// Check for updates
 	let release: ReleaseInfo;
 	try {
 		release = await getLatestRelease({ channel });
 	} catch (err) {
-		console.error(chalk.red(`Failed to check for updates: ${err}`));
+		console.error(
+			chalk.red(t("cli.update.checkFailed", "Failed to check for updates: {error}", { error: String(err) })),
+		);
 		process.exit(1);
 	}
 
@@ -2084,7 +2147,7 @@ export async function runUpdateCommand(opts: {
 
 	if (comparison <= 0 && !opts.force && !isChannelSwitch) {
 		const icon = theme?.status?.success ?? "✔";
-		console.log(chalk.green(`${icon} Already up to date`));
+		console.log(chalk.green(t("cli.update.alreadyCurrent", "{icon} Already up to date", { icon })));
 		return;
 	}
 
@@ -2095,12 +2158,22 @@ export async function runUpdateCommand(opts: {
 			),
 		);
 	} else if (comparison > 0) {
-		console.log(chalk.cyan(`New version available: ${release.version}`));
+		console.log(
+			chalk.cyan(t("cli.update.newVersion", "New version available: {version}", { version: release.version })),
+		);
 	} else {
-		console.log(chalk.yellow(`Forcing reinstall of ${release.version}`));
+		console.log(
+			chalk.yellow(t("cli.update.forcing", "Forcing reinstall of {version}", { version: release.version })),
+		);
 	}
 	if (release.packages.pkg !== PACKAGE) {
-		console.log(chalk.cyan(`The npm package moved to ${release.packages.pkg}; updating migrates this install.`));
+		console.log(
+			chalk.cyan(
+				t("cli.update.packageMoved", "The npm package moved to {package}; updating migrates this install.", {
+					package: release.packages.pkg,
+				}),
+			),
+		);
 	}
 
 	if (opts.check) {
@@ -2117,12 +2190,22 @@ export async function runUpdateCommand(opts: {
 		const allowPrerelease = channel === "canary";
 		const target = await resolveUpdateTarget({ allowPackageManagers: !forceBinary });
 		if (channel === "canary" && (target.method === "nix" || target.method === "brew" || target.method === "mise")) {
-			console.log(chalk.yellow("Canary updates are only supported for bun, npm, or binary installs."));
+			console.log(
+				chalk.yellow(
+					t("cli.update.canaryUnsupported", "Canary updates are only supported for bun, npm, or binary installs."),
+				),
+			);
 			return;
 		}
 		if (target.method === "nix") {
-			console.log(chalk.yellow("This installation is managed by Nix and cannot update itself."));
-			console.log(chalk.dim("Update the flake input or profile that provides omp, then rebuild."));
+			console.log(
+				chalk.yellow(
+					t("cli.update.nixUnsupported", "This installation is managed by Nix and cannot update itself."),
+				),
+			);
+			console.log(
+				chalk.dim(t("cli.update.nixHint", "Update the flake input or profile that provides omp, then rebuild.")),
+			);
 			return;
 		} else if (target.method === "brew") {
 			await updateViaHomebrew(release.version, opts.force);
@@ -2134,7 +2217,14 @@ export async function runUpdateCommand(opts: {
 				// launcher resolved from PATH (the bun/npm bin-dir probes are
 				// skipped), so the launcher path is always known.
 				if (!target.path) throw new Error(`Could not resolve ${APP_NAME} launcher path in PATH`);
-				console.log(chalk.dim("This release ships as a standalone binary; replacing the script launcher."));
+				console.log(
+					chalk.dim(
+						t(
+							"cli.update.standaloneBinary",
+							"This release ships as a standalone binary; replacing the script launcher.",
+						),
+					),
+				);
 				await updateViaShimTakeover(target.path, release.version, { allowPrerelease });
 				console.log(
 					chalk.yellow(
@@ -2150,7 +2240,14 @@ export async function runUpdateCommand(opts: {
 			}
 		} else {
 			if (forceBinary && target.replacesSymlink) {
-				console.log(chalk.dim("Replacing the package-manager launcher with the standalone binary."));
+				console.log(
+					chalk.dim(
+						t(
+							"cli.update.replacingLauncher",
+							"Replacing the package-manager launcher with the standalone binary.",
+						),
+					),
+				);
 			}
 			await updateViaBinaryAt(target.path, release.version, {
 				allowPrerelease,
@@ -2166,7 +2263,7 @@ export async function runUpdateCommand(opts: {
 		}
 		if (opts.channel) persistChannel(channel);
 	} catch (err) {
-		console.error(chalk.red(`Update failed: ${err}`));
+		console.error(chalk.red(t("cli.update.failed", "Update failed: {error}", { error: String(err) })));
 		process.exit(1);
 	}
 }
