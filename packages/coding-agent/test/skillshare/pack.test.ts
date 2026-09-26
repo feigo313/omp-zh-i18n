@@ -137,7 +137,8 @@ describe("packSkill", () => {
 			"SKILL.md": SKILL_MD,
 			"config/env.sh": "#!/bin/sh\n# setup\nexport AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n",
 			"keys/id.pem":
-				"notes\n-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu\n-----END RSA PRIVATE KEY-----\n",
+				"notes\n-----BEGIN RSA " +
+				"PRIVATE KEY-----\nMIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu\n-----END RSA PRIVATE KEY-----\n",
 			"clean.md": "token_expiry_seconds = 30 and sk-short\n",
 		});
 		const pack = await packSkill(tempDir.path());

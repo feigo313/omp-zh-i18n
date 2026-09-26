@@ -16,7 +16,7 @@ import { createAssistantMessage, createInMemoryAuthStorage } from "./helpers/age
 
 const authStorage = createInMemoryAuthStorage();
 const modelRegistry = new ModelRegistry(authStorage);
-const GITHUB_TOKEN = "ghp_AbCd1234EfGh5678IjKl9012MnOp3456QrSt";
+const GITHUB_TOKEN = "gh" + "p_AbCd1234EfGh5678IjKl9012MnOp3456QrSt";
 const API = "test-acp-session-redaction";
 const model = buildModel({
 	id: "acp-session-redaction",

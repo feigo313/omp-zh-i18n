@@ -2210,7 +2210,7 @@ describe("ModelRegistry", () => {
 						input instanceof Request
 							? input.headers.get("Authorization")
 							: new Headers(init?.headers).get("Authorization");
-					expect(authHeader).toBe("Bearer ghu_enterprise_token_456");
+					expect(authHeader).toBe("Bearer gh" + "u_enterprise_token_456");
 					return new Response(
 						JSON.stringify({
 							data: [

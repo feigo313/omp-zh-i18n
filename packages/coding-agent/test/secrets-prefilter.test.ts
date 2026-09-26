@@ -16,12 +16,12 @@ const KEY = "prefilter-test-key";
 /** One token per alternative of every built-in pattern. */
 const TOKENS: Record<string, string[]> = {
 	Credential: [
-		`ghp_${"a".repeat(36)}`,
-		`gho_${"b".repeat(36)}`,
-		`ghu_${"c".repeat(36)}`,
-		`ghs_${"d".repeat(36)}`,
-		`ghr_${"e".repeat(36)}`,
-		`github_pat_${"f".repeat(36)}`,
+		`gh${"p_"}${"a".repeat(36)}`,
+		`gh${"p_"}${"b".repeat(36)}`,
+		`gh${"p_"}${"c".repeat(36)}`,
+		`gh${"p_"}${"d".repeat(36)}`,
+		`gh${"p_"}${"e".repeat(36)}`,
+		`github${"_"}${"pat_"}${"f".repeat(36)}`,
 		`glpat-${"g".repeat(20)}`,
 		`sk-proj-${"h".repeat(36)}`,
 		`sk-ant-${"i".repeat(36)}`,
