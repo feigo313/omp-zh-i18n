@@ -55,5 +55,5 @@
   "settings.shellMinimizer.sourceOutlineLevel.options.default.label": "默认",
   "tabs.shell.groups.Bash": "Bash",
   "tabs.shell.groups.Eval & Runtimes": "执行与运行时",
-  "tabs.shell.label": "Shell"
+  "tabs.shell.label": "终端"
 }

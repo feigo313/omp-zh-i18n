@@ -261,12 +261,19 @@ class I18nManager {
 
 	/**
 	 * 合并翻译
+	 *
+	 * An empty string never replaces a non-empty translation. A stale or
+	 * half-written override under `~/.omp/lang` otherwise silently blanks every
+	 * label it happens to name, which reads as "the whole UI lost its text"
+	 * rather than as a broken override. Bundled resources are contract-checked
+	 * to contain no empty values, so this only ever protects them.
 	 */
 	#mergeTranslations(target: TranslationFile, source: TranslationFile): void {
 		for (const [key, value] of Object.entries(source)) {
 			if (key === "meta") {
 				target.meta = value as TranslationMeta;
 			} else if (typeof value === "string") {
+				if (value === "" && typeof target[key] === "string" && target[key] !== "") continue;
 				target[key] = value;
 			} else if (typeof value === "object" && value !== null) {
 				if (!target[key] || typeof target[key] !== "object") {

@@ -254,10 +254,14 @@
   "tabs.interaction.groups.General": "通用",
   "tabs.interaction.groups.Git": "Git",
   "tabs.interaction.groups.Input": "输入",
+  "tabs.interaction.groups.Language": "语言",
   "tabs.interaction.groups.Magic Keywords": "魔法关键词",
   "tabs.interaction.groups.Notifications": "通知",
+  "tabs.interaction.groups.Power": "电源",
   "tabs.interaction.groups.Power (macOS)": "电源 (macOS)",
+  "tabs.interaction.groups.Skills": "技能",
   "tabs.interaction.groups.Speech": "语音",
   "tabs.interaction.groups.Startup & Updates": "启动与更新",
+  "tabs.interaction.groups.Stream": "流媒体",
   "tabs.interaction.label": "交互"
 }

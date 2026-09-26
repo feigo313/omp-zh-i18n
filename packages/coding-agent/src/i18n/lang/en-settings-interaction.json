@@ -254,10 +254,14 @@
   "tabs.interaction.groups.General": "General",
   "tabs.interaction.groups.Git": "Git",
   "tabs.interaction.groups.Input": "Input",
+  "tabs.interaction.groups.Language": "Language",
   "tabs.interaction.groups.Magic Keywords": "Magic Keywords",
   "tabs.interaction.groups.Notifications": "Notifications",
+  "tabs.interaction.groups.Power": "Power",
   "tabs.interaction.groups.Power (macOS)": "Power (macOS)",
+  "tabs.interaction.groups.Skills": "Skills",
   "tabs.interaction.groups.Speech": "Speech",
   "tabs.interaction.groups.Startup & Updates": "Startup & Updates",
+  "tabs.interaction.groups.Stream": "Stream",
   "tabs.interaction.label": "Interaction"
 }
