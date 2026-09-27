@@ -17,10 +17,10 @@ const KEY = "prefilter-test-key";
 const TOKENS: Record<string, string[]> = {
 	Credential: [
 		`gh${"p_"}${"a".repeat(36)}`,
-		`gh${"p_"}${"b".repeat(36)}`,
-		`gh${"p_"}${"c".repeat(36)}`,
-		`gh${"p_"}${"d".repeat(36)}`,
-		`gh${"p_"}${"e".repeat(36)}`,
+		`gh${"o_"}${"b".repeat(36)}`,
+		`gh${"u_"}${"c".repeat(36)}`,
+		`gh${"s_"}${"d".repeat(36)}`,
+		`gh${"r_"}${"e".repeat(36)}`,
 		`github${"_"}${"pat_"}${"f".repeat(36)}`,
 		`glpat-${"g".repeat(20)}`,
 		`sk-proj-${"h".repeat(36)}`,
