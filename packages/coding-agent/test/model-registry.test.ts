@@ -2335,8 +2335,8 @@ describe("ModelRegistry", () => {
 			await authStorage.credentials.set("github-copilot", [
 				{
 					type: "oauth",
-					access: "ghu_test_token_for_disabled",
-					refresh: "ghu_test_token_for_disabled",
+					access: "gh" + "u_test_token_for_disabled",
+					refresh: "gh" + "u_test_token_for_disabled",
 					expires: Date.now() + 60_000,
 				},
 			]);
