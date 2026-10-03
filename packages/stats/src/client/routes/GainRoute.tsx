@@ -1,235 +1,238 @@
 import { useMemo, useState } from "react";
-import { Line } from "react-chartjs-2";
 import { getGainDashboardStats } from "../api";
-import { buildSharedPlugins, buildSharedScales, CHART_THEMES, lineDatasetStyle } from "../components/chart-shared";
+import { Chart, type ChartSeries, Legend } from "../charts";
 import { formatBytes, formatCompact, formatInteger, formatPercent } from "../data/formatters";
-import { useResource } from "../data/useResource";
-import { useLocale, useTranslation } from "../i18n";
-import type { GainDashboardStats, GainSourceTotals, GainTimeSeriesPoint, TimeRange } from "../types";
-import { AsyncBoundary, Panel } from "../ui";
-import { useSystemTheme } from "../useSystemTheme";
+import { useQuery } from "../data/query";
+import { bucketAxis, rangeMeta } from "../data/range";
+import { densify } from "../data/series";
+import { useTranslation } from "../i18n";
+import type { GainSource, GainSourceTotals, TimeRange } from "../types";
+import {
+	Card,
+	ChartSkeleton,
+	type Column,
+	EmptyState,
+	MeterCell,
+	PageHeader,
+	QueryView,
+	Stat,
+	StatGrid,
+	Table,
+} from "../ui";
 
 export interface GainRouteProps {
 	active: boolean;
 	range: TimeRange;
-	refreshTrigger: number;
 }
 
-export function GainRoute({ active, range, refreshTrigger }: GainRouteProps) {
-	const [project, setProject] = useState<string | null>(null);
+const DAY_MS = 86_400_000;
 
-	const {
-		data: stats,
-		error,
-		loading,
-	} = useResource(["gain", range, refreshTrigger, project], signal => getGainDashboardStats(range, project, signal), {
-		pollMs: 30_000,
-		enabled: active,
-	});
+const SOURCE_LABEL: Record<GainSource, string> = { snapcompact: "Snapcompact" };
+
+/** The server buckets gain by UTC calendar day (`YYYY-MM-DD`). */
+const DAY_LABEL = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+
+interface SourceRow extends GainSourceTotals {
+	source: GainSource;
+	/** Share of all saved tokens (0-1). */
+	share: number;
+}
+
+export function GainRoute({ active, range }: GainRouteProps) {
+	const { t, locale } = useTranslation();
+	const [project, setProject] = useState<string | null>(null);
+	const gain = useQuery(["gain", range, project], () => getGainDashboardStats(range, project), { enabled: active });
+	const meta = rangeMeta(range);
+	const data = gain.data;
+
+	const series = useMemo(() => {
+		const points = (data?.timeSeries ?? []).map(p => ({ ...p, timestamp: Date.parse(`${p.date}T00:00:00Z`) }));
+		const buckets = bucketAxis(
+			range,
+			points.map(p => p.timestamp),
+			DAY_MS,
+		);
+		const daily = densify(points, buckets, p => p.snapcompact);
+		let running = 0;
+		const cumulative = daily.map(v => (running += v));
+		return { buckets, daily, cumulative };
+	}, [data, range]);
+
+	const sourceRows = useMemo((): SourceRow[] => {
+		if (!data) return [];
+		const total = data.overall.savedTokens;
+		return (Object.keys(data.bySource) as GainSource[]).map(source => ({
+			...data.bySource[source],
+			source,
+			share: total > 0 ? data.bySource[source].savedTokens / total : 0,
+		}));
+	}, [data]);
+
+	const projects = data?.projects ?? [];
+	// Keep the chosen project selectable even when the current range never saw it.
+	const projectOptions = project !== null && !projects.includes(project) ? [project, ...projects] : projects;
+	const scope = project ? t("gain.scopeFor", { project }) : "";
+
+	const chartSeries: ChartSeries[] = [
+		{ key: "daily", label: t("gain.savedPerDay"), color: "var(--chart-primary)", values: series.daily },
+		{
+			key: "cumulative",
+			label: t("gain.cumulative"),
+			color: "var(--chart-secondary)",
+			values: series.cumulative,
+			kind: "line",
+			axis: "right",
+		},
+	];
+
+	// Upstream hoists these to module scope; they live in the component so the
+	// localized headers can reach `t` without changing the table's sort contract.
+	const sourceColumns = useMemo<Column<SourceRow>[]>(
+		() => [
+			{
+				key: "source",
+				header: t("gain.bySource.title"),
+				sort: row => row.source,
+				render: row => <span className="cell-primary">{SOURCE_LABEL[row.source]}</span>,
+			},
+			{
+				key: "tokens",
+				header: t("gain.savedTokens"),
+				align: "right",
+				sort: row => row.savedTokens,
+				render: row => (
+					<span title={formatInteger(row.savedTokens)}>
+						<MeterCell value={row.share} max={1} display={formatCompact(row.savedTokens, locale)} />
+					</span>
+				),
+			},
+			{
+				key: "share",
+				header: t("providers.columns.share"),
+				align: "right",
+				sort: row => row.share,
+				render: row => <span className="num muted">{formatPercent(row.share)}</span>,
+			},
+			{
+				key: "bytes",
+				header: t("gain.savedBytes"),
+				align: "right",
+				sort: row => row.savedBytes,
+				render: row => <span className="num">{formatBytes(row.savedBytes)}</span>,
+			},
+			{
+				key: "hits",
+				header: t("gain.hits"),
+				align: "right",
+				sort: row => row.hits,
+				render: row => <span className="num">{formatInteger(row.hits)}</span>,
+			},
+			{
+				key: "reduction",
+				header: t("gain.reduction"),
+				align: "right",
+				sort: row => row.reductionPercent ?? -1,
+				render: row => (
+					<span className="num">{row.reductionPercent !== null ? formatPercent(row.reductionPercent) : "–"}</span>
+				),
+			},
+		],
+		[t, locale],
+	);
 
 	return (
-		<div className="stats-route-container space-y-6">
-			<AsyncBoundary loading={loading} error={error} data={stats}>
-				{stats && (
+		<div className="page">
+			<PageHeader
+				title={t("nav.section.gain")}
+				description={t("gain.pageDescription", { scope, window: meta.windowLabel })}
+				actions={
+					projectOptions.length > 0 && (
+						<select
+							className="input"
+							aria-label={t("gain.project")}
+							value={project ?? ""}
+							onChange={e => setProject(e.target.value || null)}
+							style={{ maxWidth: 320 }}
+						>
+							<option value="">{t("gain.allProjects")}</option>
+							{projectOptions.map(p => (
+								<option key={p} value={p}>
+									{p}
+								</option>
+							))}
+						</select>
+					)
+				}
+			/>
+
+			<QueryView
+				query={gain}
+				skeleton={<ChartSkeleton height={96} />}
+				isEmpty={stats => stats.overall.hits === 0 && stats.timeSeries.length === 0}
+				empty={
+					<Card>
+						<EmptyState
+							title={t("gain.noSavings", { scope, window: meta.windowLabel })}
+							hint={range === "all" ? t("gain.noSavingsHintAll") : t("common.hint.tryLongerRange")}
+						/>
+					</Card>
+				}
+			>
+				{({ overall }) => (
 					<>
-						<GainProjectSelector projects={stats.projects} selected={project} onChange={setProject} />
-						<GainOverallPanel overall={stats.overall} />
-						<GainBySourcePanel bySource={stats.bySource} />
-						<GainTimeSeriesPanel timeSeries={stats.timeSeries} />
+						<div data-stale={gain.stale}>
+							<StatGrid min={180}>
+								<Stat
+									label={t("gain.savedTokens")}
+									value={formatCompact(overall.savedTokens, locale)}
+									hint={formatInteger(overall.savedTokens)}
+									spark={series.daily}
+								/>
+								<Stat label={t("gain.savedBytes")} value={formatBytes(overall.savedBytes)} />
+								<Stat
+									label={t("gain.reduction")}
+									title={t("gain.title.reduction")}
+									value={overall.reductionPercent !== null ? formatPercent(overall.reductionPercent) : "–"}
+									hint={overall.reductionPercent === null ? t("gain.hint.originalUnknown") : undefined}
+								/>
+								<Stat label={t("gain.hits")} value={formatInteger(overall.hits)} />
+								<Stat
+									label={t("gain.savedPerHit")}
+									value={overall.hits > 0 ? formatCompact(overall.savedTokens / overall.hits, locale) : "–"}
+									hint={t("common.hint.tokens")}
+								/>
+							</StatGrid>
+						</div>
+
+						<Card
+							index={1}
+							title={t("gain.timeSeries.title")}
+							description={t("gain.timeSeries.subtitle")}
+							actions={<Legend items={chartSeries.map(s => ({ key: s.key, label: s.label, color: s.color }))} />}
+							stale={gain.stale}
+						>
+							<Chart
+								slots={series.buckets.length}
+								tickLabel={i => DAY_LABEL.format(series.buckets[i])}
+								series={chartSeries}
+								height={260}
+								formatTooltip={formatInteger}
+								formatRight={v => formatCompact(v, locale)}
+							/>
+						</Card>
+
+						<Card
+							index={2}
+							title={t("gain.bySource.title")}
+							description={t("gain.bySource.subtitle")}
+							flush
+							stale={gain.stale}
+						>
+							<Table rows={sourceRows} rowKey={row => row.source} columns={sourceColumns} />
+						</Card>
 					</>
 				)}
-			</AsyncBoundary>
+			</QueryView>
 		</div>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Project selector
-// ---------------------------------------------------------------------------
-
-function GainProjectSelector({
-	projects,
-	selected,
-	onChange,
-}: {
-	projects: string[];
-	selected: string | null;
-	onChange: (p: string | null) => void;
-}) {
-	const { t } = useTranslation();
-	if (projects.length === 0) return null;
-	return (
-		<div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-			<span className="stats-text-secondary" style={{ fontSize: "0.875rem", whiteSpace: "nowrap" }}>
-				{t("gain.project")}
-			</span>
-			<select
-				className="stats-select"
-				value={selected ?? ""}
-				onChange={e => onChange(e.target.value || null)}
-				style={{ maxWidth: "480px", flex: 1 }}
-			>
-				<option value="">{t("gain.allProjects")}</option>
-				{projects.map(p => (
-					<option key={p} value={p}>
-						{p}
-					</option>
-				))}
-			</select>
-		</div>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Overall metrics panel
-// ---------------------------------------------------------------------------
-
-function GainOverallPanel({ overall }: { overall: GainSourceTotals }) {
-	const { t } = useTranslation();
-	const { locale } = useLocale();
-	return (
-		<Panel title={t("gain.overall.title")} subtitle={t("gain.overall.subtitle")}>
-			<div className="stats-metric-primary-grid">
-				<div className="stats-metric-card primary">
-					<div className="stats-metric-label">{t("gain.savedTokens")}</div>
-					<div className="stats-metric-value">{formatCompact(overall.savedTokens, locale)}</div>
-				</div>
-				<div className="stats-metric-card primary">
-					<div className="stats-metric-label">{t("gain.savedBytes")}</div>
-					<div className="stats-metric-value">{formatBytes(overall.savedBytes)}</div>
-				</div>
-				<div className="stats-metric-card primary">
-					<div className="stats-metric-label">{t("gain.reduction")}</div>
-					<div className="stats-metric-value">
-						{overall.reductionPercent !== null ? formatPercent(overall.reductionPercent) : "—"}
-					</div>
-				</div>
-				<div className="stats-metric-card primary">
-					<div className="stats-metric-label">{t("gain.totalHits")}</div>
-					<div className="stats-metric-value">{formatInteger(overall.hits)}</div>
-				</div>
-			</div>
-		</Panel>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// By-source breakdown panel
-// ---------------------------------------------------------------------------
-
-function SourceCard({ title, totals }: { title: string; totals: GainSourceTotals }) {
-	const { t } = useTranslation();
-	const { locale } = useLocale();
-	return (
-		<div className="stats-metric-card secondary" style={{ flex: 1 }}>
-			<div className="stats-metric-label" style={{ fontWeight: 600, marginBottom: 8 }}>
-				{title}
-			</div>
-			<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-				<div>
-					<div className="stats-metric-label">{t("gain.savedTokens")}</div>
-					<div className="stats-metric-value" style={{ fontSize: "1rem" }}>
-						{formatCompact(totals.savedTokens, locale)}
-					</div>
-				</div>
-				<div>
-					<div className="stats-metric-label">{t("gain.savedBytes")}</div>
-					<div className="stats-metric-value" style={{ fontSize: "1rem" }}>
-						{formatBytes(totals.savedBytes)}
-					</div>
-				</div>
-				<div>
-					<div className="stats-metric-label">{t("gain.hits")}</div>
-					<div className="stats-metric-value" style={{ fontSize: "1rem" }}>
-						{formatInteger(totals.hits)}
-					</div>
-				</div>
-				<div>
-					<div className="stats-metric-label">{t("gain.reduction")}</div>
-					<div className="stats-metric-value" style={{ fontSize: "1rem" }}>
-						{totals.reductionPercent !== null ? formatPercent(totals.reductionPercent) : "—"}
-					</div>
-				</div>
-			</div>
-		</div>
-	);
-}
-
-function GainBySourcePanel({ bySource }: { bySource: GainDashboardStats["bySource"] }) {
-	const { t } = useTranslation();
-	return (
-		<Panel title={t("gain.bySource.title")} subtitle={t("gain.bySource.subtitle")}>
-			<div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-				<SourceCard title={t("gain.source.snapcompact")} totals={bySource.snapcompact} />
-			</div>
-		</Panel>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Time series chart (stacked area, daily)
-// ---------------------------------------------------------------------------
-
-const GAIN_COLORS = {
-	snapcompact: "rgb(34, 197, 94)",
-} as const;
-
-function GainTimeSeriesPanel({ timeSeries }: { timeSeries: GainTimeSeriesPoint[] }) {
-	const { t } = useTranslation();
-	const { locale } = useLocale();
-	const theme = useSystemTheme();
-	const chartTheme = CHART_THEMES[theme];
-
-	const { data, options } = useMemo(() => {
-		const labelFormatter = new Intl.DateTimeFormat(undefined, {
-			month: "short",
-			day: "numeric",
-			timeZone: "UTC",
-		});
-		const labels = timeSeries.map(p => labelFormatter.format(new Date(`${p.date}T00:00:00.000Z`)));
-		const chartData = {
-			labels,
-			datasets: [
-				{
-					label: t("gain.source.snapcompact"),
-					data: timeSeries.map(p => p.snapcompact),
-					...lineDatasetStyle(GAIN_COLORS.snapcompact),
-				},
-			],
-		};
-
-		const { sharedScaleBase, yScale } = buildSharedScales({
-			chartTheme,
-			formatY: n => formatCompact(n, locale),
-		});
-
-		const chartOptions = {
-			responsive: true,
-			maintainAspectRatio: false,
-			plugins: buildSharedPlugins({
-				chartTheme,
-				showLegend: true,
-				defaultLabel: t("gain.tokensSaved"),
-				formatValue: (n: number) => formatCompact(n, locale),
-			}),
-			scales: {
-				x: { ...sharedScaleBase, stacked: true },
-				y: { ...yScale, stacked: true },
-			},
-		};
-
-		return { data: chartData, options: chartOptions };
-	}, [timeSeries, chartTheme, t]);
-
-	return (
-		<Panel title={t("gain.timeSeries.title")} subtitle={t("gain.timeSeries.subtitle")}>
-			<div style={{ height: 240 }}>
-				{timeSeries.length === 0 ? (
-					<div className="stats-table-empty">{t("gain.noTimeSeries")}</div>
-				) : (
-					<Line data={data} options={options as Parameters<typeof Line>[0]["options"]} />
-				)}
-			</div>
-		</Panel>
 	);
 }

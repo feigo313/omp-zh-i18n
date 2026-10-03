@@ -10,10 +10,17 @@ import { tuiT } from "../i18n-host";
 import { shortenPath } from "../render/render-utils";
 import { getSelectListTheme, theme } from "../theme/theme";
 import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
+import { formatKeyHint } from "../app-keybindings";
+import { boundKeys, editorKey, editorKeys, interruptKey } from "../chrome/keybinding-hints";
 import { OverlayPanel } from "../chrome/overlay-box";
 import { TextFormField, type FormFieldTheme } from "../components/form";
 import { SelectList } from "../components/select-list";
 import { WizardStep, type WizardStepKind } from "../components/wizard-step";
+import { col, node, span, text } from "../native/describe";
+import { type DescribeContext, leafKey, type NativeChild, type NativeNode, type NativeUiEvent } from "../native/node";
+import { actionHint, hintsRow, type NativeHint } from "../native/overlay";
+import { plainText } from "../native/spans";
+import { isNativeRendering } from "../native/state";
 
 type TransportType = "stdio" | "http" | "sse";
 type AuthMethod = "none" | "oauth" | "manual";
@@ -164,6 +171,63 @@ function sanitize(text: string): string {
 	return truncateToWidth(replaceTabs(text), MAX_DISPLAY_WIDTH);
 }
 
+/** An error message for a native text node: whole (the terminal wraps it), tabs expanded, no escapes. */
+function nativeErrorText(error: unknown): string {
+	return plainText(error instanceof Error ? error.message : String(error));
+}
+
+/** Footer for text steps; the field submits on `tui.input.submit` and cancels on `tui.select.cancel`. */
+function inputHint(escapeAction: string): string {
+	return tuiT("ui.mcpAddWizard.continueBack", "[{submit} to continue, {cancel} to {escape}]", {
+		submit: editorKey("tui.input.submit"),
+		cancel: editorKey("tui.select.cancel"),
+		escape: escapeAction,
+	});
+}
+
+/** Footer for choice steps; the wizard routes navigation, Enter, and Escape itself. */
+function choiceHint(escapeAction: string): string {
+	return tuiT("ui.mcpAddWizard.navigateSelectBack", "[{nav} to navigate, {enter} to select, {esc} to {escape}]", {
+		nav: editorKeys("tui.select.up", "tui.select.down"),
+		enter: formatKeyHint("enter"),
+		esc: interruptKey(),
+		escape: escapeAction,
+	});
+}
+
+/** The `app.interrupt` key (raw Escape when unbound) as a footer hint. */
+function interruptHint(label: string): NativeHint {
+	return { keys: boundKeys("app.interrupt", ["escape"]).slice(0, 1), label };
+}
+
+/**
+ * Escape-verb labels shared by every step. The wizard routes Escape itself, so
+ * the same two actions recur in each footer; resolving them once keeps the
+ * translated wording identical across steps.
+ */
+const ESCAPE_CANCEL = tuiT("ui.mcpAddWizard.escapeCancel", "cancel");
+const ESCAPE_GO_BACK = tuiT("ui.mcpAddWizard.escapeGoBack", "go back");
+
+/** Native form of {@link choiceHint}. */
+function choiceHints(escapeAction: string): readonly (NativeHint | undefined)[] {
+	return [
+		actionHint(["tui.select.up", "tui.select.down"], "navigate"),
+		{ keys: ["enter"], label: "select" },
+		interruptHint(escapeAction),
+	];
+}
+
+/** What the native description shows for the mounted step (the ANSI view mounts a {@link WizardStep}). */
+interface NativeWizardStep {
+	readonly heading: string;
+	/** Heading colour token. */
+	readonly tone: string;
+	/** Nodes, and a text step's `Input`, between the heading and the choices. */
+	readonly body: readonly NativeChild[];
+	readonly choices?: readonly WizardChoiceOption[];
+	readonly hints: readonly (NativeHint | undefined)[];
+}
+
 const mcpFormTheme: FormFieldTheme = {
 	label: text => text,
 	description: text => theme.fg("muted", text),
@@ -212,6 +276,11 @@ export class MCPAddWizard extends OverlayPanel {
 	#validationError: string | null = null;
 	#oauthErrorLines: readonly string[] | null = null;
 	#oauthErrorHeading: { text: string; tone: "error" | "muted" } | null = null;
+	/** Native form of {@link #oauthErrorLines}: the full error and its tip. */
+	#oauthErrorNative: readonly NativeNode[] = [];
+	#nativeStep: NativeWizardStep = { heading: "", tone: "accent", body: [], hints: [] };
+	/** Memoized native description; dropped whenever a step mounts or its body changes. */
+	#native: NativeNode | undefined;
 	#onCompleteCallback: (name: string, config: MCPAddWizardConfig, scope: Scope) => void;
 	#onCancelCallback: () => void;
 	#onOAuthCallback:
@@ -249,7 +318,7 @@ export class MCPAddWizard extends OverlayPanel {
 		onRender?: () => void,
 		initialName?: string,
 	) {
-		super(tuiT("ui.mcpAddWizard.addServer", "Add MCP Server"));
+		super(tuiT("ui.mcpAddWizard.addServer", "Add MCP Server"), "omp.overlay.mcpAdd");
 		this.#deps = deps;
 		this.#onCompleteCallback = onComplete;
 		this.#onCancelCallback = onCancel;
@@ -278,23 +347,42 @@ export class MCPAddWizard extends OverlayPanel {
 	}
 
 	/** Mount a step as the wizard body. Overlay chrome is unbounded, so no height budget applies. */
-	#show(step: WizardStep): void {
+	#show(step: WizardStep, native: NativeWizardStep): void {
 		step.setMaxHeight(undefined);
 		this.#step = step;
 		this.#contentContainer.clear();
 		this.#contentContainer.addChild(step);
+		this.#nativeStep = native;
+		this.#native = undefined;
 	}
 
+	/** Replace the mounted step's native body (async steps update in place). */
+	#setNativeBody(body: readonly NativeChild[]): void {
+		this.#nativeStep = { ...this.#nativeStep, body };
+		this.#native = undefined;
+	}
+
+	/**
+	 * `note` is a constraint shown above the key hint; `escape` names what
+	 * Escape does (`undefined`: an optional step whose only hint is skipping).
+	 */
 	#inputStep(options: {
 		heading: string;
 		prompt: string;
 		initial: string;
-		hint: string;
+		note?: string;
+		escape?: string;
 		details?: readonly string[];
 		optional: boolean;
 		error?: string | null;
 	}): void {
 		this.#stepKind = "input";
+		const keyHint =
+			options.escape === undefined
+				? tuiT("ui.mcpAddWizard.skipOrContinue", "[Press {submit} to skip or continue]", {
+						submit: editorKey("tui.input.submit"),
+					})
+				: inputHint(options.escape);
 		const field = new TextFormField({
 			theme: mcpFormTheme,
 			label: options.prompt,
@@ -302,7 +390,7 @@ export class MCPAddWizard extends OverlayPanel {
 			summary: options.error
 				? [new Text(theme.fg("error", `✗ ${sanitize(options.error)}`), 0, 0), new Spacer(1)]
 				: undefined,
-			hint: options.hint,
+			hint: options.note ? `[${options.note}]\n${keyHint}` : keyHint,
 			initialValue: options.initial,
 			empty: options.optional ? "submit" : "reject",
 			emptyError: " ",
@@ -310,21 +398,39 @@ export class MCPAddWizard extends OverlayPanel {
 			onCancel: () => this.#cancelInputStep(),
 		});
 		this.#inputField = field;
+		const body: NativeChild[] = [text(options.prompt, { wrap: "word" })];
+		for (const detail of options.details ?? []) body.push(text([span(detail, "muted")], { wrap: "word" }));
+		body.push(field.input);
+		if (options.error) {
+			body.push(text([span(`✗ ${plainText(options.error)}`, "error")], { wrap: "word" }));
+		}
+		if (options.note) body.push(text([span(options.note, "muted")], { wrap: "word" }));
 		this.#show(
 			new WizardStep({
 				kind: "input",
 				heading: new Text(theme.fg("accent", options.heading), 0, 0),
 				content: field,
 			}),
+			{
+				heading: options.heading,
+				tone: "accent",
+				body,
+				hints:
+					options.escape === undefined
+						? [actionHint("tui.input.submit", "skip or continue")]
+						: [actionHint("tui.input.submit", "continue"), actionHint("tui.select.cancel", options.escape)],
+			},
 		);
 	}
 
+	/** `escape` names what Escape does; `nativeIntro` is `intro`'s native description. */
 	#choiceStep(options: {
 		heading: string;
 		headingTone?: "accent" | "error" | "muted";
 		intro?: Component;
+		nativeIntro?: readonly NativeChild[];
 		choices: readonly WizardChoiceOption[];
-		hint: string;
+		escape: string;
 		kind?: WizardStepKind;
 	}): void {
 		const tone = options.headingTone ?? "accent";
@@ -353,16 +459,26 @@ export class MCPAddWizard extends OverlayPanel {
 				heading: new Text(theme.fg(tone, options.heading), 0, 0),
 				intro: options.intro,
 				content: list,
-				footer: new Text(theme.fg("muted", options.hint), 0, 0),
+				footer: new Text(theme.fg("muted", choiceHint(options.escape)), 0, 0),
 			}),
+			{
+				heading: options.heading,
+				tone,
+				body: options.nativeIntro ?? [],
+				choices: options.choices,
+				hints: choiceHints(options.escape),
+			},
 		);
 	}
 
+	/** `nativeBody` describes `body`; `escapeHint` is the native form of `footer`. */
 	#asyncStep(
 		heading: string,
 		headingTone: "accent" | "success" | "warning" | "error" | "muted",
 		body: Component,
+		nativeBody: readonly NativeChild[],
 		footer?: Component,
+		escapeHint?: NativeHint,
 	): void {
 		this.#stepKind = "async";
 		this.#inputField = null;
@@ -373,7 +489,51 @@ export class MCPAddWizard extends OverlayPanel {
 				content: body,
 				footer,
 			}),
+			{ heading, tone: headingTone, body: nativeBody, hints: escapeHint ? [escapeHint] : [] },
 		);
+	}
+
+	override describe(_cx: DescribeContext): NativeNode {
+		if (this.#native) return this.#native;
+		const step = this.#nativeStep;
+		const children: NativeChild[] = [
+			text([span(step.heading, `${step.tone} strong`)], { wrap: "word" }),
+			...step.body,
+		];
+		if (step.choices) {
+			const items = step.choices.map((choice, index) =>
+				node(
+					"item",
+					{ label: choice.label, ...(choice.description ? { detail: choice.description } : {}) },
+					undefined,
+					String(index),
+				),
+			);
+			// Keyed per step: a double-click's trailing event never lands on the next step's list.
+			children.push(node("list", { selected: String(this.#selectedIndex) }, items, `choices-${this.#currentStep}`));
+		}
+		children.push(hintsRow(step.hints));
+		// The wizard replaces the editor in the dock; its sheet hoists into the terminal's layer.
+		const sheet = node(
+			"overlay",
+			{ role: this.nativeRole, head: "Add MCP server", anchor: "center", size: "md", modal: true },
+			[col(children, { gap: "md" })],
+			"sheet",
+		);
+		this.#native = col([sheet]);
+		return this.#native;
+	}
+
+	/** A click on a choice is Enter on it, exactly as highlighting it with the arrows and pressing Enter. */
+	handleNativeEvent(event: NativeUiEvent): void {
+		if (event.type !== "select" && event.type !== "activate") return;
+		if (leafKey(event.key) !== `choices-${this.#currentStep}`) return;
+		if (this.#inputField || this.#stepKind === "async" || this.#oauthAbort) return;
+		const index = Number(event.item);
+		if (!Number.isInteger(index) || index < 0 || index > this.#getMaxIndexForCurrentStep()) return;
+		this.#selectedIndex = index;
+		this.#selectCurrentOption();
+		this.#requestRender();
 	}
 
 	#cancelInputStep(): void {
@@ -452,10 +612,8 @@ export class MCPAddWizard extends OverlayPanel {
 			heading: tuiT("ui.mcpAddWizard.serverNameStep", "Step 1: Server Name"),
 			prompt: tuiT("ui.mcpAddWizard.serverNamePrompt", "Enter a unique name for this server:"),
 			initial: this.#state.name,
-			hint: tuiT(
-				"ui.mcpAddWizard.nameHint",
-				"[Only letters, numbers, dash, underscore, dot, colon]\n[Enter to continue, Esc to cancel]",
-			),
+			note: tuiT("ui.mcpAddWizard.noteNameChars", "Only letters, numbers, dash, underscore, dot, colon"),
+			escape: ESCAPE_CANCEL,
 			optional: false,
 			error: this.#validationError,
 		});
@@ -465,6 +623,7 @@ export class MCPAddWizard extends OverlayPanel {
 		this.#choiceStep({
 			heading: tuiT("ui.mcpAddWizard.transportStep", "Step 2: Transport Type"),
 			intro: new Text(tuiT("ui.mcpAddWizard.selectTransport", "Select the transport type:"), 0, 0),
+			nativeIntro: [text(tuiT("ui.mcpAddWizard.selectTransport", "Select the transport type:"))],
 			choices: [
 				{
 					label: tuiT("ui.mcpAddWizard.stdioLocalProcess", "stdio (Local process)"),
@@ -474,7 +633,7 @@ export class MCPAddWizard extends OverlayPanel {
 					label: tuiT("ui.mcpAddWizard.sseServersentEvents", "sse (Server-Sent Events)"),
 				},
 			],
-			hint: tuiT("ui.mcpAddWizard.navigateSelectCancel", "[↑↓ to navigate, Enter to select, Esc to cancel]"),
+			escape: ESCAPE_CANCEL,
 		});
 	}
 
@@ -483,7 +642,7 @@ export class MCPAddWizard extends OverlayPanel {
 			heading: tuiT("ui.mcpAddWizard.commandStep", "Step 3: Command"),
 			prompt: tuiT("ui.mcpAddWizard.commandPrompt", "Enter the command to run:"),
 			initial: this.#state.command,
-			hint: tuiT("ui.mcpAddWizard.continueBack", "[Enter to continue, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 			optional: false,
 		});
 	}
@@ -493,7 +652,6 @@ export class MCPAddWizard extends OverlayPanel {
 			heading: tuiT("ui.mcpAddWizard.argumentsStep", "Step 4: Arguments (Optional)"),
 			prompt: tuiT("ui.mcpAddWizard.argumentsPrompt", "Enter command arguments (space-separated):"),
 			initial: this.#state.args,
-			hint: tuiT("ui.mcpAddWizard.skipOrContinue", "[Press Enter to skip or continue]"),
 			optional: true,
 		});
 	}
@@ -503,10 +661,8 @@ export class MCPAddWizard extends OverlayPanel {
 			heading: tuiT("ui.mcpAddWizard.serverUrlStep", "Step 3: Server URL"),
 			prompt: tuiT("ui.mcpAddWizard.serverUrlPrompt", "Enter the server URL:"),
 			initial: this.#state.url,
-			hint: tuiT(
-				"ui.mcpAddWizard.urlHint",
-				"[Must start with http:// or https://]\n[Enter to continue, Esc to go back]",
-			),
+			note: tuiT("ui.mcpAddWizard.noteUrlScheme", "Must start with http:// or https://"),
+			escape: ESCAPE_GO_BACK,
 			optional: false,
 			error: this.#validationError,
 		});
@@ -516,12 +672,10 @@ export class MCPAddWizard extends OverlayPanel {
 		this.#choiceStep({
 			heading: tuiT("ui.mcpAddWizard.provideKey", "Step: How to provide the key?"),
 			choices: [
-				{
-					label: tuiT("ui.mcpAddWizard.environmentVariable", "Environment variable"),
-				},
+				{ label: tuiT("ui.mcpAddWizard.environmentVariable", "Environment variable") },
 				{ label: tuiT("ui.mcpAddWizard.httpHeader", "HTTP header") },
 			],
-			hint: tuiT("ui.mcpAddWizard.navigateSelectBack", "[↑↓ to navigate, Enter to select, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 		});
 	}
 
@@ -530,7 +684,7 @@ export class MCPAddWizard extends OverlayPanel {
 			heading: tuiT("ui.mcpAddWizard.environmentVariableName", "Step: Environment Variable Name"),
 			prompt: tuiT("ui.mcpAddWizard.environmentVariablePrompt", "Enter the environment variable name:"),
 			initial: this.#state.envVarName,
-			hint: tuiT("ui.mcpAddWizard.continueBack", "[Enter to continue, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 			optional: false,
 		});
 	}
@@ -540,7 +694,7 @@ export class MCPAddWizard extends OverlayPanel {
 			heading: tuiT("ui.mcpAddWizard.httpHeaderName", "Step: HTTP Header Name"),
 			prompt: tuiT("ui.mcpAddWizard.httpHeaderPrompt", "Enter the HTTP header name:"),
 			initial: this.#state.headerName,
-			hint: tuiT("ui.mcpAddWizard.continueBack", "[Enter to continue, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 			optional: false,
 		});
 	}
@@ -561,54 +715,55 @@ export class MCPAddWizard extends OverlayPanel {
 					}),
 				},
 			],
-			hint: tuiT("ui.mcpAddWizard.navigateSelectBack", "[↑↓ to navigate, Enter to select, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 		});
 	}
 
 	#renderConfirmStep(): void {
-		const summary = new Container();
-		summary.addChild(
-			new Text(`${tuiT("ui.mcpAddWizard.summaryName", "Name:")} ${theme.fg("accent", this.#state.name)}`, 0, 0),
-		);
-		summary.addChild(new Text(`${tuiT("ui.mcpAddWizard.summaryType", "Type:")} ${this.#state.transport}`, 0, 0));
+		// `ansi` overrides the value in the ANSI summary (the native `kv` styles and fits values itself).
+		const nameKey = tuiT("ui.mcpAddWizard.summaryName", "Name");
+		const entries: { k: string; v: string; ansi?: string }[] = [
+			{ k: nameKey, v: this.#state.name, ansi: theme.fg("accent", this.#state.name) },
+			{ k: tuiT("ui.mcpAddWizard.summaryType", "Type"), v: `${this.#state.transport}` },
+		];
 
 		if (this.#state.transport === "stdio") {
-			summary.addChild(
-				new Text(`${tuiT("ui.mcpAddWizard.summaryCommand", "Command:")} ${this.#state.command}`, 0, 0),
-			);
+			entries.push({ k: tuiT("ui.mcpAddWizard.summaryCommand", "Command"), v: this.#state.command });
 			if (this.#state.args) {
-				summary.addChild(new Text(`${tuiT("ui.mcpAddWizard.summaryArgs", "Args:")} ${this.#state.args}`, 0, 0));
+				entries.push({ k: tuiT("ui.mcpAddWizard.summaryArgs", "Args"), v: this.#state.args });
 			}
 		} else {
-			summary.addChild(new Text(`${tuiT("ui.mcpAddWizard.summaryUrl", "URL:")} ${sanitize(this.#state.url)}`, 0, 0));
+			entries.push({
+				k: tuiT("ui.mcpAddWizard.summaryUrl", "URL"),
+				v: replaceTabs(this.#state.url),
+				ansi: sanitize(this.#state.url),
+			});
 		}
 
 		// Auth info
 		if (this.#state.authMethod === "none") {
-			summary.addChild(new Text(tuiT("ui.mcpAddWizard.summaryAuthNone", "Auth: None"), 0, 0));
+			entries.push({
+				k: tuiT("ui.mcpAddWizard.summaryAuth", "Auth"),
+				v: tuiT("ui.mcpAddWizard.summaryAuthNone", "None"),
+			});
 		} else if (this.#state.authMethod === "oauth") {
-			summary.addChild(new Text(tuiT("ui.mcpAddWizard.summaryAuthOauth", "Auth: OAuth (authenticated)"), 0, 0));
+			entries.push({
+				k: tuiT("ui.mcpAddWizard.summaryAuth", "Auth"),
+				v: tuiT("ui.mcpAddWizard.summaryAuthOauth", "OAuth (authenticated)"),
+			});
 		} else if (this.#state.authMethod === "manual") {
 			if (this.#state.authLocation === "env") {
-				summary.addChild(
-					new Text(
-						tuiT("ui.mcpAddWizard.summaryAuthEnv", "Auth: API key via env ({name})", {
-							name: this.#state.envVarName,
-						}),
-						0,
-						0,
-					),
-				);
+				entries.push({
+					k: tuiT("ui.mcpAddWizard.summaryAuth", "Auth"),
+					v: tuiT("ui.mcpAddWizard.summaryAuthEnv", "API key via env ({name})", { name: this.#state.envVarName }),
+				});
 			} else {
-				summary.addChild(
-					new Text(
-						tuiT("ui.mcpAddWizard.summaryAuthHeader", "Auth: API key via header ({name})", {
-							name: this.#state.headerName,
-						}),
-						0,
-						0,
-					),
-				);
+				entries.push({
+					k: tuiT("ui.mcpAddWizard.summaryAuth", "Auth"),
+					v: tuiT("ui.mcpAddWizard.summaryAuthHeader", "API key via header ({name})", {
+						name: this.#state.headerName,
+					}),
+				});
 			}
 		}
 
@@ -616,15 +771,26 @@ export class MCPAddWizard extends OverlayPanel {
 			this.#state.scope === "user"
 				? tuiT("ui.mcpAddWizard.userLevel", "User level")
 				: tuiT("ui.mcpAddWizard.projectLevel", "Project level");
-		summary.addChild(new Text(`${tuiT("ui.mcpAddWizard.summaryScope", "Scope:")} ${scopeLabel}`, 0, 0));
+		entries.push({ k: tuiT("ui.mcpAddWizard.summaryScope", "Scope"), v: scopeLabel });
+
+		const summary = new Container();
+		for (const entry of entries) summary.addChild(new Text(`${entry.k}: ${entry.ansi ?? entry.v}`, 0, 0));
 		summary.addChild(new Spacer(1));
 		summary.addChild(new Text(tuiT("ui.mcpAddWizard.saveConfiguration", "Save this configuration?"), 0, 0));
+		const items = entries.map(entry => ({
+			k: entry.k,
+			v: entry.k === nameKey ? [span(entry.v, "accent")] : entry.v,
+		}));
 
 		this.#choiceStep({
 			heading: tuiT("ui.mcpAddWizard.reviewConfiguration", "Review Configuration"),
 			intro: summary,
+			nativeIntro: [
+				node("kv", { items }, undefined, "summary"),
+				text(tuiT("ui.mcpAddWizard.saveConfiguration", "Save this configuration?")),
+			],
 			choices: [{ label: tuiT("ui.yes", "Yes") }, { label: tuiT("ui.no", "No") }],
-			hint: tuiT("ui.mcpAddWizard.navigateSelectBack", "[↑↓ to navigate, Enter to select, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 			kind: "confirm",
 		});
 	}
@@ -985,7 +1151,7 @@ export class MCPAddWizard extends OverlayPanel {
 					description: tuiT("ui.pasteOrShellCmd", "(paste or use shell command)"),
 				},
 			],
-			hint: tuiT("ui.mcpAddWizard.navigateSelectBack", "[↑↓ to navigate, Enter to select, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 		});
 	}
 
@@ -995,7 +1161,7 @@ export class MCPAddWizard extends OverlayPanel {
 			prompt: tuiT("ui.mcpAddWizard.authorizationUrlPrompt", "Enter the OAuth authorization endpoint:"),
 			initial: this.#state.oauthAuthUrl,
 			details: ["e.g., https://auth.example.com/oauth/authorize"],
-			hint: tuiT("ui.mcpAddWizard.continueBack", "[Enter to continue, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 			optional: false,
 		});
 	}
@@ -1006,7 +1172,7 @@ export class MCPAddWizard extends OverlayPanel {
 			prompt: tuiT("ui.mcpAddWizard.tokenUrlPrompt", "Enter the OAuth token endpoint:"),
 			initial: this.#state.oauthTokenUrl,
 			details: ["e.g., https://auth.example.com/oauth/token"],
-			hint: tuiT("ui.mcpAddWizard.continueBack", "[Enter to continue, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 			optional: false,
 		});
 	}
@@ -1016,7 +1182,7 @@ export class MCPAddWizard extends OverlayPanel {
 			heading: tuiT("ui.mcpAddWizard.clientId", "OAuth: Client ID"),
 			prompt: tuiT("ui.mcpAddWizard.clientIdPrompt", "Enter your OAuth client ID:"),
 			initial: this.#state.oauthClientId,
-			hint: tuiT("ui.mcpAddWizard.continueBack", "[Enter to continue, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 			optional: false,
 		});
 	}
@@ -1027,7 +1193,7 @@ export class MCPAddWizard extends OverlayPanel {
 			prompt: tuiT("ui.mcpAddWizard.clientSecretPrompt", "Enter your OAuth client secret:"),
 			initial: this.#state.oauthClientSecret,
 			details: [tuiT("ui.mcpAddWizard.pkceOnly", "(Leave empty for PKCE-only flows)")],
-			hint: tuiT("ui.mcpAddWizard.continueBack", "[Enter to continue, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 			optional: true,
 		});
 	}
@@ -1038,7 +1204,7 @@ export class MCPAddWizard extends OverlayPanel {
 			prompt: tuiT("ui.mcpAddWizard.scopesPrompt", "Enter OAuth scopes (space-separated):"),
 			initial: this.#state.oauthScopes,
 			details: ["e.g., read write"],
-			hint: tuiT("ui.mcpAddWizard.continueBack", "[Enter to continue, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 			optional: true,
 		});
 	}
@@ -1057,15 +1223,12 @@ export class MCPAddWizard extends OverlayPanel {
 				tuiT("ui.mcpAddWizard.oauthAuthenticationFailed", "OAuth authentication failed"),
 			headingTone: this.#oauthErrorHeading?.tone ?? "error",
 			intro,
+			nativeIntro: [...this.#oauthErrorNative, text("Choose next action:")],
 			choices: [
-				{
-					label: tuiT("ui.mcpAddWizard.retryOauth", "Retry OAuth authentication"),
-				},
-				{
-					label: tuiT("ui.mcpAddWizard.editOauthSettings", "Edit OAuth settings"),
-				},
+				{ label: tuiT("ui.mcpAddWizard.retryOauth", "Retry OAuth authentication") },
+				{ label: tuiT("ui.mcpAddWizard.editOauthSettings", "Edit OAuth settings") },
 			],
-			hint: tuiT("ui.mcpAddWizard.navigateSelectBack", "[↑↓ to navigate, Enter to select, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 		});
 	}
 
@@ -1075,7 +1238,7 @@ export class MCPAddWizard extends OverlayPanel {
 			prompt: tuiT("ui.mcpAddWizard.apiKeyPrompt", "Enter your API key or token:"),
 			initial: this.#state.apiKey,
 			details: [tuiT("ui.mcpAddWizard.passwordManagerCommand", "(Supports !command for password manager)")],
-			hint: tuiT("ui.mcpAddWizard.continueBack", "[Enter to continue, Esc to go back]"),
+			escape: ESCAPE_GO_BACK,
 			optional: false,
 		});
 	}
@@ -1105,6 +1268,7 @@ export class MCPAddWizard extends OverlayPanel {
 				tuiT("ui.mcpAddWizard.connectionSuccessful", "✓ Connection successful!"),
 				"success",
 				successBody,
+				[text(tuiT("ui.mcpAddWizard.noAuthRequired", "No authentication required"))],
 			);
 
 			setTimeout(() => {
@@ -1159,7 +1323,9 @@ export class MCPAddWizard extends OverlayPanel {
 							0,
 						),
 					);
-					this.#asyncStep(tuiT("ui.mcpAddWizard.oauthDetected", "✓ OAuth detected"), "success", oauthBody);
+					this.#asyncStep(tuiT("ui.mcpAddWizard.oauthDetected", "✓ OAuth detected"), "success", oauthBody, [
+						text(tuiT("ui.mcpAddWizard.launchingAuthorization", "Launching browser for authorization...")),
+					]);
 
 					void this.#launchOAuthFlow();
 					return;
@@ -1177,7 +1343,10 @@ export class MCPAddWizard extends OverlayPanel {
 				failureBody.addChild(
 					new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.addingAnyway", "Adding server anyway...")), 0, 0),
 				);
-				this.#asyncStep(tuiT("ui.mcpAddWizard.connectionFailed", "✗ Connection failed"), "error", failureBody);
+				this.#asyncStep(tuiT("ui.mcpAddWizard.connectionFailed", "✗ Connection failed"), "error", failureBody, [
+					text(nativeErrorText(error), { wrap: "word" }),
+					text([span(tuiT("ui.mcpAddWizard.addingAnyway", "Adding server anyway..."), "muted")]),
+				]);
 
 				setTimeout(() => {
 					this.#state.authMethod = "none";
@@ -1285,6 +1454,17 @@ export class MCPAddWizard extends OverlayPanel {
 				tuiT("ui.mcpAddWizard.oauthUnavailable", "OAuth flow not available"),
 				"error",
 				unavailableBody,
+				[
+					text(
+						tuiT(
+							"ui.mcpAddWizard.oauthHandlerUnavailable",
+							"OAuth login cannot start without a host OAuth handler.",
+						),
+						{
+							wrap: "word",
+						},
+					),
+				],
 			);
 			this.#requestRender();
 			return;
@@ -1300,7 +1480,16 @@ export class MCPAddWizard extends OverlayPanel {
 				tuiT("ui.mcpAddWizard.oauthIncomplete", "OAuth configuration incomplete"),
 				"error",
 				incompleteBody,
-				new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.pressEscBack", "[Press Esc to go back]")), 0, 0),
+				[text("Authorization and Token URLs are required.")],
+				new Text(
+					theme.fg(
+						"muted",
+						tuiT("ui.mcpAddWizard.pressEscBack", "[Press {esc} to go back]", { esc: interruptKey() }),
+					),
+					0,
+					0,
+				),
+				interruptHint("go back"),
 			);
 			this.#requestRender();
 			return;
@@ -1327,7 +1516,20 @@ export class MCPAddWizard extends OverlayPanel {
 			tuiT("ui.mcpAddWizard.oauthAuthentication", "OAuth Authentication"),
 			"accent",
 			authBody,
-			new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.pressEscCancel", "(Press Esc to cancel)")), 0, 0),
+			[
+				text(tuiT("ui.mcpAddWizard.launchingOauth", "Launching OAuth flow...")),
+				text([span("Browser will open automatically.", "muted")]),
+				text([span("If browser doesn't open, copy the URL from chat.", "warning")], { wrap: "word" }),
+			],
+			new Text(
+				theme.fg(
+					"muted",
+					tuiT("ui.mcpAddWizard.pressEscCancel", "(Press {esc} to cancel)", { esc: interruptKey() }),
+				),
+				0,
+				0,
+			),
+			interruptHint("cancel"),
 		);
 		this.#requestRender();
 
@@ -1380,29 +1582,35 @@ export class MCPAddWizard extends OverlayPanel {
 				0,
 			);
 			healthBody.addChild(healthText);
+			const healthIntro = text([span("Running connection health check...", "muted")]);
 			this.#asyncStep(
 				tuiT("ui.mcpAddWizard.authenticationSuccessful", "✓ Authentication successful!"),
 				"success",
 				healthBody,
+				[
+					healthIntro,
+					node("spinner", { label: [span("Checking server connection...", "muted")] }, undefined, "health"),
+				],
 			);
 
+			// The frame ticker only repaints; a native terminal animates the described spinner itself.
 			let spinnerIndex = 0;
-			const spinner = setInterval(() => {
-				healthText.setText(
-					theme.fg(
-						"muted",
-						`${spinnerFrames[spinnerIndex % spinnerFrames.length]} ${tuiT(
-							"ui.mcpAddWizard.checkingConnection",
-							"Checking server connection...",
-						)}`,
-					),
-				);
-				spinnerIndex++;
-				this.#requestRender();
-			}, 80);
+			const spinner = isNativeRendering()
+				? undefined
+				: setInterval(() => {
+						healthText.setText(
+							theme.fg(
+								"muted",
+								`${spinnerFrames[spinnerIndex % spinnerFrames.length]} Checking server connection...`,
+							),
+						);
+						spinnerIndex++;
+						this.#requestRender();
+					}, 80);
 
 			let healthPassed = true;
 			let healthError = "";
+			let nativeHealthError = "";
 			if (this.#onTestConnectionCallback) {
 				try {
 					const { promise: timeoutPromise, reject: timeoutReject } = Promise.withResolvers<never>();
@@ -1421,12 +1629,17 @@ export class MCPAddWizard extends OverlayPanel {
 				} catch (error) {
 					healthPassed = false;
 					healthError = sanitize(error instanceof Error ? error.message : String(error));
+					nativeHealthError = nativeErrorText(error);
 				}
 			}
 
 			clearInterval(spinner);
 			if (healthPassed) {
 				healthText.setText(theme.fg("success", tuiT("ui.mcpAddWizard.healthCheckPassed", "✓ Health check passed")));
+				this.#setNativeBody([
+					healthIntro,
+					text([span(tuiT("ui.mcpAddWizard.healthCheckPassed", "✓ Health check passed"), "success")]),
+				]);
 			} else {
 				healthText.setText(
 					theme.fg(
@@ -1436,6 +1649,11 @@ export class MCPAddWizard extends OverlayPanel {
 				);
 				healthBody.addChild(new Spacer(1));
 				healthBody.addChild(new Text(theme.fg("muted", healthError), 0, 0));
+				this.#setNativeBody([
+					healthIntro,
+					text([span("⚠ Health check failed (will still save config)", "warning")]),
+					text([span(nativeHealthError, "muted")], { wrap: "word" }),
+				]);
 			}
 			this.#requestRender();
 
@@ -1455,33 +1673,23 @@ export class MCPAddWizard extends OverlayPanel {
 			// stay meaningful. Name-matching avoids importing controller types.
 			const cancelled = error instanceof Error && error.name === "MCPOAuthCancelledError";
 			const errorMsg = sanitize(error instanceof Error ? error.message : String(error));
-			const tipLines: string[] = [errorMsg];
+			let tip: string | undefined;
 			if (cancelled) {
-				tipLines.push(
-					theme.fg("muted", tuiT("ui.mcpAddWizard.retryTip", "Tip: Choose Retry to launch the browser again.")),
-				);
+				tip = tuiT("ui.mcpAddWizard.retryTip", "Tip: Choose Retry to launch the browser again.");
 			} else if (errorMsg.includes("timeout") || errorMsg.includes("timed out")) {
-				tipLines.push(
-					theme.fg(
-						"muted",
-						tuiT("ui.mcpAddWizard.authorizeFasterTip", "Tip: Complete authorization faster next time"),
-					),
-				);
+				tip = tuiT("ui.mcpAddWizard.authorizeFasterTip", "Tip: Complete authorization faster next time");
 			} else if (errorMsg.includes("Invalid OAuth URLs")) {
-				tipLines.push(
-					theme.fg(
-						"muted",
-						tuiT("ui.mcpAddWizard.checkOauthUrlsTip", "Tip: Check that the OAuth URLs are correct"),
-					),
-				);
+				tip = tuiT("ui.mcpAddWizard.checkOauthUrlsTip", "Tip: Check that the OAuth URLs are correct");
 			} else if (errorMsg.includes("ECONNREFUSED")) {
-				tipLines.push(
-					theme.fg(
-						"muted",
-						tuiT("ui.mcpAddWizard.oauthAccessibleTip", "Tip: Verify the OAuth server is accessible"),
-					),
-				);
+				tip = tuiT("ui.mcpAddWizard.oauthAccessibleTip", "Tip: Verify the OAuth server is accessible");
 			}
+			const tipLines: string[] = [errorMsg];
+			const nativeLines = [text(nativeErrorText(error), { wrap: "word" })];
+			if (tip) {
+				tipLines.push(theme.fg("muted", tip));
+				nativeLines.push(text([span(tip, "muted")], { wrap: "word" }));
+			}
+			this.#oauthErrorNative = nativeLines;
 
 			// Set up as a selector step
 			this.#selectedIndex = 0;

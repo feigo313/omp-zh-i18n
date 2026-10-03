@@ -14,6 +14,7 @@ const PREFERENCE_ICON: Record<ThemePreference, LucideIcon> = {
 	dark: Moon,
 };
 
+/** Cycles system → light → dark. */
 export function ThemeToggle() {
 	const { t } = useTranslation();
 	const { preference, setPreference } = useThemePreference();
@@ -26,12 +27,14 @@ export function ThemeToggle() {
 	return (
 		<button
 			type="button"
-			className="stats-theme-toggle"
+			className="btn"
+			data-variant="ghost"
+			data-icon="true"
 			onClick={() => setPreference(nextPreference)}
 			aria-label={t("theme.switchHint", { theme: nextLabel })}
 			title={t("theme.switchHint", { theme: nextLabel })}
 		>
-			<Icon size={16} />
+			<Icon size={15} />
 		</button>
 	);
 }

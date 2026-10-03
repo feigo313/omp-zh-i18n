@@ -1,13 +1,23 @@
+import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
+import type { TspSpan } from "@oh-my-pi/pi-wire";
+import { formatDoubleTap, formatKeyHint, formatKeyHints, type KeyName } from "../app-keybindings";
+import { editorKey } from "../chrome/keybinding-hints";
+import { getKeybindings, type Keybinding } from "../keybindings";
+import { card, col, kbd, keyed, node, row, span, text } from "../native/describe";
+import type { DescribeContext, NativeChild, NativeNode, NativeUiEvent } from "../native/node";
+import { runTranscriptAction } from "../chat/transcript-actions";
+import { plainLine } from "../native/spans";
+import { isNativeRendering } from "../native/state";
 import { TERMINAL } from "../terminal-capabilities";
+import { theme } from "../theme/theme";
 import type { Component } from "../tui";
 import { padding, replaceTabs, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils";
-import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
-import { theme } from "../theme/theme";
 import { tuiLanguage, tuiT } from "../i18n-host";
 import tipsText from "./tips.txt" with { type: "text" };
 
-/** Tips embedded at build time, one per line; blanks dropped. */
-const EN_TIPS: readonly string[] = tipsText
+/** Tips embedded at build time, one per line; blanks dropped. Key placeholders
+ *  (see {@link expandTipKeys}) stay raw until render time. */
+const TIPS: readonly string[] = tipsText
 	.split("\n")
 	.map(line => line.trim())
 	.filter(line => line.length > 0);
@@ -27,6 +37,7 @@ const TIP_KEYS: readonly string[] = [
 	"tips.ultrathink",
 	"tips.orchestrate",
 	"tips.workflowz",
+	"tips.jevify",
 	"tips.multi_account",
 	"tips.auth_broker",
 	"tips.switch_provider",
@@ -41,6 +52,7 @@ const TIP_KEYS: readonly string[] = [
 	"tips.advisor",
 	"tips.prompt_arrow_list",
 	"tips.shift_tab_effort",
+	"tips.self_reconfigure",
 	"tips.cleanse",
 ];
 
@@ -77,7 +89,7 @@ function interceptWelcomeString(key: string): string {
 }
 
 function resolveTips(): readonly string[] {
-	return interceptTips(EN_TIPS);
+	return interceptTips(TIPS);
 }
 
 let _tips: readonly string[] | null = null;
@@ -165,6 +177,40 @@ function renderNewTag(phase: number, encoding: ColorEncoding): string {
 	}
 	return out + reset;
 }
+
+/** Key placeholders in tips.txt: `{key:shift+tab}`, `{keys:up,down}`, `{tap:left}`, `{action:tui.editor.undo}`. */
+const TIP_KEY_PLACEHOLDER = /\{(key|keys|tap|action):([^}]+)\}/g;
+
+const MODIFIER_NAMES: Record<string, true | undefined> = {
+	ctrl: true,
+	shift: true,
+	alt: true,
+	super: true,
+};
+
+/** A `+`-joined chord whose leading parts are modifiers (`ctrl+o`, `shift`, `left`). */
+function isKeyName(key: string): key is KeyName {
+	const parts = key.split("+");
+	return parts.every((part, i) => part.length > 0 && (i === parts.length - 1 || MODIFIER_NAMES[part] === true));
+}
+
+function isKeybinding(action: string): action is Keybinding {
+	return action in getKeybindings().getResolvedBindings();
+}
+
+/** Expand tip key placeholders through the key formatter; malformed ones stay verbatim. */
+function expandTipKeys(tip: string): string {
+	return tip.replace(TIP_KEY_PLACEHOLDER, (placeholder, kind: string, value: string) => {
+		if (kind === "action") return isKeybinding(value) ? editorKey(value) : placeholder;
+		const keys = value.split(",");
+		if (!keys.every(isKeyName)) return placeholder;
+		if (kind === "keys") return formatKeyHints(keys);
+		const [key] = keys;
+		if (key === undefined) return placeholder;
+		return kind === "tap" ? formatDoubleTap(key) : formatKeyHint(key);
+	});
+}
+
 export function renderWelcomeTip(tip: string, boxWidth: number, phase = 0): string[] {
 	const label = interceptWelcomeString("tipLabel");
 	const labelWidth = visibleWidth(label);
@@ -172,7 +218,7 @@ export function renderWelcomeTip(tip: string, boxWidth: number, phase = 0): stri
 	if (bodyBudget < 8) return [];
 
 	const isNew = NEW_TIP_MARKER.test(tip);
-	const body = isNew ? tip.replace(NEW_TIP_MARKER, "") : tip;
+	const body = expandTipKeys(isNew ? tip.replace(NEW_TIP_MARKER, "") : tip);
 
 	const wrappedBody = wrapTextWithAnsi(replaceTabs(body), bodyBudget);
 	if (wrappedBody.length === 0) return [];
@@ -210,6 +256,8 @@ export function renderWelcomeTip(tip: string, boxWidth: number, phase = 0): stri
 export interface RecentSession {
 	name: string;
 	timeAgo: string;
+	/** Session file; a native click on the row resumes it. */
+	path?: string;
 }
 
 export interface LspServerInfo {
@@ -236,13 +284,15 @@ export class WelcomeComponent implements Component {
 	// Bypassed while the intro animation runs (every frame differs).
 	#cachedWidth = -1;
 	#cachedLines: string[] | undefined;
+	#native: { tip: string | undefined; node: NativeNode } | undefined;
 
 	constructor(
 		private version: string,
 		private modelName: string,
 		private providerName: string,
 		private recentSessions: RecentSession[] = [],
-		private lspServers: LspServerInfo[] = [],
+		/** Detected project servers; `null` means LSP is disabled and hides the section. */
+		private lspServers: LspServerInfo[] | null = [],
 	) {}
 	get tip(): string | undefined {
 		this.#nagRoll ??= Math.random();
@@ -256,7 +306,150 @@ export class WelcomeComponent implements Component {
 	invalidate(): void {
 		this.#cachedWidth = -1;
 		this.#cachedLines = undefined;
+		this.#native = undefined;
 	}
+
+	/**
+	 * A `card` (`omp.welcome`) titled with the app version. The brand column
+	 * (`omp.welcome.brand`: greeting and the terminal's builtin `omp` mark, which
+	 * it animates) sits beside the info column (`omp.welcome.info`: prompt-sigil
+	 * keycaps, LSP servers, recent sessions); the tip of the session closes the card. Roles
+	 * carry the look (gradient logo, type scale, column hairline); a "[NEW]" tip
+	 * carries a terminal-clocked shimmering tag.
+	 */
+	describe(_cx: DescribeContext): NativeNode {
+		const tip = this.tip;
+		if (this.#native && this.#native.tip === tip) return this.#native.node;
+		const line = (spans: readonly TspSpan[], role?: string, key?: string): NativeNode =>
+			keyed(text(spans, { wrap: "none", truncate: "end", role }), key ?? role ?? "");
+		// Centered brand lines are short and fixed; the logo is multi-line art that must never truncate.
+		const art = (spans: readonly TspSpan[], role: string): NativeNode =>
+			keyed(text(spans, { wrap: "none", role }), role);
+		const brand = keyed(
+			col(
+				[
+					art([span("Welcome back!", "strong")], "omp.welcome.greeting"),
+					node(
+						"image",
+						{
+							builtin: "omp",
+							alt: APP_NAME,
+							w: 128,
+							role: "omp.welcome.logo",
+						},
+						undefined,
+						"logo",
+					),
+				],
+				{ align: "center", role: "omp.welcome.brand" },
+			),
+			"brand",
+		);
+		const section = (key: string, label: string, rows: readonly NativeChild[]): NativeNode =>
+			keyed(
+				col([line([span(label, "dim")], "omp.welcome.heading"), ...rows], {
+					gap: "xs",
+					role: `omp.welcome.${key}`,
+				}),
+				key,
+			);
+		const shortcut = (key: string, label: string): NativeNode =>
+			keyed(row([kbd(key), line([span(label, "muted")])], { gap: "sm" }), label);
+		const info: NativeChild[] = [
+			line([span(this.version, "dim mono")], "omp.welcome.version"),
+			section("tips", "Tips", [
+				shortcut("#", "prompt actions"),
+				shortcut("/", "commands"),
+				shortcut("!", "run bash"),
+				shortcut("$", "run python"),
+			]),
+		];
+		if (this.lspServers !== null) {
+			const lsp: NativeChild[] = [];
+			if (this.lspServers.length === 0) lsp.push(line([span("No LSP servers", "dim")], undefined, "none"));
+			for (const server of this.lspServers.slice(0, WELCOME_LSP_SLOTS)) {
+				const [symbol, token] =
+					server.status === "ready"
+						? (["status.enabled", "success"] as const)
+						: server.status === "available"
+							? (["status.enabled", "dim"] as const)
+							: server.status === "connecting"
+								? (["status.pending", "muted"] as const)
+								: (["status.error", "error"] as const);
+				lsp.push(
+					keyed(
+						row(
+							[
+								text([span("●", token)], { role: "omp.welcome.lsp-dot", title: server.status, aria: symbol }),
+								line([span(server.name)]),
+								...server.fileTypes
+									.slice(0, 3)
+									.map(type => node("badge", { text: type, role: "omp.welcome.lsp-type" }, undefined, type)),
+							],
+							{ gap: "sm", role: "omp.welcome.lsp-row" },
+						),
+						server.name,
+					),
+				);
+			}
+			info.push(section("lsp", "LSP servers", lsp));
+		}
+		const recents: NativeChild[] = [];
+		if (this.recentSessions.length === 0) recents.push(line([span("No recent sessions", "dim")], undefined, "none"));
+		for (const [index, session] of this.recentSessions.slice(0, WELCOME_SESSION_SLOTS).entries()) {
+			recents.push(
+				keyed(
+					row(
+						[
+							line([span(plainLine(session.name))], "omp.welcome.session"),
+							line([span(session.timeAgo, "dim")], "omp.welcome.age"),
+						],
+						{
+							gap: "md",
+							justify: "between",
+							role: "omp.welcome.recent",
+							actions: session.path ? { click: "resume" } : undefined,
+							title: session.path ? `Resume ${plainLine(session.name)}` : undefined,
+						},
+					),
+					`s${index}`,
+				),
+			);
+		}
+		info.push(section("recents", "Recent sessions", recents));
+		const body: NativeChild[] = [
+			keyed(
+				row([brand, keyed(col(info, { gap: "md", role: "omp.welcome.info" }), "info")], {
+					align: "start",
+					wrap: true,
+					role: "omp.welcome.grid",
+				}),
+				"grid",
+			),
+		];
+		if (tip) {
+			const isNew = NEW_TIP_MARKER.test(tip);
+			const tipText = plainLine(expandTipKeys(isNew ? tip.replace(NEW_TIP_MARKER, "") : tip));
+			const tipRow: NativeChild[] = [
+				node("icon", { name: "lightbulb", role: "omp.welcome.tip-icon" }),
+				text(tipText, { wrap: "word", role: "omp.welcome.tip-text" }),
+			];
+			if (isNew) tipRow.push(node("shimmer", { text: "New", role: "omp.welcome.new" }));
+			body.push(node("row", { gap: "sm", align: "start", role: "omp.welcome.tip" }, tipRow, "tip"));
+		}
+		// No head row or chevron: the card is the hero; the version sits in the info column.
+		const described = card({ role: "omp.welcome" }, body);
+		this.#native = { tip, node: described };
+		return described;
+	}
+	/** A click on a recent session resumes it. */
+	handleNativeEvent(event: NativeUiEvent): void {
+		if (event.type !== "action" || event.act !== "resume") return;
+		const index = Number(/\/s(\d+)$/.exec(event.key)?.[1]);
+		const path = this.recentSessions[index]?.path;
+		if (path) runTranscriptAction({ act: "resume", path });
+	}
+
 	/** The intro keeps the welcome block mutable; settling lets it retire to history. */
 	isTranscriptBlockFinalized(): boolean {
 		return this.#animTimer == null;
@@ -269,6 +462,12 @@ export class WelcomeComponent implements Component {
 	 */
 	playIntro(requestRender: () => void): void {
 		this.#stopAnimation();
+		// The intro is a repaint-only gradient sweep; a TSP terminal shows the
+		// settled card right away.
+		if (isNativeRendering()) {
+			requestRender();
+			return;
+		}
 		this.#requestRender = requestRender;
 		this.#animStart = performance.now();
 		this.#requestRender();
@@ -328,7 +527,7 @@ export class WelcomeComponent implements Component {
 		this.invalidate();
 	}
 
-	setLspServers(servers: LspServerInfo[]): void {
+	setLspServers(servers: LspServerInfo[] | null): void {
 		this.lspServers = servers;
 		this.invalidate();
 	}
@@ -421,29 +620,6 @@ export class WelcomeComponent implements Component {
 			sessionLines.push("");
 		}
 
-		// LSP servers content
-		const lspLines: string[] = [];
-		if (this.lspServers.length === 0) {
-			lspLines.push(` ${theme.fg("dim", interceptWelcomeString("noLspServers"))}`);
-		} else {
-			for (const server of this.lspServers.slice(0, WELCOME_LSP_SLOTS)) {
-				const icon =
-					server.status === "ready"
-						? theme.styledSymbol("status.enabled", "success")
-						: server.status === "available"
-							? theme.styledSymbol("status.enabled", "dim")
-							: server.status === "connecting"
-								? theme.styledSymbol("status.pending", "muted")
-								: theme.styledSymbol("status.error", "error");
-				const exts = server.fileTypes.slice(0, 3).join(" ");
-				lspLines.push(` ${icon} ${theme.fg("muted", server.name)} ${theme.fg("dim", exts)}`);
-			}
-		}
-		// Pad to the fixed slot count so the box height doesn't depend on server count.
-		while (lspLines.length < WELCOME_LSP_SLOTS) {
-			lspLines.push("");
-		}
-
 		// Right column
 		const rightLines = [
 			` ${theme.bold(theme.fg("accent", interceptWelcomeString("tips")))}`,
@@ -451,9 +627,7 @@ export class WelcomeComponent implements Component {
 			` ${theme.fg("dim", "/")}${theme.fg("muted", interceptWelcomeString("tips.commands"))}`,
 			` ${theme.fg("dim", "!")}${theme.fg("muted", interceptWelcomeString("tips.bash"))}`,
 			` ${theme.fg("dim", "$")}${theme.fg("muted", interceptWelcomeString("tips.python"))}`,
-			separator,
-			` ${theme.bold(theme.fg("accent", interceptWelcomeString("lspServers")))}`,
-			...lspLines,
+			...this.#renderLspSection(separator),
 			separator,
 			` ${theme.bold(theme.fg("accent", interceptWelcomeString("recentSessions")))}`,
 			...sessionLines,
@@ -506,6 +680,33 @@ export class WelcomeComponent implements Component {
 		lines.push(...this.#renderTip(boxWidth));
 
 		return lines;
+	}
+
+	/** Right-column LSP rows padded to a fixed height; empty when LSP is disabled. */
+	#renderLspSection(separator: string): string[] {
+		if (this.lspServers === null) return [];
+		const lspLines: string[] = [];
+		if (this.lspServers.length === 0) {
+			lspLines.push(` ${theme.fg("dim", interceptWelcomeString("noLspServers"))}`);
+		} else {
+			for (const server of this.lspServers.slice(0, WELCOME_LSP_SLOTS)) {
+				const icon =
+					server.status === "ready"
+						? theme.styledSymbol("status.enabled", "success")
+						: server.status === "available"
+							? theme.styledSymbol("status.enabled", "dim")
+							: server.status === "connecting"
+								? theme.styledSymbol("status.pending", "muted")
+								: theme.styledSymbol("status.error", "error");
+				const exts = server.fileTypes.slice(0, 3).join(" ");
+				lspLines.push(` ${icon} ${theme.fg("muted", server.name)} ${theme.fg("dim", exts)}`);
+			}
+		}
+		// Pad to the fixed slot count so the box height doesn't depend on server count.
+		while (lspLines.length < WELCOME_LSP_SLOTS) {
+			lspLines.push("");
+		}
+		return [separator, ` ${theme.bold(theme.fg("accent", interceptWelcomeString("lspServers")))}`, ...lspLines];
 	}
 
 	/**
@@ -571,6 +772,18 @@ export class WelcomeComponent implements Component {
 
 /** Block-grid brand mark shared by the welcome and setup surfaces. */
 export const PI_LOGO = ["████████████", "   ██  ██   ", "   ██  ██   ", "   ▒▒  ██   ", "       ██   "];
+
+/** The block-grid brand mark as accent lines; `shimmer` declares the terminal-clocked shine sweep. */
+export function logoNode(lines: readonly string[], shimmer: boolean): NativeNode {
+	return col(
+		lines.map(line =>
+			text([span(line, "accent", shimmer ? { fx: "shimmer" } : undefined)], {
+				wrap: "none",
+			}),
+		),
+		{ align: "center", role: "omp.setup.logo" },
+	);
+}
 
 /** Multi-stop palette for the diagonal gradient. */
 const GRADIENT_STOPS: ReadonlyArray<readonly [number, number, number]> = [

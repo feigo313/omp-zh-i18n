@@ -63,25 +63,21 @@ export function buildAsyncResultBlock(message: CustomOrHookMessage): ToolActivit
 		const duration = typeof job.durationMs === "number" ? formatDuration(job.durationMs) : undefined;
 		rows.push({
 			parts: [
-				theme.fg(
-					"success",
-					`${theme.status.done} ${tuiT("ui.backgroundJobCompleted", "Background job completed")}`,
-				),
-				theme.fg("dim", typeLabel),
-				theme.fg("accent", jobId),
-				duration ? theme.fg("dim", `(${duration})`) : undefined,
+				{
+					text: `${theme.status.done} ${tuiT("ui.backgroundJobCompleted", "Background job completed")}`,
+					color: "success",
+				},
+				{ text: typeLabel, color: "dim" },
+				{ text: jobId, color: "accent" },
+				duration ? { text: `(${duration})`, color: "dim" } : undefined,
 			],
 		});
 		if (job.meta?.artifactError) {
-			rows.push({
-				parts: [theme.fg("warning", formatArtifactErrorNotice(job.meta.artifactError))],
-			});
+			rows.push({ parts: [{ text: formatArtifactErrorNotice(job.meta.artifactError), color: "warning" }] });
 		}
 	}
 	if (details?.meta?.artifactError) {
-		rows.push({
-			parts: [theme.fg("warning", formatArtifactErrorNotice(details.meta.artifactError))],
-		});
+		rows.push({ parts: [{ text: formatArtifactErrorNotice(details.meta.artifactError), color: "warning" }] });
 	}
 	return new ToolActivityContainer(new TranscriptStatusBlock(rows));
 }
@@ -96,14 +92,7 @@ export function buildLaunchCompletionBlock(message: CustomOrHookMessage): ToolAc
 	const rows: TranscriptStatusRow[] = [];
 	const daemons = details?.daemons ?? [];
 	if (daemons.length === 0 && typeof message.content === "string") {
-		rows.push({
-			parts: [
-				theme.fg(
-					"dim",
-					`${theme.status.done} ${tuiT("ui.supervisedProcessCompleted", "Supervised process completed")}`,
-				),
-			],
-		});
+		rows.push({ parts: [{ text: `${theme.status.done} ${message.content}`, color: "dim" }] });
 	}
 	for (const daemon of daemons) {
 		const failed = daemon.state === "failed" || (daemon.exitCode !== undefined && daemon.exitCode !== 0);
@@ -114,17 +103,17 @@ export function buildLaunchCompletionBlock(message: CustomOrHookMessage): ToolAc
 		rows.push({
 			parts: [
 				failed
-					? theme.fg(
-							"error",
-							`${theme.status.error} ${tuiT("ui.supervisedProcessFailed", "Supervised process failed")}`,
-						)
-					: theme.fg(
-							"success",
-							`${theme.status.done} ${tuiT("ui.supervisedProcessCompleted", "Supervised process completed")}`,
-						),
-				theme.fg("accent", daemon.name),
-				daemon.exitCode !== undefined ? theme.fg("dim", `(exit ${daemon.exitCode})`) : undefined,
-				duration ? theme.fg("dim", `(${duration})`) : undefined,
+					? {
+							text: `${theme.status.error} ${tuiT("ui.supervisedProcessFailed", "Supervised process failed")}`,
+							color: "error",
+						}
+					: {
+							text: `${theme.status.done} ${tuiT("ui.supervisedProcessCompleted", "Supervised process completed")}`,
+							color: "success",
+						},
+				{ text: daemon.name, color: "accent" },
+				daemon.exitCode !== undefined ? { text: `(exit ${daemon.exitCode})`, color: "dim" } : undefined,
+				duration ? { text: `(${duration})`, color: "dim" } : undefined,
 			],
 		});
 	}
@@ -181,28 +170,27 @@ export function buildIrcMessageCard(message: CustomOrHookMessage, getExpanded: (
 export function buildFileMentionBlock(files: FileMentionMessage["files"], indent: number): TranscriptBlock {
 	const rows: TranscriptStatusRow[] = [];
 	for (const file of files) {
-		const size =
-			typeof file.byteSize === "number" ? formatBytes(file.byteSize) : tuiT("ui.unknownSize", "unknown size");
+		let suffix: string;
+		if (file.skippedReason === "tooLarge" || file.skippedReason === "binary") {
+			const size =
+				typeof file.byteSize === "number" ? formatBytes(file.byteSize) : tuiT("ui.unknownSize", "unknown size");
+			suffix =
+				file.skippedReason === "binary"
+					? tuiT("ui.fileSkippedBinary", "(skipped: binary, {size})", { size })
+					: tuiT("ui.fileSkipped", "(skipped: {size})", { size });
+		} else {
+			suffix = file.image
+				? tuiT("ui.imageFile", "(image)")
+				: file.lineCount === undefined
+					? tuiT("ui.unknownLines", "(unknown lines)")
+					: tuiT("ui.fileLines", "({count} lines)", { count: file.lineCount });
+		}
 		rows.push({
 			parts: [
-				`${theme.fg("dim", `${theme.tree.last} `)}${theme.fg("muted", tuiT("ui.read", "Read"))}`,
-				theme.fg("accent", file.path),
-				theme.fg(
-					"dim",
-					file.skippedReason === "tooLarge" || file.skippedReason === "binary"
-						? file.skippedReason === "binary"
-							? tuiT("ui.fileSkippedBinary", "(skipped: binary, {size})", {
-									size,
-								})
-							: tuiT("ui.fileSkipped", "(skipped: {size})", { size })
-						: file.image
-							? tuiT("ui.imageFile", "(image)")
-							: file.lineCount === undefined
-								? tuiT("ui.unknownLines", "(unknown lines)")
-								: tuiT("ui.fileLines", "({count} lines)", {
-										count: file.lineCount,
-									}),
-				),
+				{ text: theme.tree.last, color: "dim", rowsOnly: true },
+				{ text: tuiT("ui.read", "Read"), color: "muted" },
+				{ text: file.path, color: "accent" },
+				{ text: suffix, color: "dim" },
 			],
 			indent,
 		});

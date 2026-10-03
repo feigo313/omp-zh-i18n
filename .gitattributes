@@ -59,6 +59,7 @@ packages/*/CHANGELOG.md merge=union
 packages/catalog/src/models.json binary
 packages/catalog/src/compat/rules.json binary
 
+<<<<<<< 12a79d27d2d07bae75b19497aecb4b68602b0006
 # Files whose trailing whitespace is load-bearing, so the pre-commit
 # `git diff --check` pass must not flag them.
 #
@@ -94,4 +95,8 @@ crates/vendor/cfg_aliases/BUILD.bazel whitespace=-blank-at-eol,-blank-at-eof
 packages/catalog/src/compat/rules/providers/opencode-go.kdl whitespace=-blank-at-eol,-blank-at-eof
 packages/catalog/src/discovery/cursor-proto.ts whitespace=-blank-at-eol,-blank-at-eof
 packages/catalog/src/discovery/devin-proto.ts whitespace=-blank-at-eol,-blank-at-eof
+=======
+# Generated tree-sitter parser: regenerate from grammar.js (see its README.md).
+crates/vendor/tree-sitter-go/src/parser.c linguist-generated
+>>>>>>> a0ba5ce39a94fb5886949170846d3d8ef8cb523b
 

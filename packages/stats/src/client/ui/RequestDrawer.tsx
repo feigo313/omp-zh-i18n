@@ -1,217 +1,191 @@
-import { Clock, Coins, Gauge, Hash, Star, X, Zap } from "lucide-react";
-import { useTranslation } from "../i18n";
-import { useEffect, useRef, useState } from "react";
+import { GitBranch } from "lucide-react";
 import { getRequestDetails } from "../api";
-import { formatDurationMs, formatInteger, formatMessageCost } from "../data/formatters";
+import {
+	formatCost,
+	formatDurationMs,
+	formatFolder,
+	formatInteger,
+	formatMessageCost,
+	formatRelativeTime,
+	formatTimestamp,
+	formatTokensPerSecond,
+} from "../data/formatters";
+import { useQuery } from "../data/query";
+import { buildHash, parseHash } from "../data/useHashRoute";
+import { type RequestStatus, requestStatus } from "../data/view-models";
+import { type TranslationFn, useTranslation } from "../i18n";
 import type { RequestDetails } from "../types";
+import { Badge, type Tone } from "./Badge";
+import { Drawer, KeyValues } from "./Drawer";
 import { JsonBlock } from "./JsonBlock";
-import { Skeleton } from "./Skeleton";
-import { StatusPill } from "./StatusPill";
+import { ErrorState, Skeleton } from "./States";
+import "./request-drawer.css";
+
+/** Tone per request outcome; the labels resolve through the dashboard translator. */
+export const REQUEST_STATUS: Record<RequestStatus, { labelKey: string; tone: Tone }> = {
+	ok: { labelKey: "common.success", tone: "ok" },
+	aborted: { labelKey: "detail.aborted", tone: "warn" },
+	failed: { labelKey: "common.failed", tone: "bad" },
+};
+
+/** Localized label for one request outcome. */
+export function requestStatusLabel(t: TranslationFn, status: RequestStatus): string {
+	return t(REQUEST_STATUS[status].labelKey);
+}
 
 export interface RequestDrawerProps {
 	id: number | null;
 	onClose: () => void;
 }
 
+/** Full detail sheet for one model request: timing, tokens, cost, ids, error, and the raw session entry. */
 export function RequestDrawer({ id, onClose }: RequestDrawerProps) {
 	const { t } = useTranslation();
-	const [details, setDetails] = useState<RequestDetails | null>(null);
-	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<Error | null>(null);
-	const previousActiveElement = useRef<HTMLElement | null>(null);
-	const closeButtonRef = useRef<HTMLButtonElement>(null);
-
-	useEffect(() => {
-		if (id === null) {
-			setDetails(null);
-			return;
-		}
-
-		previousActiveElement.current = document.activeElement as HTMLElement | null;
-		setLoading(true);
-		setError(null);
-		setDetails(null);
-
-		const controller = new AbortController();
-		getRequestDetails(id, controller.signal)
-			.then(data => {
-				if (controller.signal.aborted) return;
-				setDetails(data);
-				// Focus the close button for accessibility
-				setTimeout(() => closeButtonRef.current?.focus(), 50);
-			})
-			.catch(err => {
-				if (controller.signal.aborted) return;
-				setError(err instanceof Error ? err : new Error(String(err)));
-			})
-			.finally(() => {
-				if (!controller.signal.aborted) setLoading(false);
-			});
-
-		return () => controller.abort();
-	}, [id]);
-
-	useEffect(() => {
-		if (id === null) return;
-
-		const handleKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				onClose();
-			}
-		};
-
-		window.addEventListener("keydown", handleKeyDown);
-		return () => {
-			window.removeEventListener("keydown", handleKeyDown);
-			if (previousActiveElement.current) {
-				previousActiveElement.current.focus();
-			}
-		};
-	}, [id, onClose]);
-
-	if (id === null) return null;
-
-	const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
-		if (e.target === e.currentTarget) {
-			onClose();
-		}
-	};
+	const query = useQuery(["request", id], () => getRequestDetails(id ?? 0), { enabled: id !== null });
+	// Never show the previous request's payload under a new id.
+	const details = query.stale ? null : query.data;
+	const status = details ? REQUEST_STATUS[requestStatus(details)] : null;
 
 	return (
-		<div className="stats-drawer-overlay" onClick={handleOverlayClick} role="presentation">
-			<div className="stats-drawer" role="dialog" aria-modal="true" aria-label={t("detail.title")}>
-				{/* Drawer Header */}
-				<div className="stats-drawer-header">
-					<div className="stats-drawer-header-left">
-						<h2 className="stats-drawer-title">{t("detail.title")}</h2>
-						{details && (
-							<span className="stats-drawer-id">
-								{t("detail.id")}: {id}
-							</span>
-						)}
+		<Drawer
+			open={id !== null}
+			onClose={onClose}
+			width={620}
+			title={details ? <span className="mono">{details.model}</span> : t("detail.requestTitle")}
+			subtitle={
+				details ? (
+					<>
+						{details.provider} ·{" "}
+						<span title={formatTimestamp(details.timestamp)}>{formatRelativeTime(details.timestamp)}</span>
+					</>
+				) : id !== null ? (
+					<span className="mono">#{id}</span>
+				) : undefined
+			}
+			actions={
+				details && status ? (
+					<div className="row" style={{ gap: 6 }}>
+						<a
+							className="btn"
+							data-size="sm"
+							data-variant="ghost"
+							href={buildHash({
+								...parseHash(window.location.hash),
+								section: "traces",
+								session: details.sessionFile,
+							})}
+							onClick={onClose}
+							title={t("detail.traceTooltip")}
+						>
+							<GitBranch size={13} /> {t("detail.trace")}
+						</a>
+						<Badge tone={status.tone}>{requestStatusLabel(t, requestStatus(details))}</Badge>
 					</div>
-					<button
-						ref={closeButtonRef}
-						type="button"
-						onClick={onClose}
-						className="stats-drawer-close-btn"
-						aria-label={t("detail.close")}
-					>
-						<X size={18} />
-					</button>
+				) : undefined
+			}
+		>
+			{details ? (
+				<RequestDetailsBody details={details} aborted={requestStatus(details) === "aborted"} />
+			) : query.error ? (
+				<ErrorState error={query.error} onRetry={query.refetch} />
+			) : (
+				<div className="stack" style={{ gap: 12 }}>
+					<Skeleton height={56} />
+					<Skeleton height={120} />
+					<Skeleton height={120} />
+					<Skeleton height={220} />
 				</div>
+			)}
+		</Drawer>
+	);
+}
 
-				<div className="stats-drawer-body">
-					{loading && (
-						<div className="stats-drawer-loading">
-							<Skeleton variant="text" width="60%" height={24} className="mb-4" />
-							<Skeleton variant="rect" width="100%" height={80} className="mb-4" />
-							<Skeleton variant="rect" width="100%" height={120} className="mb-4" />
-							<Skeleton variant="rect" width="100%" height={200} />
-						</div>
-					)}
+function RequestDetailsBody({ details, aborted }: { details: RequestDetails; aborted: boolean }) {
+	const { t } = useTranslation();
+	const { usage } = details;
+	const throughput =
+		details.duration !== null && details.duration > 0 && usage.output > 0
+			? (usage.output * 1000) / details.duration
+			: null;
+	// The stats row as ingested, without the session payload shown separately below.
+	const { messages, output, ...row } = details;
 
-					{error && (
-						<div className="stats-drawer-error">
-							<p className="stats-drawer-error-title">{t("detail.failedToLoad")}</p>
-							<p className="stats-drawer-error-message">{error.message}</p>
-						</div>
-					)}
+	return (
+		<>
+			{details.errorMessage && (
+				<section className="request-drawer-error" data-tone={aborted ? "warn" : "bad"} role="note">
+					<div className="request-drawer-error-label">{aborted ? t("detail.aborted") : t("common.error")}</div>
+					<pre className="request-drawer-error-text">{details.errorMessage}</pre>
+				</section>
+			)}
 
-					{details && (
-						<div className="stats-drawer-content">
-							{/* Status Card */}
-							<div className="stats-drawer-status-card">
-								<div className="stats-drawer-status-row">
-									<div>
-										<div className="stats-drawer-model">{details.model}</div>
-										<div className="stats-drawer-provider">{details.provider}</div>
-									</div>
-									<StatusPill variant={details.errorMessage ? "danger" : "success"}>
-										{details.errorMessage ? t("common.error") : t("common.success")}
-									</StatusPill>
-								</div>
-								{details.errorMessage && (
-									<div className="stats-drawer-error-block">
-										<div className="stats-drawer-error-label">{t("detail.errorMessage")}</div>
-										<div className="stats-drawer-error-text">{details.errorMessage}</div>
-									</div>
-								)}
-							</div>
+			<section>
+				<div className="section-label">{t("detail.timing")}</div>
+				<KeyValues
+					items={[
+						{ key: "at", label: t("common.started"), value: formatTimestamp(details.timestamp) },
+						{ key: "duration", label: t("detail.duration"), value: formatDurationMs(details.duration) },
+						{ key: "ttft", label: t("detail.ttft"), value: formatDurationMs(details.ttft) },
+						{ key: "tps", label: t("common.tokensPerSec"), value: formatTokensPerSecond(throughput) },
+					]}
+				/>
+			</section>
 
-							{/* Metrics Grid */}
-							<div className="stats-drawer-metrics-grid">
-								<div className="stats-drawer-metric-card">
-									<div className="stats-drawer-metric-label">
-										<Coins size={14} className="stats-drawer-metric-icon" />
-										API-equivalent estimate
-									</div>
-									<div className="stats-drawer-metric-value">{formatMessageCost(details, 4)}</div>
-								</div>
+			<section>
+				<div className="section-label">{t("common.tokens")}</div>
+				<KeyValues
+					items={[
+						{ key: "input", label: t("common.uncachedInput"), value: formatInteger(usage.input) },
+						{ key: "cacheRead", label: t("common.cacheRead"), value: formatInteger(usage.cacheRead) },
+						{ key: "cacheWrite", label: t("common.cacheWrite"), value: formatInteger(usage.cacheWrite) },
+						{ key: "output", label: t("common.output"), value: formatInteger(usage.output) },
+						{ key: "total", label: t("detail.totalTokens"), value: formatInteger(usage.totalTokens) },
+						{
+							key: "premium",
+							label: t("metric.premiumRequests"),
+							value: formatInteger(Math.round((usage.premiumRequests ?? 0) * 100) / 100),
+						},
+					]}
+				/>
+			</section>
 
-								<div className="stats-drawer-metric-card">
-									<div className="stats-drawer-metric-label">
-										<Star size={14} className="stats-drawer-metric-icon" />
-										{t("detail.premium")}
-									</div>
-									<div className="stats-drawer-metric-value">
-										{formatInteger(details.usage.premiumRequests ?? 0)}
-									</div>
-								</div>
+			<section>
+				<div className="section-label">{t("costs.apiEquivalent")}</div>
+				<KeyValues
+					items={[
+						{ key: "total", label: t("costs.total"), value: formatMessageCost(details, 4) },
+						{ key: "input", label: t("common.input"), value: formatCost(usage.cost.input, 4) },
+						{ key: "cacheRead", label: t("common.cacheRead"), value: formatCost(usage.cost.cacheRead, 4) },
+						{ key: "cacheWrite", label: t("common.cacheWrite"), value: formatCost(usage.cost.cacheWrite, 4) },
+						{ key: "output", label: t("common.output"), value: formatCost(usage.cost.output, 4) },
+					]}
+				/>
+			</section>
 
-								<div className="stats-drawer-metric-card">
-									<div className="stats-drawer-metric-label">
-										<Hash size={14} className="stats-drawer-metric-icon" />
-										{t("detail.totalTokens")}
-									</div>
-									<div className="stats-drawer-metric-value">{formatInteger(details.usage.totalTokens)}</div>
-									<div className="stats-drawer-metric-sub">
-										{t("detail.inOut", {
-											input: formatInteger(details.usage.input),
-											output: formatInteger(details.usage.output),
-										})}
-									</div>
-								</div>
-
-								<div className="stats-drawer-metric-card">
-									<div className="stats-drawer-metric-label">
-										<Clock size={14} className="stats-drawer-metric-icon" />
-										{t("detail.duration")}
-									</div>
-									<div className="stats-drawer-metric-value">{formatDurationMs(details.duration)}</div>
-								</div>
-
-								<div className="stats-drawer-metric-card">
-									<div className="stats-drawer-metric-label">
-										<Zap size={14} className="stats-drawer-metric-icon" />
-										{t("detail.ttft")}
-									</div>
-									<div className="stats-drawer-metric-value">{formatDurationMs(details.ttft)}</div>
-								</div>
-
-								{details.duration && details.usage.output > 0 && (
-									<div className="stats-drawer-metric-card">
-										<div className="stats-drawer-metric-label">
-											<Gauge size={14} className="stats-drawer-metric-icon" />
-											{t("detail.throughput")}
-										</div>
-										<div className="stats-drawer-metric-value">
-											{((details.usage.output * 1000) / details.duration).toFixed(1)}
-										</div>
-										<div className="stats-drawer-metric-sub">{t("detail.tokensPerSecond")}</div>
-									</div>
-								)}
-							</div>
-
-							{/* JSON blocks */}
-							<div className="stats-drawer-json-blocks">
-								<JsonBlock data={details.output} title={t("detail.outputPayload")} initialCollapsed={false} />
-								<JsonBlock data={details} title={t("detail.rawMetadata")} initialCollapsed={true} />
-							</div>
-						</div>
-					)}
+			<section>
+				<div className="section-label">{t("detail.identity")}</div>
+				<KeyValues
+					items={[
+						{ key: "id", label: t("detail.id"), value: details.id ?? "–" },
+						{ key: "entry", label: t("detail.entryId"), value: details.entryId },
+						{ key: "stop", label: t("detail.stopReason"), value: details.stopReason },
+						{ key: "api", label: "API", value: details.api },
+						{
+							key: "project",
+							label: t("gain.project"),
+							value: <span title={details.folder}>{formatFolder(details.folder)}</span>,
+						},
+					]}
+				/>
+				<div className="request-drawer-file">
+					<span className="kv-key">{t("detail.sessionFile")}</span>
+					<span className="kv-value">{details.sessionFile}</span>
 				</div>
-			</div>
-		</div>
+			</section>
+
+			<JsonBlock data={output} title={t("detail.outputPayload")} />
+			<JsonBlock data={messages} title={t("detail.rawMetadata")} initialCollapsed />
+			<JsonBlock data={row} title={t("detail.statsRow")} initialCollapsed />
+		</>
 	);
 }

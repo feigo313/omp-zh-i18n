@@ -1,8 +1,8 @@
+import { X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Line } from "react-chartjs-2";
 import { getToolDashboardStats } from "../api";
-import { CHART_THEMES, MODEL_COLORS } from "../components/chart-shared";
-import { formatRangeTick, rangeMeta } from "../components/range-meta";
+import { Legend, Sparkline, TimeChart, useHiddenSeries } from "../charts";
+import { buildColorLookup, OTHER_COLOR } from "../data/colors";
 import {
 	formatCompact,
 	formatEstimatedCost,
@@ -10,483 +10,593 @@ import {
 	formatPercent,
 	formatRelativeTime,
 } from "../data/formatters";
-import { useResource } from "../data/useResource";
+import { useQuery } from "../data/query";
+import { bucketAxis, rangeMeta } from "../data/range";
+import { densify, pivotSeries } from "../data/series";
 import { buildToolRows, type ToolRowView } from "../data/view-models";
-import { useTranslation } from "../i18n";
-import type { TimeRange, ToolModelStats, ToolTimeSeriesPoint, ToolUsageStats } from "../types";
-import { AsyncBoundary, DataTable, Panel, StatusPill } from "../ui";
-import { useSystemTheme } from "../useSystemTheme";
+import { type Locale, type TranslationFn, useTranslation } from "../i18n";
+import type { TimeRange, ToolDashboardStats, ToolModelStats, ToolTimeSeriesPoint } from "../types";
+import {
+	Badge,
+	Card,
+	ChartSkeleton,
+	type Column,
+	EmptyState,
+	errorRateTone,
+	LabelCell,
+	MeterCell,
+	PageHeader,
+	QueryView,
+	Segmented,
+	Stat,
+	StatGrid,
+	Swatch,
+	Table,
+	TableSkeleton,
+} from "../ui";
+import "./tools.css";
 
 export interface ToolsRouteProps {
 	active: boolean;
 	range: TimeRange;
-	refreshTrigger: number;
 }
 
-export function ToolsRoute({ active, range, refreshTrigger }: ToolsRouteProps) {
-	const { t } = useTranslation();
-	const {
-		data: stats,
-		error,
-		loading,
-	} = useResource(["tools", range, refreshTrigger], signal => getToolDashboardStats(range, signal), {
-		pollMs: 30000,
-		enabled: active,
-	});
+type CallMetric = "calls" | "errors";
 
-	return (
-		<div className="stats-route-container space-y-6">
-			<AsyncBoundary loading={loading} error={error} data={stats} emptyText={t("tools.emptyText")}>
-				{stats && (
-					<>
-						<ToolsSummaryPanel byTool={stats.byTool} />
-						<ToolCallsChart series={stats.series} timeRange={range} />
-						<ToolsTable byTool={stats.byTool} />
-						<ToolModelPanel byToolModel={stats.byToolModel} />
-					</>
-				)}
-			</AsyncBoundary>
-		</div>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Summary metrics
-// ---------------------------------------------------------------------------
-
-function ToolsSummaryPanel({ byTool }: { byTool: ToolUsageStats[] }) {
-	const { t, locale } = useTranslation();
-	const totals = useMemo(() => {
-		let calls = 0;
-		let errors = 0;
-		let tokens = 0;
-		let output = 0;
-		let cost = 0;
-		let unpricedRequests = 0;
-		let resultChars = 0;
-		let argsChars = 0;
-		for (const t of byTool) {
-			calls += t.calls;
-			errors += t.errors;
-			tokens += t.totalTokensShare;
-			output += t.outputTokensShare;
-			cost += t.costShare;
-			unpricedRequests += t.unpricedRequestsShare;
-			resultChars += t.resultChars;
-			argsChars += t.argsChars;
-		}
-		return { calls, errors, tokens, output, cost, unpricedRequests, resultChars, argsChars, tools: byTool.length };
-	}, [byTool]);
-
-	return (
-		<Panel
-			title="Tool Usage"
-			subtitle="Tokens and API-equivalent estimates are split from invoking turns across each turn's tool calls"
-		>
-			<div className="stats-metric-cluster">
-				<div className="stats-metric-primary-grid">
-					<div className="stats-metric-card primary">
-						<div className="stats-metric-label">{t("tools.metric.toolCalls")}</div>
-						<div className="stats-metric-value">{formatInteger(totals.calls)}</div>
-					</div>
-					<div className="stats-metric-card primary">
-						<div className="stats-metric-label">{t("tools.metric.toolsUsed")}</div>
-						<div className="stats-metric-value">{formatInteger(totals.tools)}</div>
-					</div>
-					<div className="stats-metric-card primary">
-						<div className="stats-metric-label">{t("tools.metric.errorRate")}</div>
-						<div className="stats-metric-value">
-							{formatPercent(totals.calls > 0 ? totals.errors / totals.calls : 0)}
-						</div>
-					</div>
-					<div className="stats-metric-card primary">
-						<div className="stats-metric-label">Attributed API-equivalent estimate</div>
-						<div className="stats-metric-value">{formatEstimatedCost(totals.cost, totals.unpricedRequests)}</div>
-					</div>
-				</div>
-
-				<div className="stats-metric-secondary-grid">
-					<div className="stats-metric-card secondary">
-						<div className="stats-metric-label">{t("tools.metric.attributedTokens")}</div>
-						<div className="stats-metric-value">{formatCompact(Math.round(totals.tokens), locale)}</div>
-					</div>
-					<div className="stats-metric-card secondary">
-						<div className="stats-metric-label">{t("tools.metric.attributedOutput")}</div>
-						<div className="stats-metric-value">{formatCompact(Math.round(totals.output), locale)}</div>
-					</div>
-					<div className="stats-metric-card secondary">
-						<div className="stats-metric-label">{t("tools.metric.resultText")}</div>
-						<div className="stats-metric-value">
-							{formatCompact(totals.resultChars, locale)} {t("tools.metric.charsSuffix")}
-						</div>
-					</div>
-					<div className="stats-metric-card secondary">
-						<div className="stats-metric-label">{t("tools.metric.callArguments")}</div>
-						<div className="stats-metric-value">
-							{formatCompact(totals.argsChars, locale)} {t("tools.metric.charsSuffix")}
-						</div>
-					</div>
-				</div>
-			</div>
-		</Panel>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Calls over time (stacked by top tools)
-// ---------------------------------------------------------------------------
-
+/** Tools stacked individually in the calls chart; the rest fold into "Other". */
 const TOP_TOOLS = 6;
 
-function buildToolCallSeries(
-	points: ToolTimeSeriesPoint[],
-	t: (key: string) => string,
-): {
-	buckets: number[];
-	tools: string[];
-	data: Map<number, Record<string, number>>;
-} {
-	const totals = new Map<string, number>();
-	for (const p of points) totals.set(p.tool, (totals.get(p.tool) ?? 0) + p.calls);
-	const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]);
-	const top = ranked.slice(0, TOP_TOOLS).map(([tool]) => tool);
-	const topSet = new Set(top);
-	const hasOther = ranked.length > top.length;
-	const tools = hasOther ? [...top, t("tools.chart.other")] : top;
+const ATTRIBUTION_NOTE_KEY =
+	"Tokens and API-equivalent cost of each invoking turn, split evenly across that turn's tool calls";
 
-	const buckets = [...new Set(points.map(p => p.timestamp))].sort((a, b) => a - b);
-	const data = new Map<number, Record<string, number>>();
-	for (const bucket of buckets) data.set(bucket, {});
-	for (const p of points) {
-		const label = topSet.has(p.tool) ? p.tool : t("tools.chart.other");
-		const row = data.get(p.timestamp);
-		if (row) row[label] = (row[label] ?? 0) + p.calls;
-	}
-	return { buckets, tools, data };
+/** Bucket word for chart subtitles ("5 minutes" / "hour" / "day"). */
+function bucketWord(bucketMs: number): string {
+	if (bucketMs < 3_600_000) return "common.bucket.5minutes";
+	if (bucketMs < 86_400_000) return "common.bucket.hour";
+	return "common.bucket.day";
 }
 
-function ToolCallsChart({ series, timeRange }: { series: ToolTimeSeriesPoint[]; timeRange: TimeRange }) {
-	const { t } = useTranslation();
-	const theme = useSystemTheme();
-	const chartTheme = CHART_THEMES[theme];
-	const meta = rangeMeta(timeRange, t);
+export function ToolsRoute({ active, range }: ToolsRouteProps) {
+	const { t, locale } = useTranslation();
+	const tools = useQuery(["tools", range], () => getToolDashboardStats(range), { enabled: active });
+	const [metric, setMetric] = useState<CallMetric>("calls");
+	const [hidden, toggleHidden] = useHiddenSeries();
+	const [pickedTool, setToolFilter] = useState<string | null>(null);
+	const meta = rangeMeta(range);
 
-	const chartSeries = useMemo(() => buildToolCallSeries(series, t), [series, t]);
-
-	const data = useMemo(
-		() => ({
-			labels: chartSeries.buckets.map(ts => formatRangeTick(ts, timeRange)),
-			datasets: chartSeries.tools.map((tool, index) => ({
-				label: tool,
-				data: chartSeries.buckets.map(bucket => chartSeries.data.get(bucket)?.[tool] ?? 0),
-				borderColor: MODEL_COLORS[index % MODEL_COLORS.length],
-				backgroundColor: `${MODEL_COLORS[index % MODEL_COLORS.length]}30`,
-				fill: true,
-				tension: 0.4,
-				pointRadius: 0,
-				pointHoverRadius: 4,
-				borderWidth: 2,
-			})),
-		}),
-		[chartSeries, timeRange],
+	const view = useMemo(() => buildToolsView(tools.data, range, t, locale), [tools.data, range, t, locale]);
+	const metricOptions = useMemo(
+		() => [
+			{ value: "calls" as const, label: t("tools.table.column.calls") },
+			{ value: "errors" as const, label: t("common.failed") },
+		],
+		[t],
 	);
+	const noCalls = <EmptyState title={t("tools.emptyText")} />;
+	// A pick from another range only applies while that tool still has calls.
+	const toolFilter = pickedTool !== null && view.toolNames.includes(pickedTool) ? pickedTool : null;
 
-	const options = useMemo(
-		() => ({
-			responsive: true,
-			maintainAspectRatio: false,
-			interaction: { mode: "index" as const, intersect: false },
-			plugins: {
-				legend: {
-					position: "top" as const,
-					align: "start" as const,
-					labels: {
-						color: chartTheme.legendLabel,
-						usePointStyle: true,
-						padding: 16,
-						font: { size: 12 },
-						boxWidth: 8,
-					},
-				},
-				tooltip: {
-					backgroundColor: chartTheme.tooltipBackground,
-					titleColor: chartTheme.tooltipTitle,
-					bodyColor: chartTheme.tooltipBody,
-					borderColor: chartTheme.tooltipBorder,
-					borderWidth: 1,
-					padding: 12,
-					cornerRadius: 8,
-					callbacks: {
-						label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) =>
-							`${context.dataset.label ?? ""}: ${formatInteger(context.parsed.y ?? 0)} ${t("tools.chart.tooltipCallsSuffix")}`,
-					},
-				},
-			},
-			scales: {
-				x: {
-					stacked: true,
-					grid: { color: chartTheme.grid, drawBorder: false },
-					ticks: { color: chartTheme.tick, font: { size: 11 } },
-				},
-				y: {
-					stacked: true,
-					grid: { color: chartTheme.grid, drawBorder: false },
-					ticks: { color: chartTheme.tick, font: { size: 11 }, precision: 0 },
-					min: 0,
-				},
-			},
-		}),
-		[chartTheme],
-	);
+	const chartSeries = metric === "calls" ? view.callSeries : view.errorSeries;
+	const isEmpty = (data: ToolDashboardStats) => data.byTool.length === 0;
 
 	return (
-		<Panel title={t("tools.chart.title")} subtitle={t("tools.chart.subtitle", { window: meta.windowLabel })}>
-			<div className="h-[280px]">
-				{chartSeries.buckets.length === 0 ? (
-					<div className="h-full flex items-center justify-center text-stats-muted text-sm">
-						{t("tools.chart.noData")}
-					</div>
-				) : (
-					<Line data={data} options={options} />
-				)}
-			</div>
-		</Panel>
-	);
-}
+		<div className="page">
+			<PageHeader
+				title={t("nav.section.tools")}
+				description={t("tools.pageDescription", { window: meta.windowLabel })}
+			/>
 
-// ---------------------------------------------------------------------------
-// Per-tool table
-// ---------------------------------------------------------------------------
+			<QueryView query={tools} skeleton={<ChartSkeleton height={112} />}>
+				{() => {
+					const totals = view.totals;
+					const attributionNote = t(ATTRIBUTION_NOTE_KEY);
+					return (
+						<div data-stale={tools.stale} className="stack" style={{ gap: 16 }}>
+							<StatGrid min={190}>
+								<Stat
+									label={t("tools.metric.toolCalls")}
+									value={formatInteger(totals.calls)}
+									hint={t("common.failedCount", { count: formatInteger(totals.errors) })}
+									spark={view.totalCalls}
+								/>
+								<Stat
+									label={t("tools.stat.distinctTools")}
+									value={formatInteger(totals.tools)}
+									hint={view.rows[0] ? t("tools.hint.mostUsed", { tool: view.rows[0].tool }) : undefined}
+								/>
+								<Stat
+									label={t("tools.metric.errorRate")}
+									title={t("tools.tooltip.errors")}
+									value={formatPercent(totals.calls > 0 ? totals.errors / totals.calls : 0)}
+									hint={t("common.succeededCount", {
+										count: formatInteger(totals.calls - totals.errors),
+									})}
+									spark={view.totalErrors}
+									sparkColor="var(--bad)"
+								/>
+								<Stat
+									label={t("tools.metric.attributedTokens")}
+									title={attributionNote}
+									value={formatCompact(Math.round(totals.tokens), locale)}
+									hint={t("common.hint.output", {
+										count: formatCompact(Math.round(totals.output), locale),
+									})}
+								/>
+								<Stat
+									label={t("tools.metric.attributedCost")}
+									title={`${attributionNote}; ${t("costs.apiEquivalent")}`}
+									value={formatEstimatedCost(totals.cost, totals.unpriced)}
+									hint={
+										totals.unpriced > 0
+											? t("tools.hint.unpricedRequests", {
+													count: formatInteger(Math.round(totals.unpriced)),
+												})
+											: t("costs.apiEquivalent")
+									}
+								/>
+							</StatGrid>
+							<StatGrid min={150}>
+								<Stat
+									size="sm"
+									label={t("tools.metric.resultText")}
+									title={t("tools.table.tooltip.resultText")}
+									value={`${formatCompact(totals.resultChars, locale)} ${t("tools.metric.charsSuffix")}`}
+								/>
+								<Stat
+									size="sm"
+									label={t("tools.metric.callArguments")}
+									title={t("tools.tooltip.args")}
+									value={`${formatCompact(totals.argsChars, locale)} ${t("tools.metric.charsSuffix")}`}
+								/>
+								<Stat
+									size="sm"
+									label={t("tools.stat.avgResult")}
+									value={`${formatCompact(totals.calls > 0 ? Math.round(totals.resultChars / totals.calls) : 0, locale)} ${t("tools.metric.charsSuffix")}`}
+								/>
+								<Stat
+									size="sm"
+									label={t("tools.stat.avgArgs")}
+									value={`${formatCompact(totals.calls > 0 ? Math.round(totals.argsChars / totals.calls) : 0, locale)} ${t("tools.metric.charsSuffix")}`}
+								/>
+							</StatGrid>
+						</div>
+					);
+				}}
+			</QueryView>
 
-function errorPillVariant(errorRate: number): "danger" | "warning" | "success" {
-	return errorRate > 0.1 ? "danger" : errorRate > 0 ? "warning" : "success";
-}
-
-function ToolsTable({ byTool }: { byTool: ToolUsageStats[] }) {
-	const { t, locale } = useTranslation();
-	const rows = useMemo(() => buildToolRows(byTool), [byTool]);
-
-	const columns = useMemo(
-		() => [
-			{
-				key: "tool",
-				header: t("tools.table.column.tool"),
-				render: (item: ToolRowView) => (
-					<div className="stats-font-medium stats-text-primary font-mono truncate max-w-[280px]" title={item.tool}>
-						{item.tool}
-					</div>
-				),
-			},
-			{
-				key: "calls",
-				header: t("tools.table.column.calls"),
-				numeric: true,
-				render: (item: ToolRowView) => (
-					<div className="stats-text-right">
-						<div className="font-mono">{formatInteger(item.calls)}</div>
-						<div className="stats-progress-bar-track mt-1 ml-auto w-24 h-1">
-							<div
-								className="stats-progress-bar-fill"
-								data-variant="link"
-								style={{ width: `${item.callsPercentage}%` }}
+			<Card
+				index={1}
+				title={metric === "calls" ? t("tools.chart.title") : t("tools.chart.errorsOverTime")}
+				description={t("tools.chart.stackedDescription", {
+					bucket: t(bucketWord(meta.bucketMs)),
+					top: TOP_TOOLS,
+				})}
+				actions={<Segmented size="sm" options={metricOptions} value={metric} onChange={setMetric} />}
+				stale={tools.stale}
+			>
+				<QueryView query={tools} skeleton={<ChartSkeleton height={260} />} isEmpty={isEmpty} empty={noCalls}>
+					{() => (
+						<div className="stack" style={{ gap: 12 }}>
+							<TimeChart
+								buckets={view.buckets}
+								bucketMs={meta.bucketMs}
+								series={chartSeries}
+								hidden={hidden}
+								height={260}
+								formatTooltip={formatInteger}
+								emptyLabel={metric === "errors" ? t("tools.emptyErrors") : undefined}
+							/>
+							<Legend
+								items={chartSeries.map(s => ({
+									key: s.key,
+									label: s.label,
+									color: s.color,
+									value: formatCompact(
+										s.values.reduce<number>((sum, v) => sum + (v ?? 0), 0),
+										locale,
+									),
+								}))}
+								hidden={hidden}
+								onToggle={toggleHidden}
 							/>
 						</div>
-					</div>
-				),
-			},
-			{
-				key: "errorRate",
-				header: t("tools.table.column.errorRate"),
-				numeric: true,
-				render: (item: ToolRowView) => (
-					<StatusPill variant={errorPillVariant(item.errorRate)}>{formatPercent(item.errorRate)}</StatusPill>
-				),
-			},
-			{
-				key: "tokens",
-				header: t("tools.table.column.attrTokens"),
-				numeric: true,
-				render: (item: ToolRowView) => (
-					<span className="font-mono" title={t("tools.table.tooltip.attrTokens")}>
-						{formatCompact(Math.round(item.totalTokensShare), locale)}
-					</span>
-				),
-			},
-			{
-				key: "cost",
-				header: t("costs.attrApiEquivalent"),
-				numeric: true,
-				render: (item: ToolRowView) => (
-					<span className="font-mono">{formatEstimatedCost(item.costShare, item.unpricedRequestsShare)}</span>
-				),
-			},
-			{
-				key: "resultChars",
-				header: t("tools.table.column.resultText"),
-				numeric: true,
-				render: (item: ToolRowView) => (
-					<span className="font-mono" title={t("tools.table.tooltip.resultText")}>
-						{formatCompact(item.resultChars, locale)}
-					</span>
-				),
-			},
-			{
-				key: "lastUsed",
-				header: t("tools.table.column.lastUsed"),
-				numeric: true,
-				render: (item: ToolRowView) => (
-					<span className="stats-text-secondary">{formatRelativeTime(item.lastUsed)}</span>
-				),
-			},
-		],
-		[],
-	);
+					)}
+				</QueryView>
+			</Card>
 
-	const renderMobileCard = (item: ToolRowView) => (
-		<div className="stats-mobile-card">
-			<div className="stats-mobile-card-header mb-2">
-				<div className="stats-font-semibold stats-text-primary font-mono">{item.tool}</div>
-				<StatusPill variant={errorPillVariant(item.errorRate)}>
-					{formatPercent(item.errorRate)} {t("tools.mobile.errSuffix")}
-				</StatusPill>
-			</div>
-			<div className="stats-mobile-card-grid">
-				<div>
-					<div className="stats-mobile-card-label">{t("tools.table.column.calls")}</div>
-					<div className="stats-mobile-card-value font-mono">{formatInteger(item.calls)}</div>
-				</div>
-				<div>
-					<div className="stats-mobile-card-label">{t("tools.table.column.attrTokens")}</div>
-					<div className="stats-mobile-card-value font-mono">
-						{formatCompact(Math.round(item.totalTokensShare), locale)}
+			<Card
+				index={2}
+				title={t("tools.table.byToolTitle")}
+				description={t("tools.byToolDescription")}
+				flush
+				stale={tools.stale}
+			>
+				<QueryView query={tools} skeleton={<TableSkeleton rows={8} />} isEmpty={isEmpty} empty={noCalls}>
+					{() => (
+						<Table
+							rows={view.rows}
+							rowKey={row => row.tool}
+							columns={view.toolColumns}
+							initialSort={{ key: "calls", dir: "desc" }}
+							limit={20}
+							selectedKey={toolFilter}
+							onRowClick={row => setToolFilter(prev => (prev === row.tool ? null : row.tool))}
+							dense
+						/>
+					)}
+				</QueryView>
+			</Card>
+
+			<Card
+				index={3}
+				title={t("tools.byToolAndModel.title")}
+				description={t("tools.byToolAndModel.description")}
+				flush
+				stale={tools.stale}
+				actions={
+					<div className="row" style={{ gap: 6 }}>
+						<select
+							className="input tools-filter"
+							value={toolFilter ?? ""}
+							onChange={e => setToolFilter(e.target.value || null)}
+							aria-label={t("tools.model.filterLabel")}
+						>
+							<option value="">{t("tools.model.filterAll")}</option>
+							{view.toolNames.map(name => (
+								<option key={name} value={name}>
+									{name}
+								</option>
+							))}
+						</select>
+						{toolFilter !== null && (
+							<button
+								type="button"
+								className="btn"
+								data-size="sm"
+								data-variant="ghost"
+								data-icon="true"
+								title={t("tools.clearFilter")}
+								aria-label={t("tools.clearFilter")}
+								onClick={() => setToolFilter(null)}
+							>
+								<X size={13} />
+							</button>
+						)}
 					</div>
-				</div>
-				<div>
-					<div className="stats-mobile-card-label">Attr. API-equivalent estimate</div>
-					<div className="stats-mobile-card-value font-mono">
-						{formatEstimatedCost(item.costShare, item.unpricedRequestsShare)}
-					</div>
-				</div>
-				<div>
-					<div className="stats-mobile-card-label">{t("tools.table.column.resultText")}</div>
-					<div className="stats-mobile-card-value font-mono">{formatCompact(item.resultChars, locale)}</div>
-				</div>
-			</div>
+				}
+			>
+				<QueryView query={tools} skeleton={<TableSkeleton rows={8} />} isEmpty={isEmpty} empty={noCalls}>
+					{data => <ToolModelTable rows={data.byToolModel} tool={toolFilter} colors={view.colors} />}
+				</QueryView>
+			</Card>
 		</div>
-	);
-
-	return (
-		<Panel title={t("tools.table.byToolTitle")} subtitle={t("tools.table.byToolSubtitle")}>
-			<DataTable
-				columns={columns}
-				data={rows}
-				keyExtractor={item => item.tool}
-				renderMobileCard={renderMobileCard}
-				emptyText={t("tools.emptyText")}
-			/>
-		</Panel>
 	);
 }
 
 // ---------------------------------------------------------------------------
-// Per-(tool, model) breakdown
+// View model
 // ---------------------------------------------------------------------------
 
-function ToolModelPanel({ byToolModel }: { byToolModel: ToolModelStats[] }) {
+interface ToolTotals {
+	calls: number;
+	errors: number;
+	tools: number;
+	tokens: number;
+	output: number;
+	cost: number;
+	unpriced: number;
+	resultChars: number;
+	argsChars: number;
+}
+
+function buildToolsView(data: ToolDashboardStats | null, range: TimeRange, tr: TranslationFn, locale: Locale) {
+	const byTool = data?.byTool ?? [];
+	const points = data?.series ?? [];
+	const rows = buildToolRows(byTool).sort((a, b) => b.calls - a.calls);
+	const colors = buildColorLookup(byTool.map(t => ({ key: t.tool, weight: t.calls })));
+	const buckets = bucketAxis(
+		range,
+		points.map(p => p.timestamp),
+	);
+
+	const totals: ToolTotals = {
+		calls: 0,
+		errors: 0,
+		tools: byTool.length,
+		tokens: 0,
+		output: 0,
+		cost: 0,
+		unpriced: 0,
+		resultChars: 0,
+		argsChars: 0,
+	};
+	for (const t of byTool) {
+		totals.calls += t.calls;
+		totals.errors += t.errors;
+		totals.tokens += t.totalTokensShare;
+		totals.output += t.outputTokensShare;
+		totals.cost += t.costShare;
+		totals.unpriced += t.unpricedRequestsShare;
+		totals.resultChars += t.resultChars;
+		totals.argsChars += t.argsChars;
+	}
+
+	// Every tool keeps its table swatch color in both metrics; zero slots become
+	// gaps so the tooltip lists only tools active in that bucket.
+	const [callSeries, errorSeries] = [(p: ToolTimeSeriesPoint) => p.calls, (p: ToolTimeSeriesPoint) => p.errors].map(
+		value =>
+			pivotSeries(points, { buckets, key: p => p.tool, value, limit: TOP_TOOLS, colors }).map(s => ({
+				...s,
+				values: s.values.map(v => v || null),
+			})),
+	);
+	// Unlimited pivot for the per-row sparklines.
+	const trends = new Map(
+		pivotSeries(points, { buckets, key: p => p.tool, value: p => p.calls }).map(s => [s.key, s.values as number[]]),
+	);
+
+	const maxCalls = rows[0]?.calls ?? 0;
+	const toolColumns = buildToolColumns(maxCalls, colors, trends, tr, locale);
+
+	return {
+		rows,
+		colors,
+		buckets,
+		totals,
+		callSeries,
+		errorSeries,
+		totalCalls: densify(points, buckets, p => p.calls),
+		totalErrors: densify(points, buckets, p => p.errors),
+		toolNames: rows.map(r => r.tool).sort((a, b) => a.localeCompare(b)),
+		toolColumns,
+	};
+}
+
+function buildToolColumns(
+	maxCalls: number,
+	colors: ReadonlyMap<string, string>,
+	trends: ReadonlyMap<string, number[]>,
+	t: TranslationFn,
+	locale: Locale,
+): Column<ToolRowView>[] {
+	const attributionNote = t(ATTRIBUTION_NOTE_KEY);
+	return [
+		{
+			key: "tool",
+			header: t("tools.table.column.tool"),
+			sort: row => row.tool,
+			render: row => (
+				<span className="row" style={{ gap: 8 }}>
+					<Swatch color={colors.get(row.tool) ?? OTHER_COLOR} />
+					<span className="mono truncate tools-name" title={row.tool}>
+						{row.tool}
+					</span>
+				</span>
+			),
+		},
+		{
+			key: "trend",
+			header: t("models.trend"),
+			title: t("tools.tooltip.trend"),
+			render: row => {
+				const values = trends.get(row.tool);
+				return values && values.length > 1 ? (
+					<Sparkline values={values} width={80} height={20} color={colors.get(row.tool) ?? OTHER_COLOR} />
+				) : (
+					<span className="dim">–</span>
+				);
+			},
+		},
+		{
+			key: "calls",
+			header: t("tools.table.column.calls"),
+			align: "right",
+			sort: row => row.calls,
+			render: row => (
+				<MeterCell
+					value={row.calls}
+					max={maxCalls}
+					display={
+						<span title={t("common.tooltip.shareOfCalls", { share: formatPercent(row.callFraction) })}>
+							{formatInteger(row.calls)}
+							<span className="dim tools-share">{formatPercent(row.callFraction, 0)}</span>
+						</span>
+					}
+				/>
+			),
+		},
+		{
+			key: "errorRate",
+			header: t("common.errors"),
+			title: t("tools.tooltip.errorColumn"),
+			align: "right",
+			sort: row => row.errorRate,
+			render: row => (
+				<span className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+					<span className="num dim">{formatInteger(row.errors)}</span>
+					<Badge tone={row.errors > 0 ? errorRateTone(row.errorRate) : "neutral"} mono>
+						{formatPercent(row.errorRate)}
+					</Badge>
+				</span>
+			),
+		},
+		{
+			key: "args",
+			header: t("tools.column.args"),
+			title: t("tools.tooltip.args"),
+			align: "right",
+			sort: row => row.argsChars,
+			render: row => <span className="num">{formatCompact(row.argsChars, locale)}</span>,
+		},
+		{
+			key: "result",
+			header: t("tools.table.column.resultText"),
+			title: t("tools.table.tooltip.resultText"),
+			align: "right",
+			sort: row => row.resultChars,
+			render: row => <span className="num">{formatCompact(row.resultChars, locale)}</span>,
+		},
+		{
+			key: "avgResult",
+			header: t("tools.column.resultPerCall"),
+			title: t("tools.tooltip.avgResult"),
+			align: "right",
+			sort: row => row.avgResultChars,
+			render: row => <span className="num muted">{formatCompact(Math.round(row.avgResultChars), locale)}</span>,
+		},
+		{
+			key: "tokens",
+			header: t("tools.table.column.attrTokens"),
+			title: attributionNote,
+			align: "right",
+			sort: row => row.totalTokensShare,
+			render: row => (
+				<span className="num" title={t("tools.tooltip.tokenShare", { share: formatPercent(row.tokenFraction) })}>
+					{formatCompact(Math.round(row.totalTokensShare), locale)}
+					<span className="dim tools-share">{formatPercent(row.tokenFraction, 0)}</span>
+				</span>
+			),
+		},
+		{
+			key: "cost",
+			header: t("tools.table.column.attrCost"),
+			title: `${attributionNote}; ${t("costs.apiEquivalent")}`,
+			align: "right",
+			sort: row => row.costShare,
+			render: row => (
+				<span className="num" title={t("tools.tooltip.costShare", { share: formatPercent(row.costFraction) })}>
+					{formatEstimatedCost(row.costShare, row.unpricedRequestsShare)}
+					<span className="dim tools-share">{formatPercent(row.costFraction, 0)}</span>
+				</span>
+			),
+		},
+		{
+			key: "lastUsed",
+			header: t("tools.table.column.lastUsed"),
+			align: "right",
+			sort: row => row.lastUsed,
+			render: row => <span className="muted">{formatRelativeTime(row.lastUsed, locale)}</span>,
+		},
+	];
+}
+
+// ---------------------------------------------------------------------------
+// Tool × model breakdown
+// ---------------------------------------------------------------------------
+
+interface ToolModelRow extends ToolModelStats {
+	errorRate: number;
+}
+
+function ToolModelTable({
+	rows,
+	tool,
+	colors,
+}: {
+	rows: ToolModelStats[];
+	tool: string | null;
+	colors: ReadonlyMap<string, string>;
+}) {
 	const { t, locale } = useTranslation();
-	const [tool, setTool] = useState<string | null>(null);
-
-	const tools = useMemo(() => [...new Set(byToolModel.map(row => row.tool))].sort(), [byToolModel]);
-
-	const rows = useMemo(() => {
-		const filtered = tool ? byToolModel.filter(row => row.tool === tool) : byToolModel;
-		return filtered.map(row => ({
-			...row,
-			errorRate: row.calls > 0 ? row.errors / row.calls : 0,
-		}));
-	}, [byToolModel, tool]);
-
-	const columns = useMemo(
-		() => [
+	const filtered = useMemo<ToolModelRow[]>(
+		() =>
+			(tool === null ? rows : rows.filter(r => r.tool === tool)).map(r => ({
+				...r,
+				errorRate: r.calls > 0 ? r.errors / r.calls : 0,
+			})),
+		[rows, tool],
+	);
+	const columns = useMemo<Column<ToolModelRow>[]>(() => {
+		const maxCalls = filtered.reduce((max, r) => Math.max(max, r.calls), 0);
+		return [
 			{
 				key: "tool",
 				header: t("tools.table.column.tool"),
-				render: (item: ToolModelStats & { errorRate: number }) => (
-					<span className="stats-font-medium stats-text-primary font-mono">{item.tool}</span>
+				sort: row => row.tool,
+				render: row => (
+					<span className="row" style={{ gap: 8 }}>
+						<Swatch color={colors.get(row.tool) ?? OTHER_COLOR} />
+						<span className="mono truncate tools-name" title={row.tool}>
+							{row.tool}
+						</span>
+					</span>
 				),
 			},
 			{
 				key: "model",
 				header: t("common.model"),
-				render: (item: ToolModelStats & { errorRate: number }) => (
-					<div>
-						<div className="stats-text-primary">{item.model || t("tools.model.unknown")}</div>
-						<div className="stats-text-secondary text-xs">{item.provider}</div>
-					</div>
+				sort: row => row.model,
+				render: row => (
+					<LabelCell
+						primary={<span className="mono">{row.model || t("tools.model.unknown")}</span>}
+						secondary={row.provider}
+					/>
 				),
 			},
 			{
 				key: "calls",
 				header: t("tools.table.column.calls"),
-				numeric: true,
-				render: (item: ToolModelStats & { errorRate: number }) => (
-					<span className="font-mono">{formatInteger(item.calls)}</span>
-				),
+				align: "right",
+				sort: row => row.calls,
+				render: row => <MeterCell value={row.calls} max={maxCalls} display={formatInteger(row.calls)} />,
 			},
 			{
 				key: "errorRate",
-				header: t("tools.table.column.errorRate"),
-				numeric: true,
-				render: (item: ToolModelStats & { errorRate: number }) => (
-					<StatusPill variant={errorPillVariant(item.errorRate)}>{formatPercent(item.errorRate)}</StatusPill>
+				header: t("common.errors"),
+				align: "right",
+				sort: row => row.errorRate,
+				render: row => (
+					<span className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+						<span className="num dim">{formatInteger(row.errors)}</span>
+						<Badge tone={row.errors > 0 ? errorRateTone(row.errorRate) : "neutral"} mono>
+							{formatPercent(row.errorRate)}
+						</Badge>
+					</span>
 				),
+			},
+			{
+				key: "result",
+				header: t("tools.table.column.resultText"),
+				title: t("tools.table.tooltip.resultText"),
+				align: "right",
+				sort: row => row.resultChars,
+				render: row => <span className="num">{formatCompact(row.resultChars, locale)}</span>,
 			},
 			{
 				key: "tokens",
 				header: t("tools.table.column.attrTokens"),
-				numeric: true,
-				render: (item: ToolModelStats & { errorRate: number }) => (
-					<span className="font-mono">{formatCompact(Math.round(item.totalTokensShare), locale)}</span>
-				),
+				title: t(ATTRIBUTION_NOTE_KEY),
+				align: "right",
+				sort: row => row.totalTokensShare,
+				render: row => <span className="num">{formatCompact(Math.round(row.totalTokensShare), locale)}</span>,
 			},
 			{
 				key: "cost",
-				header: t("costs.attrApiEquivalent"),
-				numeric: true,
-				render: (item: ToolModelStats & { errorRate: number }) => (
-					<span className="font-mono">{formatEstimatedCost(item.costShare, item.unpricedRequestsShare)}</span>
-				),
+				header: t("tools.table.column.attrCost"),
+				title: `${t(ATTRIBUTION_NOTE_KEY)}; ${t("costs.apiEquivalent")}`,
+				align: "right",
+				sort: row => row.costShare,
+				render: row => <span className="num">{formatEstimatedCost(row.costShare, row.unpricedRequestsShare)}</span>,
 			},
-		],
-		[],
-	);
+			{
+				key: "lastUsed",
+				header: t("tools.table.column.lastUsed"),
+				align: "right",
+				sort: row => row.lastUsed,
+				render: row => <span className="muted">{formatRelativeTime(row.lastUsed, locale)}</span>,
+			},
+		];
+	}, [filtered, colors]);
 
 	return (
-		<Panel title={t("tools.model.title")} subtitle={t("tools.model.subtitle")}>
-			<div className="mb-4" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-				<span className="stats-text-secondary" style={{ fontSize: "0.875rem", whiteSpace: "nowrap" }}>
-					{t("tools.model.filterLabel")}
-				</span>
-				<select
-					className="stats-select"
-					value={tool ?? ""}
-					onChange={e => setTool(e.target.value || null)}
-					style={{ maxWidth: "320px", flex: 1 }}
-				>
-					<option value="">{t("tools.model.filterAll")}</option>
-					{tools.map(name => (
-						<option key={name} value={name}>
-							{name}
-						</option>
-					))}
-				</select>
-			</div>
-			<DataTable
-				columns={columns}
-				data={rows}
-				keyExtractor={item => `${item.tool}::${item.model}::${item.provider}`}
-				emptyText={t("tools.emptyText")}
-			/>
-		</Panel>
+		<Table
+			rows={filtered}
+			rowKey={row => `${row.tool}::${row.model}::${row.provider}`}
+			columns={columns}
+			initialSort={{ key: "calls", dir: "desc" }}
+			limit={25}
+			dense
+			empty={<EmptyState title={tool ? t("tools.noCallsTo", { tool }) : t("tools.emptyText")} />}
+		/>
 	);
 }

@@ -1,154 +1,342 @@
 import { useMemo, useState } from "react";
-import { getModelList, getRecentRequests } from "../api";
-import { formatDurationMs, formatInteger, formatMessageCost, formatRelativeTime } from "../data/formatters";
-import { useResource } from "../data/useResource";
+import { getRecentRequests } from "../api";
+import {
+	formatCompact,
+	formatDurationMs,
+	formatEstimatedCost,
+	formatFolder,
+	formatInteger,
+	formatMessageCost,
+	formatPercent,
+	formatRelativeTime,
+	formatTimestamp,
+} from "../data/formatters";
+import { useQuery } from "../data/query";
+import { rangeMeta } from "../data/range";
+import { type RequestStatus, requestStatus, summarizeRequests } from "../data/view-models";
 import { useTranslation } from "../i18n";
 import type { MessageStats, TimeRange } from "../types";
-import { AsyncBoundary, DataTable, ModelFilter, Pagination, Panel, StatusPill } from "../ui";
-
-const PAGE_SIZE = 50;
+import {
+	Card,
+	type Column,
+	Dot,
+	EmptyState,
+	LabelCell,
+	PageHeader,
+	QueryView,
+	SearchInput,
+	Segmented,
+	Skeleton,
+	Stat,
+	StatGrid,
+	Table,
+	TableSkeleton,
+} from "../ui";
+import { requestStatusLabel, REQUEST_STATUS } from "../ui/RequestDrawer";
 
 export interface RequestsRouteProps {
 	active: boolean;
 	range: TimeRange;
-	refreshTrigger: number;
 	onRequestClick: (id: number) => void;
 }
 
-export function RequestsRoute({ active, refreshTrigger, onRequestClick }: RequestsRouteProps) {
+/** How many of the newest requests to load; "Load more" steps through these. */
+const LOAD_STEPS = [500, 2_000, 10_000] as const;
+
+type StatusFilter = "all" | RequestStatus;
+
+export function RequestsRoute({ active, range, onRequestClick }: RequestsRouteProps) {
 	const { t, locale } = useTranslation();
-	const [page, setPage] = useState(1);
-	const [modelFilter, setModelFilter] = useState<string | null>(null);
+	const [step, setStep] = useState(0);
+	const limit = LOAD_STEPS[step];
+	const log = useQuery(["requests-log", limit], () => getRecentRequests(limit), { enabled: active });
+	const [search, setSearch] = useState("");
+	const [status, setStatus] = useState<StatusFilter>("all");
+	const meta = rangeMeta(range);
 
-	const offset = (page - 1) * PAGE_SIZE;
+	const view = useMemo(() => {
+		const rows = log.data ?? [];
+		const cutoff = meta.spanMs === null ? null : Date.now() - meta.spanMs;
+		const inRange = cutoff === null ? rows : rows.filter(row => row.timestamp >= cutoff);
+		// The loaded window covers the whole range when the server ran out of rows
+		// or the oldest loaded row is already older than the range start. Stale
+		// rows belong to a smaller limit that is being replaced.
+		const complete = !log.stale && (rows.length < limit || (cutoff !== null && inRange.length < rows.length));
+		const counts: Record<StatusFilter, number> = { all: inRange.length, ok: 0, aborted: 0, failed: 0 };
+		for (const row of inRange) counts[requestStatus(row)]++;
+		return { loaded: rows.length, inRange, complete, counts, summary: summarizeRequests(inRange) };
+	}, [log.data, log.stale, limit, meta.spanMs]);
 
-	// Fetch model list for the filter dropdown
-	const { data: models } = useResource(["models-list"], signal => getModelList(signal), {
-		enabled: active,
-	});
+	const filtered = useMemo(() => {
+		const needle = search.trim().toLowerCase();
+		return view.inRange.filter(
+			row =>
+				(status === "all" || requestStatus(row) === status) &&
+				(needle === "" ||
+					row.model.toLowerCase().includes(needle) ||
+					row.provider.toLowerCase().includes(needle) ||
+					row.folder.toLowerCase().includes(needle)),
+		);
+	}, [view.inRange, search, status]);
 
-	const {
-		data: result,
-		error,
-		loading,
-	} = useResource(
-		["recent-requests-dense", refreshTrigger, page, modelFilter],
-		signal => getRecentRequests(PAGE_SIZE, offset, modelFilter ?? undefined, signal),
-		{
-			pollMs: 30000,
-			enabled: active,
-		},
-	);
-
-	const recentRequests = result?.items ?? null;
-	const total = result?.total ?? 0;
-
-	const handleModelChange = (model: string | null) => {
-		setModelFilter(model);
-		setPage(1);
-	};
-
-	const columns = useMemo(
+	// Upstream hoists these to module scope; they live in the component so the
+	// localized headers can reach `t` without changing the table's sort contract.
+	const columns = useMemo<readonly Column<MessageStats>[]>(
 		() => [
 			{
 				key: "model",
-				header: t("requests.column.model"),
-				render: (item: MessageStats) => (
-					<div>
-						<div className="stats-font-medium stats-text-primary">{item.model}</div>
-						<div className="stats-text-xs stats-text-muted">{item.provider}</div>
-					</div>
+				header: t("common.model"),
+				sort: row => row.model,
+				render: row => <LabelCell primary={<span className="mono">{row.model}</span>} secondary={row.provider} />,
+			},
+			{
+				key: "time",
+				header: t("common.when"),
+				sort: row => row.timestamp,
+				render: row => (
+					<span className="muted" title={formatTimestamp(row.timestamp)}>
+						{formatRelativeTime(row.timestamp, locale)}
+					</span>
 				),
 			},
 			{
-				key: "timestamp",
-				header: t("requests.column.time"),
-				render: (item: MessageStats) => formatRelativeTime(item.timestamp, locale),
+				key: "project",
+				header: t("gain.project"),
+				sort: row => row.folder,
+				render: row => (
+					<span className="mono muted truncate" title={row.folder} style={{ display: "block", maxWidth: 180 }}>
+						{formatFolder(row.folder)}
+					</span>
+				),
 			},
 			{
-				key: "tokens",
-				header: t("requests.column.tokens"),
-				numeric: true,
-				render: (item: MessageStats) => formatInteger(item.usage.totalTokens),
+				key: "input",
+				header: t("common.input"),
+				title: t("common.uncachedInputTokens"),
+				align: "right",
+				sort: row => row.usage.input,
+				render: row => <span className="num">{formatCompact(row.usage.input, locale)}</span>,
+			},
+			{
+				key: "cache",
+				header: t("common.cacheRead"),
+				title: t("requests.tooltip.cacheRead"),
+				align: "right",
+				sort: row => row.usage.cacheRead,
+				render: row => (
+					<span
+						className="num"
+						title={t("requests.tooltip.cacheWrite", { count: formatInteger(row.usage.cacheWrite) })}
+					>
+						{formatCompact(row.usage.cacheRead, locale)}
+					</span>
+				),
+			},
+			{
+				key: "output",
+				header: t("common.output"),
+				align: "right",
+				sort: row => row.usage.output,
+				render: row => <span className="num">{formatCompact(row.usage.output, locale)}</span>,
 			},
 			{
 				key: "cost",
-				header: "API-equivalent estimate",
-				numeric: true,
-				render: (item: MessageStats) => formatMessageCost(item, 4),
+				header: t("common.cost"),
+				title: t("costs.apiEquivalent"),
+				align: "right",
+				sort: row => row.usage.cost.total,
+				render: row => <span className="num">{formatMessageCost(row, 4)}</span>,
 			},
 			{
 				key: "duration",
-				header: t("requests.column.duration"),
-				numeric: true,
-				render: (item: MessageStats) => formatDurationMs(item.duration),
+				header: t("common.duration"),
+				align: "right",
+				sort: row => row.duration ?? -1,
+				render: row => <span className="num">{formatDurationMs(row.duration)}</span>,
+			},
+			{
+				key: "ttft",
+				header: t("detail.ttft"),
+				title: t("models.title.ttft"),
+				align: "right",
+				sort: row => row.ttft ?? -1,
+				render: row => <span className="num muted">{formatDurationMs(row.ttft)}</span>,
 			},
 			{
 				key: "status",
-				header: t("requests.column.status"),
-				className: "stats-text-center",
-				render: (item: MessageStats) => (
-					<StatusPill variant={item.errorMessage ? "danger" : "success"}>
-						{item.errorMessage ? t("requests.status.failed") : t("requests.status.success")}
-					</StatusPill>
-				),
+				header: t("common.status"),
+				sort: row => requestStatus(row),
+				render: row => {
+					const status = REQUEST_STATUS[requestStatus(row)];
+					return (
+						<span title={row.errorMessage ?? undefined}>
+							<LabelCell
+								lead={<Dot tone={status.tone} />}
+								primary={requestStatusLabel(t, requestStatus(row))}
+								secondary={<span className="mono">{row.stopReason}</span>}
+							/>
+						</span>
+					);
+				},
 			},
 		],
 		[t, locale],
 	);
 
-	const renderMobileCard = (item: MessageStats, onClick?: () => void) => (
-		<div className="stats-mobile-card" onClick={onClick}>
-			<div className="stats-mobile-card-header">
-				<div>
-					<div className="stats-font-semibold stats-text-primary">{item.model}</div>
-					<div className="stats-text-xs stats-text-muted">{item.provider}</div>
-				</div>
-				<StatusPill variant={item.errorMessage ? "danger" : "success"}>
-					{item.errorMessage ? t("requests.status.failed") : t("requests.status.success")}
-				</StatusPill>
-			</div>
-			<div className="stats-mobile-card-grid">
-				<div>
-					<div className="stats-mobile-card-label">{t("requests.column.time")}</div>
-					<div className="stats-mobile-card-value">{formatRelativeTime(item.timestamp, locale)}</div>
-				</div>
-				<div>
-					<div className="stats-mobile-card-label">{t("costs.apiEquivalent")}</div>
-					<div className="stats-mobile-card-value">{formatMessageCost(item, 4)}</div>
-				</div>
-				<div>
-					<div className="stats-mobile-card-label">{t("requests.column.tokens")}</div>
-					<div className="stats-mobile-card-value">{formatInteger(item.usage.totalTokens)}</div>
-				</div>
-				<div>
-					<div className="stats-mobile-card-label">{t("requests.column.duration")}</div>
-					<div className="stats-mobile-card-value">{formatDurationMs(item.duration)}</div>
-				</div>
-			</div>
-			{item.errorMessage && <div className="stats-mobile-card-error truncate mt-2">{item.errorMessage}</div>}
-		</div>
-	);
+	const { summary, counts, complete } = view;
+	const nextStep = step + 1 < LOAD_STEPS.length ? LOAD_STEPS[step + 1] : null;
+	const loadMore =
+		nextStep !== null ? (
+			<button
+				type="button"
+				className="btn"
+				data-size="sm"
+				disabled={log.refreshing}
+				onClick={() => setStep(step + 1)}
+			>
+				{log.refreshing && log.stale
+					? t("common.loading")
+					: t("requests.loadLatest", { count: formatInteger(nextStep) })}
+			</button>
+		) : undefined;
+
+	const statusOptions = (["all", "ok", "aborted", "failed"] as const).map(value => ({
+		value,
+		label: (
+			<>
+				{value === "all" ? t("range.all") : requestStatusLabel(t, value)}{" "}
+				<span className="dim num">{formatCompact(counts[value], locale)}</span>
+			</>
+		),
+	}));
 
 	return (
-		<div className="stats-route-container">
-			<Panel
-				title={t("requests.title")}
-				subtitle={t("requests.subtitle")}
-				actions={<ModelFilter models={models ?? []} value={modelFilter} onChange={handleModelChange} />}
+		<div className="page">
+			<PageHeader
+				title={t("nav.section.requests")}
+				description={t("requests.pageDescription", { window: meta.windowLabel })}
+			/>
+
+			<QueryView query={log} skeleton={<Skeleton height={96} style={{ borderRadius: 12 }} />}>
+				{() => (
+					<div data-stale={log.stale}>
+						<StatGrid min={160}>
+							<Stat
+								label={t("common.requests")}
+								value={formatInteger(summary.requests)}
+								hint={
+									summary.oldest === null
+										? t("requests.hint.noneIn", { window: meta.windowLabel })
+										: t("requests.hint.since", {
+												time: formatRelativeTime(summary.oldest, locale),
+											})
+								}
+							/>
+							<Stat
+								label={t("common.failed")}
+								value={formatInteger(summary.failed)}
+								hint={`${summary.requests > 0 ? formatPercent(summary.failed / summary.requests) : "–"} · ${t("requests.hint.aborted", { count: formatInteger(summary.aborted) })}`}
+							/>
+							<Stat
+								label={t("common.tokens")}
+								title={t("requests.tooltip.totalTokens")}
+								value={formatCompact(summary.tokens, locale)}
+							/>
+							<Stat
+								label={t("costs.apiEquivalent")}
+								title={t("requests.tooltip.apiEquivalent")}
+								value={formatEstimatedCost(summary.cost, summary.unpriced)}
+								hint={
+									summary.unpriced > 0
+										? t("common.unpricedCount", { count: formatInteger(summary.unpriced) })
+										: undefined
+								}
+							/>
+							<Stat
+								label={t("requests.medianDuration")}
+								value={formatDurationMs(summary.medianDuration)}
+								hint={t("requests.hint.p95", { time: formatDurationMs(summary.p95Duration) })}
+							/>
+							<Stat
+								label={t("requests.medianTtft")}
+								title={t("models.title.ttft")}
+								value={formatDurationMs(summary.medianTtft)}
+							/>
+						</StatGrid>
+					</div>
+				)}
+			</QueryView>
+
+			<Card
+				index={1}
+				title={t("requests.log.title")}
+				description={
+					log.data === null
+						? t("requests.log.loading")
+						: complete
+							? t("requests.log.countOfIn", {
+									count: formatInteger(filtered.length),
+									total: formatInteger(summary.requests),
+									window: meta.windowLabel,
+								})
+							: t("requests.log.countOfLatest", {
+									count: formatInteger(filtered.length),
+									total: formatInteger(summary.requests),
+								})
+				}
+				actions={
+					<>
+						<SearchInput value={search} onChange={setSearch} placeholder={t("requests.searchPlaceholder")} />
+						<Segmented
+							size="sm"
+							aria-label={t("common.status")}
+							options={statusOptions}
+							value={status}
+							onChange={setStatus}
+						/>
+					</>
+				}
+				flush
+				stale={log.stale}
+				footer={
+					log.data !== null && !complete ? (
+						<>
+							<span>
+								{t("requests.footer", {
+									count: formatInteger(view.loaded),
+									oldest: summary.oldest === null ? "–" : formatTimestamp(summary.oldest),
+									window: meta.windowLabel,
+								})}
+							</span>
+							{loadMore}
+						</>
+					) : undefined
+				}
 			>
-				<AsyncBoundary loading={loading} error={error} data={recentRequests}>
-					<DataTable
-						columns={columns}
-						data={recentRequests || []}
-						keyExtractor={item => item.id || `${item.sessionFile}-${item.entryId}`}
-						onRowClick={item => item.id && onRequestClick(item.id)}
-						renderMobileCard={renderMobileCard}
-						emptyText={t("requests.noRequests")}
-					/>
-				</AsyncBoundary>
-				<Pagination currentPage={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
-			</Panel>
+				<QueryView query={log} skeleton={<TableSkeleton rows={12} />}>
+					{() => (
+						<Table
+							rows={filtered}
+							rowKey={row => row.id ?? `${row.sessionFile}:${row.entryId}`}
+							onRowClick={row => row.id !== undefined && onRequestClick(row.id)}
+							columns={columns}
+							initialSort={{ key: "time", dir: "desc" }}
+							limit={100}
+							dense
+							empty={
+								<EmptyState
+									title={
+										summary.requests === 0
+											? t("requests.noRequestsIn", { window: meta.windowLabel })
+											: t("requests.noMatch.title")
+									}
+									hint={summary.requests === 0 ? undefined : t("requests.noMatch.hint")}
+								/>
+							}
+						/>
+					)}
+				</QueryView>
+			</Card>
 		</div>
 	);
 }

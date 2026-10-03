@@ -18,7 +18,6 @@ import {
 } from "../render";
 import {
 	createCachedComponent,
-	formatCount,
 	formatEmptyMessage,
 	formatErrorMessage,
 	PREVIEW_LIMITS,
@@ -26,8 +25,14 @@ import {
 } from "../render/render-utils";
 import type { Theme, ThemeColor } from "../theme/theme";
 import type { Component } from "../tui";
+import { tuiT } from "../i18n-host";
 import type { OutputMeta } from "./output-meta";
-import type { RenderResultOptions, ToolRenderer } from "./renderer";
+import type { NativeToolHead, NativeToolView, RenderResultOptions, ToolRenderer } from "./renderer";
+import type { TspTone } from "@oh-my-pi/pi-wire";
+import { code, col, compact, keyed, node, span, text } from "../native/describe";
+import type { NativeChild, NativeNode } from "../native/node";
+import { getLanguageFromPath } from "../lang-from-path";
+import { fileHref, fileRow, inlineErrorView } from "./native-view";
 import { splitUrlScheme } from "./url-scheme-host";
 
 /** A verified line range with its yes-probability and a one-line preview. */
@@ -133,7 +138,7 @@ function renderHit(hit: FindHit, rangeLimit: number, cwd: string | undefined, th
 		const absPath = cwd === undefined ? undefined : path.join(cwd, hit.rel);
 		return absPath === undefined ? text : fileHyperlink(absPath, text, { line });
 	};
-	const coverage = hit.truncated ? `${hit.linesSeen} lines judged, partial` : `${hit.linesSeen} lines judged`;
+	const coverage = coverageLabel(hit.linesSeen, hit.truncated);
 	const lines = [
 		`${gauge(hit.contentScore, theme)} ${theme.fg(scoreColor(hit.contentScore), hit.contentScore.toFixed(2))} ${link(theme.fg("accent", hit.rel))} ${theme.fg("dim", coverage)}`,
 	];
@@ -148,6 +153,109 @@ function renderHit(hit: FindHit, rangeLimit: number, cwd: string | undefined, th
 	return lines;
 }
 
+function scoreTone(p: number): TspTone {
+	return p >= STRONG ? "success" : p >= PLAUSIBLE ? "warning" : "muted";
+}
+
+// =============================================================================
+// Localized labels
+// =============================================================================
+
+/** `N lines judged` coverage note, with the `partial` marker for clipped files. */
+function coverageLabel(linesSeen: number, truncated: boolean): string {
+	return truncated
+		? tuiT("ui.find.linesJudgedPartial", "{count} lines judged, partial", { count: linesSeen })
+		: tuiT("ui.find.linesJudged", "{count} lines judged", { count: linesSeen });
+}
+
+/** `in <path>` scope marker for a narrowed search root. */
+function inPathLabel(path: string): string {
+	return tuiT("ui.find.inPath", "in {path}", { path });
+}
+
+/** `N hits` / `N hit` result count. */
+function hitCountLabel(count: number): string {
+	return count === 1
+		? tuiT("ui.find.hitCountOne", "{count} hit", { count })
+		: tuiT("ui.find.hitCount", "{count} hits", { count });
+}
+
+/** `N files` / `N file` files-read count. */
+function fileCountLabel(count: number): string {
+	return count === 1
+		? tuiT("ui.find.fileCountOne", "{count} file", { count })
+		: tuiT("ui.find.fileCount", "{count} files", { count });
+}
+
+/** `N files read` accounting entry. */
+function filesReadLabel(count: number): string {
+	return tuiT("ui.find.filesRead", "{count} files read", { count });
+}
+
+/** `N tokens` accounting entry; the count arrives pre-formatted in one path. */
+function tokensLabel(count: number | string): string {
+	return tuiT("ui.find.tokens", "{count} tokens", { count });
+}
+
+/** `N failed` warning tally for request errors. */
+function failedLabel(count: number): string {
+	return tuiT("ui.find.failed", "{count} failed", { count });
+}
+
+/** `keywords: a, b, c` expanded-view footnote. */
+function keywordsLabel(keywords: readonly string[]): string {
+	return tuiT("ui.find.keywords", "keywords: {keywords}", { keywords: keywords.join(", ") });
+}
+
+/** τ threshold / tokens / cost / duration accounting shown in the head tooltip. */
+function findAccounting(stats: FindStats, threshold: number, elapsedMs: number): string {
+	return [
+		filesReadLabel(stats.filesRead),
+		`τ ${threshold.toFixed(2)}`,
+		tokensLabel(formatNumber(stats.inputTokens)),
+		`$${stats.cost.toFixed(4)}`,
+		formatDuration(elapsedMs),
+	].join(" · ");
+}
+
+/** Native find head: the query, then `meta` (result counts), or the call's keywords and scope. */
+function findNativeHead(
+	query: string | undefined,
+	meta: readonly NonNullable<NativeToolHead["meta"]>[number][],
+): NativeToolHead {
+	return { title: tuiT("ui.find.title", "Find"), target: query ?? "", targetKind: "query", meta };
+}
+
+/**
+ * One hit (§7.3 find): a 22px row of the score bar, the path and `12 lines
+ * judged`, then its strongest ranges as numbered `code` (no path header).
+ */
+function describeHit(hit: FindHit, rangeLimit: number, cwd: string | undefined): NativeNode {
+	const ranges = [...hit.ranges].sort((a, b) => b.p - a.p || a.start - b.start).slice(0, rangeLimit);
+	const tone = scoreTone(hit.contentScore);
+	const score = hit.contentScore.toFixed(2);
+	const isUrlHit = splitUrlScheme(hit.rel) !== undefined;
+	const head = fileRow(hit.rel, {
+		lead: node("progress", {
+			value: hit.contentScore,
+			tone,
+			title: tuiT("ui.find.scoreTitle", "score {score}", { score }),
+			max: { w: 40 },
+		}),
+		detail: [span(score, tone), span(` · ${coverageLabel(hit.linesSeen, hit.truncated)}`, "muted")],
+		href: isUrlHit || cwd === undefined ? undefined : fileHref(path.join(cwd, hit.rel)),
+		key: "hit",
+	});
+	const lang = getLanguageFromPath(hit.rel);
+	const snippets = ranges.map(range =>
+		keyed(
+			code(range.snippet.trimEnd(), { lang, start: range.start, numbers: true, title: range.p.toFixed(2) }),
+			`${range.start}-${range.end}`,
+		),
+	);
+	return keyed(col([head, ...snippets], { gap: "xs", role: "omp.tool.find.hit" }), hit.rel);
+}
+
 function quoteQuery(query: string | undefined): string | undefined {
 	return query === undefined ? undefined : `"${query}"`;
 }
@@ -157,12 +265,12 @@ export const findToolRenderer = {
 	renderCall(args: FindRenderArgs, options: RenderResultOptions, uiTheme: Theme): Component {
 		const keywords = args.grep_keywords ?? [];
 		const meta = keywords.length > 0 ? [keywords.join(" ")] : [];
-		if (args.path) meta.push(`in ${args.path}`);
+		if (args.path) meta.push(inPathLabel(args.path));
 		const text = renderStatusLine(
 			{
 				icon: "pending",
 				spinnerFrame: options.spinnerFrame,
-				title: "Find",
+				title: tuiT("ui.find.title", "Find"),
 				titleColor: "toolTitle",
 				description: quoteQuery(args.query),
 				meta,
@@ -182,7 +290,7 @@ export const findToolRenderer = {
 		const text = result.content?.find(c => c.type === "text")?.text ?? "";
 
 		if (result.isError) {
-			return new Text(formatErrorMessage(text || "Unknown error", uiTheme), 1, 0);
+			return new Text(formatErrorMessage(text || tuiT("ui.find.unknownError", "Unknown error"), uiTheme), 1, 0);
 		}
 
 		// Streaming progress: the tool reports the phase it is in.
@@ -191,7 +299,7 @@ export const findToolRenderer = {
 				{
 					icon: "pending",
 					spinnerFrame: options.spinnerFrame,
-					title: "Find",
+					title: tuiT("ui.find.title", "Find"),
 					titleColor: "toolTitle",
 					description: quoteQuery(args?.query ?? details?.query),
 					meta: text ? [text] : [],
@@ -203,26 +311,37 @@ export const findToolRenderer = {
 
 		const { hits, stats, threshold } = details;
 		const description = quoteQuery(details.query);
-		const scope = details.scopePath === undefined ? [] : [`in ${details.scopePath}`];
+		const scope = details.scopePath === undefined ? [] : [inPathLabel(details.scopePath)];
 		const meta = [
-			formatCount("hit", hits.length),
+			hitCountLabel(hits.length),
 			...scope,
-			`${stats.filesRead} files read`,
+			filesReadLabel(stats.filesRead),
 			`τ ${threshold.toFixed(2)}`,
-			`${formatNumber(stats.inputTokens)} tokens`,
+			tokensLabel(formatNumber(stats.inputTokens)),
 			`$${stats.cost.toFixed(4)}`,
 			formatDuration(details.elapsedMs),
 		];
-		if (stats.errors > 0) meta.push(uiTheme.fg("warning", `${stats.errors} failed`));
+		if (stats.errors > 0) meta.push(uiTheme.fg("warning", failedLabel(stats.errors)));
 
 		if (hits.length === 0) {
-			const emptyMeta = ["0 hits", ...scope, `$${stats.cost.toFixed(4)}`, formatDuration(details.elapsedMs)];
-			if (stats.errors > 0) emptyMeta.push(uiTheme.fg("warning", `${stats.errors} failed`));
+			const emptyMeta = [
+				tuiT("ui.find.zeroHits", "0 hits"),
+				...scope,
+				`$${stats.cost.toFixed(4)}`,
+				formatDuration(details.elapsedMs),
+			];
+			if (stats.errors > 0) emptyMeta.push(uiTheme.fg("warning", failedLabel(stats.errors)));
 			const header = renderStatusLine(
-				{ icon: "warning", title: "Find", titleColor: "toolTitle", description, meta: emptyMeta },
+				{
+					icon: "warning",
+					title: tuiT("ui.find.title", "Find"),
+					titleColor: "toolTitle",
+					description,
+					meta: emptyMeta,
+				},
 				uiTheme,
 			);
-			const lines = [header, formatEmptyMessage("No relevant passages found", uiTheme)];
+			const lines = [header, formatEmptyMessage(tuiT("ui.find.noPassages", "No relevant passages found"), uiTheme)];
 			for (const failure of stats.failures) lines.push(uiTheme.fg("warning", failure));
 			return new Text(lines.join("\n"), 1, 0);
 		}
@@ -230,7 +349,7 @@ export const findToolRenderer = {
 		const header = renderStatusLine(
 			{
 				iconOverride: uiTheme.fg("toolTitle", uiTheme.symbol("icon.search")),
-				title: "Find",
+				title: tuiT("ui.find.title", "Find"),
 				titleColor: "toolTitle",
 				description,
 				meta,
@@ -255,13 +374,86 @@ export const findToolRenderer = {
 				);
 				const extra: string[] = [];
 				if (expanded) {
-					extra.push(uiTheme.fg("dim", `keywords: ${details.keywords.join(", ")}`));
+					extra.push(uiTheme.fg("dim", keywordsLabel(details.keywords)));
 					for (const failure of stats.failures) extra.push(uiTheme.fg("warning", failure));
 				}
 				return [header, ...hitLines, ...extra].map(line => truncateToWidth(line, width, Ellipsis.Omit));
 			},
 			{ paddingX: 1 },
 		);
+	},
+	describeCall(args: FindRenderArgs): NativeToolView {
+		const keywords = args.grep_keywords ?? [];
+		return {
+			tool: findNativeHead(
+				args.query,
+				compact([keywords.length > 0 && keywords.join(" "), args.path && inPathLabel(args.path)]),
+			),
+			inline: true,
+		};
+	},
+
+	/**
+	 * Inline (§7.3 find): `Find “query”  2 hits · 8 files`, then per hit its
+	 * score bar, path and coverage over the strongest snippets. The search
+	 * accounting (τ, tokens, cost, time) is the footnote's tooltip.
+	 */
+	describeResult(
+		result: { content: Array<{ type: string; text?: string }>; details?: FindToolDetails; isError?: boolean },
+		options: RenderResultOptions,
+		args?: FindRenderArgs,
+	): NativeToolView {
+		const details = result.details;
+		const progress = result.content?.find(c => c.type === "text")?.text ?? "";
+		const query = args?.query ?? details?.query;
+		if (result.isError)
+			return inlineErrorView(findNativeHead(query, []), progress || tuiT("ui.find.unknownError", "Unknown error"));
+		if (options.isPartial || details === undefined) {
+			return {
+				tool: findNativeHead(query, progress ? [[span(progress, "muted", { fx: "shimmer" })]] : []),
+				inline: true,
+			};
+		}
+		const { hits, stats, threshold } = details;
+		const scope = details.scopePath === undefined ? undefined : inPathLabel(details.scopePath);
+		const failed = stats.errors > 0 ? [span(failedLabel(stats.errors), "warning")] : undefined;
+		const accounting = findAccounting(stats, threshold, details.elapsedMs);
+		const failures = stats.failures.map((failure, i) =>
+			keyed(text([span(failure, "warning")], { wrap: "word", role: "omp.tool.notice" }), `fail${i}`),
+		);
+		if (hits.length === 0) {
+			return {
+				tool: findNativeHead(query, compact([tuiT("ui.find.zeroHits", "0 hits"), scope, failed])),
+				tone: "warning",
+				inline: true,
+				body: failures.length > 0 ? failures : undefined,
+			};
+		}
+		const shown = options.expanded ? hits : hits.slice(0, COLLAPSED_HITS);
+		const rangeLimit = options.expanded ? RANGES_EXPANDED : RANGES_COLLAPSED;
+		const hidden = hits.length - shown.length;
+		const footParts = compact([
+			hidden > 0 && tuiT("ui.find.moreHits", "{count} more hits", { count: hidden }),
+			keywordsLabel(details.keywords),
+		]);
+		// One quiet last line; the accounting ANSI prints in the head rides its tooltip.
+		const foot = keyed(
+			text([span(footParts.join(" · "), "muted")], { wrap: "word", role: "omp.tool.stats", title: accounting }),
+			"foot",
+		);
+		return {
+			tool: findNativeHead(
+				query,
+				compact([`${hitCountLabel(hits.length)} · ${fileCountLabel(stats.filesRead)}`, scope, failed]),
+			),
+			inline: true,
+			body: compact<NativeChild>([
+				...shown.map(hit => describeHit(hit, rangeLimit, details.cwd)),
+				...failures,
+				foot,
+			]),
+			preview: { lines: PREVIEW_LIMITS.EXPANDED_LINES },
+		};
 	},
 	mergeCallAndResult: true,
 	animatedPendingPreview: true,

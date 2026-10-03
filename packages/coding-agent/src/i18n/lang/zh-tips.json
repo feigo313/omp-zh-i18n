@@ -16,6 +16,7 @@
   "tips.ultrathink": "在消息中加入 `ultrathink` 触发更深层的多步推理 — 输入时会有彩虹光效",
   "tips.orchestrate": "在消息中说 `orchestrate` 来驱动多阶段并行子代理任务 — 输入时会有光效",
   "tips.workflowz": "在消息中说 `workflowz` 来用并行子代理驱动 eval 任务 — 输入时会有光效",
+  "tips.jevify": "有一大堆数据要分类或分诊？在消息中说 `jevify` — eval 内核的 `judge()` 会处理整个批次，你只读它标记出来的部分 — 输入时会有光效",
   "tips.multi_account": "登录同一提供商的多个账号 — 再次 `/login` — omp 会自动负载均衡",
   "tips.auth_broker": "运行一次 `omp auth-broker serve`，所有机器都能拉取实时令牌 — 刷新密钥不离开主机；`omp auth-gateway` 作为兼容 OpenAI 的代理",
   "tips.switch_provider": "按 alt+p（或 /switch）切换提供商，按 ctrl+p 循环切换角色模型",
@@ -30,5 +31,6 @@
   "tips.advisor": "开启 `/advisor` 附加第二个模型来审查每一轮并悄悄注入建议 [NEW]",
   "tips.prompt_arrow_list": "尝试用 `->` 开头写个列表（1. 做 X, 2. 做 Y）来指导模型逐步处理",
   "tips.shift_tab_effort": "按 Shift+Tab 切换推理深度级别",
+  "tips.self_reconfigure": "omp 可以重新配置并扩展自己 — 你想问什么尽管问！",
   "tips.cleanse": "lint/类型错误堆积如山？`omp cleanse`（或就地 /cleanse）会用并行子代理排查并修复项目诊断问题 — Esc 可取消"
 }
