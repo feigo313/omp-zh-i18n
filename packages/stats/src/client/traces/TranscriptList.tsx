@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatDurationMs } from "../data/formatters";
+import { useTranslation } from "../i18n";
 import { EmptyState } from "../ui";
 import type { TraceMarker, TraceSpan, TraceTrack } from "../types";
 import { formatOffset } from "./time-scale";
@@ -50,6 +51,7 @@ export function buildTranscriptRows(tracks: TraceTrack[]): TranscriptRow[] {
 }
 
 export function TranscriptList({ tracks, selection, onSelect, search, traceStart }: TranscriptListProps) {
+	const { t } = useTranslation();
 	const colors = useTraceTheme();
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [scrollTop, setScrollTop] = useState(0);
@@ -106,7 +108,7 @@ export function TranscriptList({ tracks, selection, onSelect, search, traceStart
 								<span className="traces-row-label truncate">{label}</span>
 								{detail && <span className="traces-row-detail truncate">{detail}</span>}
 								<span className="traces-row-meta num">
-									{row.span?.isError && <span className="tone-bad">error</span>}
+									{row.span?.isError && <span className="tone-bad">{t("traces.row.error")}</span>}
 									<span>{duration}</span>
 									<span>{formatOffset(row.time - traceStart)}</span>
 								</span>
@@ -132,7 +134,7 @@ export function TranscriptList({ tracks, selection, onSelect, search, traceStart
 					})}
 				</div>
 			</div>
-			{rows.length === 0 && <EmptyState title="No matching events" />}
+			{rows.length === 0 && <EmptyState title={t("traces.transcript.empty")} />}
 		</div>
 	);
 }

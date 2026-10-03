@@ -44,6 +44,7 @@ import type { TspSpan, TspTableColumn, TspText, TspTone } from "@oh-my-pi/pi-wir
 import { col, elapsed, node, span, text } from "../native/describe";
 import { type DescribeContext, leafKey, type NativeChild, type NativeNode, type NativeUiEvent } from "../native/node";
 import { actionButton } from "../native/overlay";
+import { tuiT } from "../i18n-host";
 
 /** Local calendar-day activity consumed by the usage heatmap. */
 export interface DailyActivityPoint {
@@ -382,12 +383,12 @@ function statusDot(status: UsageLimit["status"]): NativeNode {
 		status === "exhausted" ? "error" : status === "warning" ? "warning" : status === "ok" ? "success" : "dim";
 	const label =
 		status === "exhausted"
-			? "Exhausted"
+			? tuiT("ui.usageDashboard.exhausted", "Exhausted")
 			: status === "warning"
-				? "Under pressure"
+				? tuiT("ui.usageDashboard.underPressure", "Under pressure")
 				: status === "ok"
-					? "OK"
-					: "Unknown";
+					? tuiT("ui.usageDashboard.ok", "OK")
+					: tuiT("ui.unknown", "Unknown");
 	return text([span("●", token)], { title: label, aria: label });
 }
 
@@ -403,7 +404,7 @@ function usageMeter(fraction: number, status: UsageLimit["status"], meter: boole
 
 /** `62% left` for a used fraction (overage reads as 0%). */
 function leftText(fraction: number): string {
-	return `${Math.max(0, Math.round((1 - fraction) * 100))}% left`;
+	return `${Math.max(0, Math.round((1 - fraction) * 100))}% ${tuiT("ui.usageDashboard.left", "left")}`;
 }
 
 /** `Mon 28 Sep` for a local date. */
@@ -426,13 +427,24 @@ function resetLabel(nowMs: number, resetMs: number): { text: string; title: stri
 	const now = new Date(nowMs);
 	const sameDay = at.toDateString() === now.toDateString();
 	const text = sameDay
-		? `resets ${clockTime(at)}`
+		? tuiT("ui.usageDashboard.resetsAt", "resets {time}", { time: clockTime(at) })
 		: resetMs < 6 * 86_400_000
-			? `resets ${WEEKDAY_NAMES[at.getDay()]} ${clockTime(at)}`
-			: `resets ${at.getDate()} ${MONTH_NAMES[at.getMonth()]}`;
+			? tuiT("ui.usageDashboard.resetsWeekday", "resets {day} {time}", {
+					day: WEEKDAY_NAMES[at.getDay()],
+					time: clockTime(at),
+				})
+			: tuiT("ui.usageDashboard.resetsDate", "resets {day} {month}", {
+					day: at.getDate(),
+					month: MONTH_NAMES[at.getMonth()],
+				});
 	return {
 		text,
-		title: `Resets ${shortDate(at)} ${at.getFullYear()}, ${clockTime(at)} (in ${formatDuration(resetMs)})`,
+		title: tuiT("ui.usageDashboard.resetsFull", "Resets {date} {year}, {time} (in {remaining})", {
+			date: shortDate(at),
+			year: at.getFullYear(),
+			time: clockTime(at),
+			remaining: formatDuration(resetMs),
+		}),
 	};
 }
 
@@ -532,7 +544,12 @@ interface CardRowLayout {
 
 export class UsageDashboardComponent implements Component {
 	/** The terminal draws the sheet: a large glass overlay titled Usage. */
-	readonly nativeOverlay = { role: "omp.overlay.usage", size: "lg", anchor: "center", head: "Usage" } as const;
+	readonly nativeOverlay = {
+		role: "omp.overlay.usage",
+		size: "lg",
+		anchor: "center",
+		head: tuiT("ui.usageDashboard.title", "Usage"),
+	} as const;
 	#options: UsageDashboardOptions;
 	#reports: UsageReport[];
 	#cards: ProviderCard[];
@@ -712,7 +729,8 @@ export class UsageDashboardComponent implements Component {
 	}
 
 	#renderCardsGrid(innerWidth: number): string[] {
-		if (this.#cards.length === 0) return [theme.fg("dim", "No usage data available.")];
+		if (this.#cards.length === 0)
+			return [theme.fg("dim", tuiT("ui.usageDashboard.noUsageData", "No usage data available."))];
 		const active = this.#cards.filter(card => !card.idle);
 		const idle = this.#cards.filter(card => card.idle);
 		const columns = Math.max(1, Math.floor((innerWidth + CARD_GUTTER) / (CARD_MIN_WIDTH + CARD_GUTTER)));
@@ -906,19 +924,27 @@ export class UsageDashboardComponent implements Component {
 
 		const latestFetchedAt = Math.max(0, ...this.#reports.map(report => report.fetchedAt ?? 0));
 		const checkedText = this.#refreshing
-			? "refreshing…"
+			? tuiT("ui.usageDashboard.refreshingTail", "refreshing…")
 			: latestFetchedAt
-				? `checked ${formatDuration(this.#nowMs - latestFetchedAt)} ago`
+				? tuiT("ui.usageDashboard.checkedAgo", "checked {duration} ago", {
+						duration: formatDuration(this.#nowMs - latestFetchedAt),
+					})
 				: "";
-		const title = this.#view === "detail" ? "Usage · Details" : "Usage";
+		const title =
+			this.#view === "detail"
+				? tuiT("ui.usageDashboard.titleDetails", "Usage · Details")
+				: tuiT("ui.usageDashboard.title", "Usage");
 
-		const scrollHint = maxScroll > 0 ? `${editorKeys("tui.select.up", "tui.select.down")} scroll · ` : "";
+		const scrollHint =
+			maxScroll > 0
+				? `${editorKeys("tui.select.up", "tui.select.down")} ${tuiT("ui.usageDashboard.scroll", "scroll")} · `
+				: "";
 		const cancel = editorKey("tui.select.cancel");
-		const refreshHint = this.#options.refresh ? "r refresh · " : "";
+		const refreshHint = this.#options.refresh ? tuiT("ui.usageDashboard.refreshHint", "r refresh · ") : "";
 		const hint =
 			this.#view === "detail"
-				? `${scrollHint}${refreshHint}${cancel} back`
-				: `${scrollHint}${refreshHint}${formatKeyHint("enter")} details · ${cancel} close`;
+				? `${scrollHint}${refreshHint}${cancel} ${tuiT("ui.back", "back")}`
+				: `${scrollHint}${refreshHint}${formatKeyHint("enter")} ${tuiT("ui.usageDashboard.details", "details")} · ${cancel} ${tuiT("ui.close", "close")}`;
 		this.#panel.title = title;
 		this.#header.setLines([checkedText ? theme.fg("dim", checkedText) : ""]);
 		this.#body.setLines(contentSource.slice(this.#scroll, this.#scroll + contentRows));
@@ -969,18 +995,26 @@ export class UsageDashboardComponent implements Component {
 		const checked: NativeChild[] = [];
 		const latestFetchedAt = Math.max(0, ...this.#reports.map(report => report.fetchedAt ?? 0));
 		if (this.#refreshing) {
-			checked.push(node("spinner", { label: [span("Refreshing…", "dim")] }));
+			checked.push(node("spinner", { label: [span(tuiT("ui.usageDashboard.refreshing", "Refreshing…"), "dim")] }));
 		} else if (this.#refreshError) {
 			checked.push(
-				text([span(`Refresh failed: ${sanitizeDisplayLine(this.#refreshError)}`, "warning")], {
-					truncate: "end",
-				}),
+				text(
+					[
+						span(
+							tuiT("ui.usageDashboard.refreshFailed", "Refresh failed: {error}", {
+								error: sanitizeDisplayLine(this.#refreshError),
+							}),
+							"warning",
+						),
+					],
+					{ truncate: "end" },
+				),
 			);
 		} else if (latestFetchedAt) {
 			checked.push(
-				text([span("checked", "dim")]),
+				text([span(tuiT("ui.usageDashboard.checked", "checked"), "dim")]),
 				elapsed(Date.now() - latestFetchedAt),
-				text([span("ago", "dim")]),
+				text([span(tuiT("ui.usageDashboard.ago", "ago"), "dim")]),
 			);
 		}
 		const children: NativeChild[] = [
@@ -1007,7 +1041,15 @@ export class UsageDashboardComponent implements Component {
 		const children: NativeChild[] = [];
 		if (this.#cards.length === 0) {
 			children.push(
-				node("text", { spans: [span("No usage data available.")], role: "omp.usage.untouched" }, undefined, "none"),
+				node(
+					"text",
+					{
+						spans: [span(tuiT("ui.usageDashboard.noUsageData", "No usage data available."))],
+						role: "omp.usage.untouched",
+					},
+					undefined,
+					"none",
+				),
 			);
 		} else {
 			// Unlimited providers keep a frame reading "No limits"; only untouched ones collapse.
@@ -1087,10 +1129,17 @@ export class UsageDashboardComponent implements Component {
 			);
 		}
 		for (const account of entry.unavailableAccounts) {
-			children.push(mutedText(`${sanitizeDisplayLine(account)}: usage unavailable`, true));
+			children.push(
+				mutedText(
+					tuiT("ui.usageDashboard.accountUnavailable", "{account}: usage unavailable", {
+						account: sanitizeDisplayLine(account),
+					}),
+					true,
+				),
+			);
 		}
 		if (entry.unlimited) {
-			children.push(mutedText("No limits"));
+			children.push(mutedText(tuiT("ui.usageDashboard.noLimits", "No limits")));
 		} else {
 			for (const [index, window] of entry.windows.slice(0, CARD_MAX_WINDOWS).entries()) {
 				const label: TspSpan[] = [span(sanitizeDisplayLine(window.label))];
@@ -1099,7 +1148,11 @@ export class UsageDashboardComponent implements Component {
 					text(label, { role: "omp.usage.label", truncate: "middle", title: sanitizeDisplayLine(window.label) }),
 				];
 				if (window.fraction === undefined) {
-					cells.push(text([span(window.usedText ?? "No data", "muted")], { truncate: "end" }));
+					cells.push(
+						text([span(window.usedText ?? tuiT("ui.usageDashboard.noData", "No data"), "muted")], {
+							truncate: "end",
+						}),
+					);
 				} else {
 					const token =
 						window.status === "exhausted" ? "error" : window.status === "warning" ? "warning" : undefined;
@@ -1216,7 +1269,14 @@ export class UsageDashboardComponent implements Component {
 			const children: NativeChild[] = [];
 			for (const account of unavailable) {
 				if (account.provider !== entry.provider) continue;
-				children.push(mutedText(`${sanitizeDisplayLine(account.label)}: usage unavailable`, true));
+				children.push(
+					mutedText(
+						tuiT("ui.usageDashboard.accountUnavailable", "{account}: usage unavailable", {
+							account: sanitizeDisplayLine(account.label),
+						}),
+						true,
+					),
+				);
 			}
 
 			const facts: { k: TspText; v: TspText }[] = [];
@@ -1273,7 +1333,12 @@ export class UsageDashboardComponent implements Component {
 						account: [span(reportAccountLabel(report, limit, index), "muted")],
 						left:
 							fraction === undefined
-								? [span(formatAbsoluteOnlyAmount([limit]) ?? "No data", "muted")]
+								? [
+										span(
+											formatAbsoluteOnlyAmount([limit]) ?? tuiT("ui.usageDashboard.noData", "No data"),
+											"muted",
+										),
+									]
 								: [span(leftText(fraction), token)],
 						reset:
 							resetsAt !== undefined && resetsAt > nowMs
@@ -1308,7 +1373,7 @@ export class UsageDashboardComponent implements Component {
 				children.push(node("table", { cols, rows }, undefined, "limits"));
 				for (const note of new Set(limitNotes)) children.push(mutedText(note, true));
 			} else if (unavailable.every(account => account.provider !== entry.provider)) {
-				children.push(mutedText("No limits"));
+				children.push(mutedText(tuiT("ui.usageDashboard.noLimits", "No limits")));
 			}
 			sections.push(
 				node(
@@ -1319,7 +1384,8 @@ export class UsageDashboardComponent implements Component {
 				),
 			);
 		}
-		if (sections.length === 0) sections.push(mutedText("No usage data available."));
+		if (sections.length === 0)
+			sections.push(mutedText(tuiT("ui.usageDashboard.noUsageData", "No usage data available.")));
 		return sections;
 	}
 

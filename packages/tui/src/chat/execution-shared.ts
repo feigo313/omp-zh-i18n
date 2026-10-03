@@ -238,7 +238,12 @@ export function describeExecutionTool(input: ExecutionToolInput): NativeNode {
 	}
 	const ms = Math.max(0, Math.round((input.endedAt ?? performance.now()) - input.startedAt));
 	const badges: { text: string; tone?: TspTone; title?: string }[] = [{ text: "you", tone: "user" }];
-	if (input.excluded) badges.push({ text: "not sent", title: "Not sent to the model", tone: "muted" });
+	if (input.excluded)
+		badges.push({
+			text: tuiT("ui.execution.notSent", "not sent"),
+			title: tuiT("ui.execution.notSentTitle", "Not sent to the model"),
+			tone: "muted",
+		});
 	const hasBody = body.length > 0;
 	return node(
 		"tool",

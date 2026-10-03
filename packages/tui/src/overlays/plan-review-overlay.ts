@@ -59,11 +59,12 @@ import { col, item, keyed, md, node, row as rowNode, span, text } from "../nativ
 import { leafKey, type NativeChild, type NativeNode, type NativeUiEvent } from "../native/node";
 import { actionButton, actionHint, hintsRow, itemIndex, type NativeHint, selectList } from "../native/overlay";
 import { getKeybindings } from "../keybindings";
+import { tuiT } from "../i18n-host";
 
 /** Title shown in the overlay's top border. */
 const OVERLAY_TITLE = "Plan Review";
 /** Native sheet title when the plan has no title heading of its own. */
-const NATIVE_TITLE = "Plan review";
+const nativeTitle = (): string => tuiT("ui.planReview.title", "Plan review");
 /** Minimum plan-body rows kept visible even on short terminals. */
 const MIN_BODY_ROWS = 3;
 /** Visible rows for the in-overlay annotation editor before it scrolls. */
@@ -1383,7 +1384,7 @@ export class PlanReviewOverlay implements Component {
 	/** The native sheet: large glass, titled by the plan's own title heading (the body never repeats it). */
 	get nativeOverlay(): NonNullable<Component["nativeOverlay"]> {
 		const heading = this.#sections[this.#titleIndex]?.title;
-		const title = heading ? sanitizeStatusText(heading) : NATIVE_TITLE;
+		const title = heading ? sanitizeStatusText(heading) : nativeTitle();
 		if (this.#nativeOverlay?.title !== title) {
 			this.#nativeOverlay = {
 				title,
@@ -1483,11 +1484,22 @@ export class PlanReviewOverlay implements Component {
 		if (this.#committed) return undefined;
 		const buttons: NativeNode[] = [];
 		if (this.callbacks.onCopyPlan)
-			buttons.push(actionButton("Copy", "copyPlan", { keys: "c", title: "Copy plan  c" }));
+			buttons.push(
+				actionButton(tuiT("ui.planReview.copy", "Copy"), "copyPlan", {
+					keys: "c",
+					title: tuiT("ui.planReview.copyTitle", "Copy plan  c"),
+				}),
+			);
 		// Unbound: the button still mirrors the callback, without a keycap.
 		const editorKeyId = getKeybindings().getKeys("app.editor.external")[0];
 		if (this.callbacks.onExternalEditor) {
-			buttons.push(actionButton("Edit in $EDITOR", "externalEditor", editorKeyId ? { keys: editorKeyId } : {}));
+			buttons.push(
+				actionButton(
+					tuiT("ui.planReview.editExternal", "Edit in $EDITOR"),
+					"externalEditor",
+					editorKeyId ? { keys: editorKeyId } : {},
+				),
+			);
 		}
 		if (buttons.length === 0) return undefined;
 		return node("row", { role: "omp.plan.tools", gap: "sm", align: "center", justify: "end" }, buttons, "tools");
@@ -1615,17 +1627,20 @@ export class PlanReviewOverlay implements Component {
 				const where = annotation?.target.kind === "line" ? `line ${annotation.target.context}` : "section";
 				return item(`c${i}`, {
 					label: sanitizeStatusText(annotation?.note ?? ""),
-					detail: `${sanitizeStatusText(section?.title || "Plan preamble")} · ${where}`,
+					detail: `${sanitizeStatusText(section?.title || tuiT("ui.planReview.planPreamble", "Plan preamble"))} · ${where}`,
 				});
 			});
 			return [
-				keyed(text([span("Edit annotation", "accent strong")]), "chooserHead"),
+				keyed(
+					text([span(tuiT("ui.planReview.editAnnotation", "Edit annotation"), "accent strong")]),
+					"chooserHead",
+				),
 				selectList("chooser", entries, { selected: `c${chooser.selected}` }),
 				hintsRow(
 					[
-						actionHint(["tui.select.up", "tui.select.down"], "choose"),
-						{ keys: ["enter"], label: "edit" },
-						actionHint("tui.select.cancel", "cancel"),
+						actionHint(["tui.select.up", "tui.select.down"], tuiT("ui.planReview.hint.choose", "choose")),
+						{ keys: ["enter"], label: tuiT("ui.edit", "edit") },
+						actionHint("tui.select.cancel", tuiT("ui.cancel", "cancel")),
 					],
 					"chooserHints",
 				),
@@ -1633,11 +1648,13 @@ export class PlanReviewOverlay implements Component {
 		}
 		if (this.#annotating) {
 			const target = this.#annotationTarget;
-			const title = sanitizeStatusText(this.#sections[target?.sectionIndex ?? -1]?.title || "Plan preamble");
+			const title = sanitizeStatusText(
+				this.#sections[target?.sectionIndex ?? -1]?.title || tuiT("ui.planReview.planPreamble", "Plan preamble"),
+			);
 			const location = target?.row === null ? `‹${title}›` : `‹${title}› · ${target?.context ?? ""}`;
 			const hints: (NativeHint | undefined)[] = [
-				actionHint("tui.input.submit", "save"),
-				actionHint("tui.input.newLine", "newline"),
+				actionHint("tui.input.submit", tuiT("ui.save", "save")),
+				actionHint("tui.input.newLine", tuiT("ui.planReview.hint.newline", "newline")),
 				actionHint("tui.select.cancel", "cancel"),
 			];
 			if (this.#editingAnnotation) hints.push({ keys: [], label: "empty deletes" });
@@ -1649,7 +1666,9 @@ export class PlanReviewOverlay implements Component {
 					{ role: "omp.plan.feedback", gap: "xs" },
 					[
 						keyed(
-							text([span("Note on ", "muted"), span(location, "accent")], { truncate: "end" }),
+							text([span(tuiT("ui.planReview.noteOn", "Note on "), "muted"), span(location, "accent")], {
+								truncate: "end",
+							}),
 							"annotateHead",
 						),
 						this.#editor,
@@ -1672,8 +1691,11 @@ export class PlanReviewOverlay implements Component {
 		const hints: (NativeHint | undefined)[] = [];
 		switch (this.#focus) {
 			case "actions":
-				hints.push(upDown("select"), key("enter", "confirm"));
-				if (this.#slider) hints.push(key(["left", "right"], "model"));
+				hints.push(
+					upDown(tuiT("ui.planReview.hint.select", "select")),
+					key("enter", tuiT("ui.planReview.hint.confirm", "confirm")),
+				);
+				if (this.#slider) hints.push(key(["left", "right"], tuiT("ui.planReview.hint.model", "model")));
 				break;
 			case "toc":
 				hints.push(
@@ -1698,8 +1720,12 @@ export class PlanReviewOverlay implements Component {
 				break;
 		}
 		// Copy and the external editor are head buttons with their keycaps; the hints skip them.
-		hints.push(key("tab", "regions"));
-		hints.push(this.#helpSuffix ? { keys: [], label: this.#helpSuffix } : actionHint("tui.select.cancel", "cancel"));
+		hints.push(key("tab", tuiT("ui.planReview.hint.regions", "regions")));
+		hints.push(
+			this.#helpSuffix
+				? { keys: [], label: this.#helpSuffix }
+				: actionHint("tui.select.cancel", tuiT("ui.cancel", "cancel")),
+		);
 		return hints;
 	}
 

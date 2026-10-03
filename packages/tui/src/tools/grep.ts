@@ -29,6 +29,7 @@ import {
 	replaceTabs,
 } from "../render/render-utils";
 import { classifyGroupedLines, describeGroupedOutput, groupLineIndicesByBlank } from "./grouped-file-output";
+import { tuiT } from "../i18n-host";
 
 /** Display metadata for grep tool results. */
 export interface GrepToolDetails {
@@ -433,7 +434,13 @@ export const grepToolRenderer = {
 		const head = grepNativeHead(args, compact([counts, scope]));
 		const hiddenFiles = options.expanded ? 0 : Math.max(0, fileCount - NATIVE_COLLAPSED_FILES);
 		const foot = footnoteText(
-			compact([hiddenFiles > 0 && formatCount("more file", hiddenFiles), missingNote]),
+			compact([
+				hiddenFiles > 0 &&
+					(hiddenFiles === 1
+						? tuiT("ui.grep.moreFile", "{count} more file", { count: hiddenFiles })
+						: tuiT("ui.grep.moreFiles", "{count} more files", { count: hiddenFiles })),
+				missingNote,
+			]),
 			details?.meta,
 		);
 		return {

@@ -59,6 +59,11 @@ export const TAB_LEADS: Record<SettingTab, string> = {
 	providers: "Services, provider protocols, timeouts and privacy.",
 };
 
+/** {@link TAB_LEADS} resolved through the UI seam; read at render time, never at module load. */
+export function tabLead(tab: SettingTab): string {
+	return tuiT(`ui.settingsDefs.lead.${tab}`, TAB_LEADS[tab]);
+}
+
 /**
  * Ordered section groups per tab. Settings declare their section via `ui.group`;
  * the settings UI renders groups in this order with a heading row between them.

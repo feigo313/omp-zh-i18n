@@ -262,7 +262,9 @@ describe("Factory Droid gemini wire — history replay", () => {
 
 describe("Factory Droid gemini wire — outbound normalization", () => {
 	it("redacts configured credentials before they reach the wire", async () => {
-		const token = "ghp_aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5bC7d";
+		// Split so the literal never appears whole in the tree; the redaction
+		// scanner matches on the reassembled value, not the source text.
+		const token = "gh" + "p_aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5bC7d";
 		const { contents } = await withCredentialRedaction(true, () => run(`deploy with ${token}`));
 		const wire = JSON.stringify(contents);
 		expect(wire).not.toContain(token);

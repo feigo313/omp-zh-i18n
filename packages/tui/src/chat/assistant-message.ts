@@ -27,6 +27,7 @@ import { type ServedModelMismatch, ServedModelMarkerComponent } from "./served-m
 import { isReactionTarget, type ReactionSplit, type ReactionTarget, splitReaction } from "./reaction";
 import { isRowPrefix, type TranscriptStableRow, trimBlankEdges } from "../chrome/transcript-container";
 import { formatTurnUsage, type TurnUsageSummary } from "../overlays/usage-row";
+import { tuiT } from "../i18n-host";
 
 /**
  * Max wrapped rows of a turn-ending provider error rendered inline in the
@@ -930,7 +931,7 @@ export class AssistantMessageComponent extends Container {
 				"row",
 				{ gap: "sm" },
 				[
-					text([span("Request failed", "error strong")]),
+					text([span(tuiT("ui.assistantMessage.requestFailed", "Request failed"), "error strong")]),
 					...(code ? [node("badge", { text: code[1]!, tone: "error", role: "omp.error.code" })] : []),
 				],
 				"head",
@@ -956,8 +957,18 @@ export class AssistantMessageComponent extends Container {
 					{ gap: "sm", role: "omp.error.actions" },
 					[
 						button("retry", "Retry", ["F5"], "Retry the failed turn"),
-						button("copy-error", "Copy error", [], "Copy the error message"),
-						button("switch-model", "Switch model", ["⌥P"], "Pick another model for this session"),
+						button(
+							"copy-error",
+							tuiT("ui.assistantMessage.copyError", "Copy error"),
+							[],
+							tuiT("ui.assistantMessage.copyErrorTitle", "Copy the error message"),
+						),
+						button(
+							"switch-model",
+							tuiT("ui.assistantMessage.switchModel", "Switch model"),
+							["⌥P"],
+							"Pick another model for this session",
+						),
 					],
 					"actions",
 				),

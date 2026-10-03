@@ -16,6 +16,7 @@ import { ansi, kv } from "../native/describe";
 import type { NativeChild } from "../native/node";
 import { OwnerMemo } from "../native/memo";
 import { errorView, noteText, resultText, toolHead } from "./native-view";
+import { tuiT } from "../i18n-host";
 
 /** Display fields captured from a debugger session. */
 export interface DebugSessionSnapshot {
@@ -143,27 +144,32 @@ function describeDebugResult(
 ): NativeToolView {
 	const [action, target] = debugCallParts(args, result.details?.action ?? "debug");
 	const output = resultText(result);
-	if (result.isError) return errorView("Debug", output || "Debug failed", action, target);
+	if (result.isError) return errorView("Debug", output || tuiT("ui.debug.failed", "Debug failed"), action, target);
 	const snapshot = result.details?.snapshot;
 	const body: NativeChild[] = [];
 	let sessionRows = 0;
 	if (snapshot) {
 		const location = formatLocation(snapshot);
 		const rows: [string, string | undefined][] = [
-			["Session", snapshot.id],
-			["Adapter", snapshot.adapter],
-			["Status", snapshot.status],
+			[tuiT("ui.debug.session", "Session"), snapshot.id],
+			[tuiT("ui.debug.adapter", "Adapter"), snapshot.adapter],
+			[tuiT("ui.debug.status", "Status"), snapshot.status],
 			["CWD", snapshot.cwd],
-			["Program", snapshot.program],
-			["Stop reason", snapshot.stopReason],
-			["Frame", snapshot.frameName],
-			["Instruction pointer", snapshot.instructionPointerReference],
-			["Location", location ?? undefined],
+			[tuiT("ui.debug.program", "Program"), snapshot.program],
+			[tuiT("ui.debug.stopReason", "Stop reason"), snapshot.stopReason],
+			[tuiT("ui.debug.frame", "Frame"), snapshot.frameName],
+			[tuiT("ui.debug.instructionPointer", "Instruction pointer"), snapshot.instructionPointerReference],
+			[tuiT("ui.debug.location", "Location"), location ?? undefined],
 			[
-				"Configuration",
-				snapshot.needsConfigurationDone ? "pending configurationDone; set breakpoints, then continue." : undefined,
+				tuiT("ui.debug.configuration", "Configuration"),
+				snapshot.needsConfigurationDone
+					? tuiT("ui.debug.configurationPending", "pending configurationDone; set breakpoints, then continue.")
+					: undefined,
 			],
-			["Exit code", snapshot.exitCode !== undefined ? String(snapshot.exitCode) : undefined],
+			[
+				tuiT("ui.debug.exitCode", "Exit code"),
+				snapshot.exitCode !== undefined ? String(snapshot.exitCode) : undefined,
+			],
 		];
 		const grid = kv(rows);
 		if (grid) {

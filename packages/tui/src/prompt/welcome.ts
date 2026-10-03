@@ -328,7 +328,7 @@ export class WelcomeComponent implements Component {
 		const brand = keyed(
 			col(
 				[
-					art([span("Welcome back!", "strong")], "omp.welcome.greeting"),
+					art([span(interceptWelcomeString("welcome.back"), "strong")], "omp.welcome.greeting"),
 					node(
 						"image",
 						{
@@ -357,16 +357,17 @@ export class WelcomeComponent implements Component {
 			keyed(row([kbd(key), line([span(label, "muted")])], { gap: "sm" }), label);
 		const info: NativeChild[] = [
 			line([span(this.version, "dim mono")], "omp.welcome.version"),
-			section("tips", "Tips", [
-				shortcut("#", "prompt actions"),
-				shortcut("/", "commands"),
-				shortcut("!", "run bash"),
-				shortcut("$", "run python"),
+			section("tips", interceptWelcomeString("tips"), [
+				shortcut("#", tuiT("ui.welcome.promptActions", "prompt actions")),
+				shortcut("/", tuiT("ui.welcome.commands", "commands")),
+				shortcut("!", tuiT("ui.welcome.runBash", "run bash")),
+				shortcut("$", tuiT("ui.welcome.runPython", "run python")),
 			]),
 		];
 		if (this.lspServers !== null) {
 			const lsp: NativeChild[] = [];
-			if (this.lspServers.length === 0) lsp.push(line([span("No LSP servers", "dim")], undefined, "none"));
+			if (this.lspServers.length === 0)
+				lsp.push(line([span(interceptWelcomeString("noLspServers"), "dim")], undefined, "none"));
 			for (const server of this.lspServers.slice(0, WELCOME_LSP_SLOTS)) {
 				const [symbol, token] =
 					server.status === "ready"
@@ -392,10 +393,11 @@ export class WelcomeComponent implements Component {
 					),
 				);
 			}
-			info.push(section("lsp", "LSP servers", lsp));
+			info.push(section("lsp", interceptWelcomeString("lspServers"), lsp));
 		}
 		const recents: NativeChild[] = [];
-		if (this.recentSessions.length === 0) recents.push(line([span("No recent sessions", "dim")], undefined, "none"));
+		if (this.recentSessions.length === 0)
+			recents.push(line([span(interceptWelcomeString("noRecentSessions"), "dim")], undefined, "none"));
 		for (const [index, session] of this.recentSessions.slice(0, WELCOME_SESSION_SLOTS).entries()) {
 			recents.push(
 				keyed(
@@ -416,7 +418,7 @@ export class WelcomeComponent implements Component {
 				),
 			);
 		}
-		info.push(section("recents", "Recent sessions", recents));
+		info.push(section("recents", interceptWelcomeString("recentSessions"), recents));
 		const body: NativeChild[] = [
 			keyed(
 				row([brand, keyed(col(info, { gap: "md", role: "omp.welcome.info" }), "info")], {

@@ -13,6 +13,7 @@ import {
 import { type SymbolKey, type Theme, type ThemeColor, theme } from "../theme";
 import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../render/render-utils";
 import { fileHyperlink } from "../render/hyperlink";
+import { tuiT } from "../i18n-host";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
 import { summarizeLoopCondition } from "./loop";
 import { formatMetric } from "../components/metric";
@@ -519,7 +520,8 @@ const modeSegment: StatusLineSegment = {
 		if (loop) {
 			const icon = loop.state === "paused" ? theme.icon.pause || theme.icon.loop : theme.icon.loop;
 			const color: ThemeColor = loop.state === "paused" ? "warning" : "customMessageLabel";
-			const stateLabel = loop.state === "waiting" ? "next prompt repeats" : loop.state;
+			const stateLabel =
+				loop.state === "waiting" ? tuiT("ui.statusLine.nextPromptRepeats", "next prompt repeats") : loop.state;
 			const label = `Loop${loop.state === "waiting" ? ":" : ""} ${stateLabel}`;
 			const parts = [withIcon(icon, label)];
 			const limit = formatLoopLimit(loop.limit, ctx.now?.getTime());
@@ -536,7 +538,7 @@ const modeSegment: StatusLineSegment = {
 		const plan = ctx.planMode;
 		if (plan && (plan.enabled || plan.paused)) {
 			return plan.paused
-				? segView([span("Plan (paused)", "warning")], "plan", "warning")
+				? segView([span(tuiT("ui.statusLine.planPaused", "Plan (paused)"), "warning")], "plan", "warning")
 				: segView([span("Plan", accentToken(ctx, "accent"))], "plan");
 		}
 		if (ctx.prewalk?.enabled) return segView([span("Prewalk", accentToken(ctx, "accent"))], "prewalk");
@@ -546,7 +548,8 @@ const modeSegment: StatusLineSegment = {
 		const loop = ctx.loopMode;
 		if (loop) {
 			const paused = loop.state === "paused";
-			const stateLabel = loop.state === "waiting" ? "next prompt repeats" : loop.state;
+			const stateLabel =
+				loop.state === "waiting" ? tuiT("ui.statusLine.nextPromptRepeats", "next prompt repeats") : loop.state;
 			const parts = [`Loop${loop.state === "waiting" ? ":" : ""} ${stateLabel}`];
 			const limit = formatLoopLimit(loop.limit, ctx.now?.getTime());
 			if (limit) parts.push(limit);

@@ -13,6 +13,7 @@
  * historical entries cannot leave stale components behind. Collab guests use the
  * same append path over the host's byte-capped transcript reads.
  */
+import { tuiT } from "../i18n-host";
 import type * as fs from "node:fs";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { TspSpan, TspTone } from "@oh-my-pi/pi-wire";
@@ -691,12 +692,16 @@ export class AgentTranscriptViewer implements Component {
 		}
 		children.push(
 			hintsRow([
-				this.#editor ? actionHint("tui.input.submit", "send") : undefined,
-				{ keys: ["escape"], label: "close" },
-				{ keys: [this.#deps.expandKeys[0] ?? "ctrl+o"], label: "expand" },
+				this.#editor ? actionHint("tui.input.submit", tuiT("ui.agentTranscript.send", "send")) : undefined,
+				{ keys: ["escape"], label: tuiT("ui.close", "close") },
+				{ keys: [this.#deps.expandKeys[0] ?? "ctrl+o"], label: tuiT("ui.agentTranscript.expand", "expand") },
 			]),
 		);
-		const head = [span("Agent Hub", "accent"), span(` ${theme.sep.dot} `, "dim"), span(id, "accent")];
+		const head = [
+			span(tuiT("ui.agentHub.agentHub", "Agent Hub"), "accent"),
+			span(` ${theme.sep.dot} `, "dim"),
+			span(id, "accent"),
+		];
 		const described = overlayCard("omp.hub.transcript", head, children);
 		this.#nativeCache = { signature, node: described };
 		return described;

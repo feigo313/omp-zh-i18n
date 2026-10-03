@@ -35,7 +35,7 @@ import {
 	numericOption,
 	SETTING_TABS,
 	type SubmenuOption,
-	TAB_LEADS,
+	tabLead,
 	TAB_METADATA,
 	type SettingTab,
 	type SettingsHost,
@@ -136,24 +136,30 @@ function settingsTabsNode(tabs: readonly Tab[], active: string | undefined): Nat
 /** Footer hints for `mode`, mirroring the ANSI footer line. */
 function settingsHintsNode(mode: SettingsHintMode): NativeNode {
 	const confirmKeys: readonly KeyName[] = actionHint("tui.select.confirm", "")?.keys ?? [];
-	const close = actionHint("tui.select.cancel", "close");
-	const switchTabs: NativeHint = { keys: ["left", "right"], label: "switch tabs" };
+	const close = actionHint("tui.select.cancel", tuiT("ui.close", "close"));
+	const switchTabs: NativeHint = {
+		keys: ["left", "right"],
+		label: tuiT("ui.settingsSelector.hint.switchTabs", "switch tabs"),
+	};
 	let hints: (NativeHint | undefined)[];
 	switch (mode) {
 		case "search":
 			hints = [
-				actionHint("tui.select.confirm", "change"),
-				{ keys: ["tab"], label: "jump tabs" },
-				actionHint("tui.select.cancel", "exit search"),
+				actionHint("tui.select.confirm", tuiT("ui.settingsSelector.hint.change", "change")),
+				{ keys: ["tab"], label: tuiT("ui.settingsSelector.hint.jumpTabs", "jump tabs") },
+				actionHint("tui.select.cancel", tuiT("ui.settingsSelector.hint.exitSearch", "exit search")),
 			];
 			break;
 		case "plugins":
-			hints = [{ keys: ["tab"], label: "switch tabs" }, close];
+			hints = [{ keys: ["tab"], label: tuiT("ui.settingsSelector.hint.switchTabs", "switch tabs") }, close];
 			break;
 		case "sections":
 			hints = [
-				actionHint(["tui.select.up", "tui.select.down"], "jump sections"),
-				{ keys: ["tab", ...confirmKeys], label: "to settings" },
+				actionHint(
+					["tui.select.up", "tui.select.down"],
+					tuiT("ui.settingsSelector.hint.jumpSections", "jump sections"),
+				),
+				{ keys: ["tab", ...confirmKeys], label: tuiT("ui.settingsSelector.hint.toSettings", "to settings") },
 				switchTabs,
 				close,
 			];
@@ -161,11 +167,22 @@ function settingsHintsNode(mode: SettingsHintMode): NativeNode {
 		case "rows":
 		case "rows-sections":
 			hints = [
-				{ keys: [...confirmKeys, "space"], label: "change" },
+				{ keys: [...confirmKeys, "space"], label: tuiT("ui.settingsSelector.hint.change", "change") },
 				...(mode === "rows-sections"
-					? [{ keys: ["tab"], label: "jump sections" } satisfies NativeHint, switchTabs]
-					: [{ keys: ["tab"], label: "switch tabs" } satisfies NativeHint]),
-				{ keys: [], label: "type to search" },
+					? [
+							{
+								keys: ["tab"],
+								label: tuiT("ui.settingsSelector.hint.jumpSections", "jump sections"),
+							} satisfies NativeHint,
+							switchTabs,
+						]
+					: [
+							{
+								keys: ["tab"],
+								label: tuiT("ui.settingsSelector.hint.switchTabs", "switch tabs"),
+							} satisfies NativeHint,
+						]),
+				{ keys: [], label: tuiT("ui.typeToSearch", "type to search") },
 				close,
 			];
 			break;
@@ -948,10 +965,10 @@ export class SettingsSelectorComponent implements Component {
 		}
 
 		const props: TspPrefsProps = {
-			title: "omp settings",
+			title: tuiT("ui.settingsSelector.title", "omp settings"),
 			pages,
 			page: searching ? this.#preSearchTabId : this.#currentTabId,
-			lead: searching ? undefined : (pluginPage?.lead ?? (tab ? TAB_LEADS[tab] : undefined)),
+			lead: searching ? undefined : (pluginPage?.lead ?? (tab ? tabLead(tab) : undefined)),
 			query: searching ? this.#searchQuery : undefined,
 			cursor: searching ? this.#searchInput.getCursor() : undefined,
 			sections,

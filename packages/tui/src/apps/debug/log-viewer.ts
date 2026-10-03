@@ -2,6 +2,7 @@ import type { TspPickerGroup, TspPickerItem, TspTone } from "@oh-my-pi/pi-wire";
 import { formatKeyHint, formatKeyHints } from "../../app-keybindings";
 import type { Component } from "../../tui";
 import { code } from "../../native/describe";
+import { tuiT } from "../../i18n-host";
 import { Memo } from "../../native/memo";
 import type { DescribeContext, NativeNode, NativeUiEvent } from "../../native/node";
 import { CLOSE_ACTION, picker, pickerAction, pickerEvent, pickerHits, pickerQuery } from "../../native/picker";
@@ -792,11 +793,15 @@ export class DebugLogViewerComponent implements Component {
 				const needle = query.toLowerCase();
 				for (const viewerRow of model.rows) {
 					if (viewerRow.kind === "warning") {
-						order.push({ group: "session", label: "This session" });
+						order.push({ group: "session", label: tuiT("ui.logViewer.thisSession", "This session") });
 						continue;
 					}
 					if (viewerRow.kind === "load-older") {
-						items.push({ id: OLDER_ITEM, label: "Load older entries", tone: "muted" });
+						items.push({
+							id: OLDER_ITEM,
+							label: tuiT("ui.logViewer.loadOlderEntries", "Load older entries"),
+							tone: "muted",
+						});
 						order.push(OLDER_ITEM);
 						continue;
 					}
@@ -823,14 +828,14 @@ export class DebugLogViewerComponent implements Component {
 					.join(" · ");
 				return picker(
 					{
-						title: "Recent logs",
+						title: tuiT("ui.logViewer.recentLogs", "Recent logs"),
 						subtitle,
 						noun: "entries",
 						size: "lg",
 						layout: "rows",
 						preview: preview ? "below" : "none",
 						...pickerQuery(this.#filter),
-						placeholder: "Filter logs…",
+						placeholder: tuiT("ui.logViewer.filterLogs", "Filter logs…"),
 						columns: [
 							{ id: "pid", format: "dim", priority: 0 },
 							{ id: "time", format: "dim", priority: 1 },
@@ -846,14 +851,20 @@ export class DebugLogViewerComponent implements Component {
 									: `l${cursorLog}`,
 						current: selected.length > 1 ? selected.map(index => `l${index}`) : [],
 						total: model.logCount,
-						empty: query ? "No matching log entries" : "No log entries",
+						empty: query
+							? tuiT("ui.logViewer.noMatchingEntries", "No matching log entries")
+							: tuiT("ui.logViewer.noEntries", "No log entries"),
 						message: this.#statusMessage,
 						actions: [
 							pickerAction("copy", "Copy", "ctrl+c", { primary: true }),
-							pickerAction("all", "Select all", "ctrl+a"),
-							pickerAction("pid", "This process", "ctrl+p", { on: model.isProcessFilterEnabled() }),
-							pickerAction("older", "Load older", "ctrl+o", {
-								disabled: model.canLoadOlder() ? undefined : "No older log entries",
+							pickerAction("all", tuiT("ui.logViewer.selectAll", "Select all"), "ctrl+a"),
+							pickerAction("pid", tuiT("ui.logViewer.thisProcess", "This process"), "ctrl+p", {
+								on: model.isProcessFilterEnabled(),
+							}),
+							pickerAction("older", tuiT("ui.logViewer.loadOlder", "Load older"), "ctrl+o", {
+								disabled: model.canLoadOlder()
+									? undefined
+									: tuiT("ui.logViewer.noOlderEntries", "No older log entries"),
 							}),
 							CLOSE_ACTION,
 						],

@@ -9,6 +9,7 @@ import { theme } from "../theme";
 import { expandKeyHint } from "../render/render-utils";
 import { span, text } from "../native/describe";
 import type { NativeNode } from "../native/node";
+import { tuiT } from "../i18n-host";
 
 /** Rule fields shown in rewind notifications. */
 export interface NotificationRule {
@@ -72,9 +73,9 @@ export class TtsrNotificationComponent extends Container {
 	#nativePresentation(): MessageNoticeNativePresentation {
 		const single = this.#rules.length === 1 ? this.#rules[0] : undefined;
 		const head = single
-			? [span("Rule applied: ", "warning"), span(single.name, "mono strong")]
+			? [span(tuiT("ui.ttsr.ruleApplied", "Rule applied: "), "warning"), span(single.name, "mono strong")]
 			: [
-					span(`${this.#rules.length} rules applied: `, "warning"),
+					span(tuiT("ui.ttsr.rulesApplied", "{count} rules applied: ", { count: this.#rules.length }), "warning"),
 					span(this.#rules.map(rule => rule.name).join(", "), "mono strong"),
 				];
 		const body: NativeNode[] = [];

@@ -16,6 +16,7 @@ import {
 } from "./autoresearch-data";
 import { formatNum, type ExperimentResult, type ExperimentState } from "../tools/autoresearch";
 import type { TspSpan, TspTableColumn, TspText } from "@oh-my-pi/pi-wire";
+import { tuiT } from "../i18n-host";
 import { card, col, elapsed, keyed, node, row, span, text } from "../native/describe";
 import type { DescribeContext, NativeNode } from "../native/node";
 import { hintsRow } from "../native/overlay";
@@ -347,12 +348,15 @@ function describeDashboard(runtime: AutoresearchDashboardRuntime, maxRows: numbe
 		const pending = runtime.lastRunSummary;
 		if (pending) {
 			const items: { k: string; v: TspText }[] = [
-				{ k: "Pending run", v: `#${pending.runNumber}` },
+				{ k: tuiT("ui.autoresearch.pendingRun", "Pending run"), v: `#${pending.runNumber}` },
 				{
 					k: "Result",
 					v: `${pending.passed ? "passed" : "failed"}${pending.parsedPrimary !== null ? `  ${state.metricName} ${formatNum(pending.parsedPrimary, state.metricUnit)}` : ""}`,
 				},
-				{ k: "Next action", v: "finish log_experiment before starting another run." },
+				{
+					k: tuiT("ui.autoresearch.nextAction", "Next action"),
+					v: tuiT("ui.autoresearch.nextActionFinishRun", "finish log_experiment before starting another run."),
+				},
 			];
 			if (!runtime.autoresearchMode) items.push({ k: "Mode", v: "off" });
 			return [node("kv", { items, layout: "grid" }, undefined, "summary")];
@@ -363,9 +367,12 @@ function describeDashboard(runtime: AutoresearchDashboardRuntime, maxRows: numbe
 					"kv",
 					{
 						items: [
-							{ k: "Current segment", v: "0 runs" },
+							{ k: tuiT("ui.autoresearch.currentSegment", "Current segment"), v: "0 runs" },
 							{ k: "Baseline", v: "pending" },
-							{ k: "Next action", v: "run and log the baseline experiment." },
+							{
+								k: tuiT("ui.autoresearch.nextAction", "Next action"),
+								v: tuiT("ui.autoresearch.nextActionBaseline", "run and log the baseline experiment."),
+							},
 						],
 						layout: "grid",
 					},
@@ -385,7 +392,7 @@ function describeDashboard(runtime: AutoresearchDashboardRuntime, maxRows: numbe
 	const best = findBestResult(state);
 	const items: { k: string; v: TspText }[] = [
 		{
-			k: "Current segment",
+			k: tuiT("ui.autoresearch.currentSegment", "Current segment"),
 			v: [
 				span(`${current.length} runs  `),
 				span(`${counts.keep} kept`, "success"),
@@ -404,7 +411,7 @@ function describeDashboard(runtime: AutoresearchDashboardRuntime, maxRows: numbe
 	}
 	if (runtime.lastRunSummary) {
 		items.push({
-			k: "Pending run",
+			k: tuiT("ui.autoresearch.pendingRun", "Pending run"),
 			v: [
 				span(`#${runtime.lastRunSummary.runNumber} (${runtime.lastRunSummary.passed ? "passed" : "failed"})`),
 				span(" — log_experiment required", "warning"),

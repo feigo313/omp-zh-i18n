@@ -18,6 +18,7 @@ import { col, node, span, text } from "../../native/describe";
 import type { NativeChild, NativeNode } from "../../native/node";
 import { Memo } from "../../native/memo";
 import type { SetupScene, SetupSceneController, SetupSceneHost, StyledLine } from "./types";
+import { tuiT } from "../../i18n-host";
 
 function loginUrlLink(url: string): string {
 	return `\x1b]8;;${url}\x07Open login URL\x1b]8;;\x07`;
@@ -84,7 +85,7 @@ interface PromptState {
  * providers and then continue with Esc.
  */
 export class SignInScene implements SetupSceneController {
-	readonly title = "Sign in to your providers";
+	readonly title = tuiT("ui.setupSignIn.title", "Sign in to your providers");
 	get subtitle(): string {
 		return `Sign in to one or more providers. Press ${editorKey("tui.select.cancel")} when you're done.`;
 	}
@@ -238,8 +239,8 @@ export class SignInScene implements SetupSceneController {
 						"text",
 						{
 							spans: [
-								span("Browser login: ", "accent"),
-								span("Open login URL", "accent link", { href: authUrl }),
+								span(tuiT("ui.setupSignIn.browserLogin", "Browser login: "), "accent"),
+								span(tuiT("ui.setupSignIn.openLoginUrl", "Open login URL"), "accent link", { href: authUrl }),
 								span(` (clipboard copy attempted; ${copyKey} retries)`, "dim"),
 							],
 						},
@@ -259,7 +260,7 @@ export class SignInScene implements SetupSceneController {
 							"text",
 							{
 								spans: [
-									span("Local shortcut (this machine only): ", "dim"),
+									span(tuiT("ui.setupSignIn.localShortcut", "Local shortcut (this machine only): "), "dim"),
 									span(launchUrl, "dim link", { href: launchUrl }),
 								],
 								wrap: "char",
@@ -483,7 +484,7 @@ export class SignInScene implements SetupSceneController {
 /** Onboarding scene for provider sign-in. */
 export const providersSetupScene: SetupScene = {
 	id: "providers",
-	title: "Sign in to your providers",
+	title: tuiT("ui.setupSignIn.title", "Sign in to your providers"),
 	minVersion: 1,
 	mount: host => new SignInScene(host),
 };

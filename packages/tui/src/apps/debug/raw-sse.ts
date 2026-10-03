@@ -1,5 +1,6 @@
 import type { TspScrollBy } from "@oh-my-pi/pi-wire";
 import { formatKeyHint } from "../../app-keybindings";
+import { tuiT } from "../../i18n-host";
 import type { Component } from "../../tui";
 import { matchesKey } from "../../keys";
 import { col, compact, keyed, node, row, span, text } from "../../native/describe";
@@ -269,7 +270,9 @@ export class RawSseViewerComponent implements Component {
 				: keyed(
 						col(
 							[
-								text("No raw SSE frames captured yet", { role: "omp.app.empty-title" }),
+								text(tuiT("ui.rawSse.empty", "No raw SSE frames captured yet"), {
+									role: "omp.app.empty-title",
+								}),
 								text([
 									span("HTTP SSE providers populate this view while a model response is streaming.", "muted"),
 								]),
@@ -296,7 +299,7 @@ export class RawSseViewerComponent implements Component {
 							"status",
 						),
 					actionBar([
-						actionButton("Copy raw", "copy", { keys: "ctrl+c", tone: "accent" }),
+						actionButton(tuiT("ui.rawSse.copyRaw", "Copy raw"), "copy", { keys: "ctrl+c", tone: "accent" }),
 						null,
 						actionButton("Close", "close", { keys: "escape" }),
 					]),
@@ -322,11 +325,17 @@ export class RawSseViewerComponent implements Component {
 				: span("waiting for first frame", "muted"),
 		);
 		return keyed(
-			row([text("Raw provider stream", { role: "omp.app.title" }), text(stats, { truncate: "end" })], {
-				gap: "sm",
-				align: "center",
-				role: "omp.app.head",
-			}),
+			row(
+				[
+					text(tuiT("ui.rawSse.title", "Raw provider stream"), { role: "omp.app.title" }),
+					text(stats, { truncate: "end" }),
+				],
+				{
+					gap: "sm",
+					align: "center",
+					role: "omp.app.head",
+				},
+			),
 			"head",
 		);
 	}

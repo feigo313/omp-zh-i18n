@@ -1,6 +1,7 @@
 import { formatKeyHint } from "../app-keybindings";
 import { editorKey, editorKeys } from "../chrome/keybinding-hints";
 import { fuzzyFilter } from "../fuzzy";
+import { tuiT } from "../i18n-host";
 import { getKeybindings } from "../keybindings";
 import { extractPrintableText } from "../keys";
 import type { MouseRoutable, SgrMouseEvent } from "../mouse";
@@ -683,7 +684,9 @@ export class SettingsList implements Component {
 			selected: this.getSelectedItem()?.id ?? null,
 			filter: this.#filterQuery.trim() || undefined,
 			empty:
-				this.#items.length === 0 ? (this.#options.emptyText ?? "No settings available") : "No matching settings",
+				this.#items.length === 0
+					? (this.#options.emptyText ?? tuiT("ui.settings.empty", "No settings available"))
+					: tuiT("ui.settings.noResults", "No matching settings"),
 			max:
 				typeof cachedMax === "object" && cachedMax.lines === this.#maxVisible
 					? cachedMax

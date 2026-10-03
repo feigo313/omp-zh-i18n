@@ -20,6 +20,7 @@ import {
 } from "../render/render-utils";
 import { applyListLimit } from "./list-limit";
 import { formatFullOutputReference, formatStyledArtifactReference } from "./output-meta";
+import { tuiT } from "../i18n-host";
 
 /** Display metadata for fetch tool results. */
 export interface ReadUrlToolDetails {
@@ -165,7 +166,7 @@ export function describeReadUrlResult(result: {
 		return {
 			tool: readUrlHead(urlText),
 			tone: "error",
-			body: [errorText(message.trim() || "Read failed")],
+			body: [errorText(message.trim() || tuiT("ui.fetch.readFailed", "Read failed"))],
 		};
 	}
 
@@ -204,7 +205,7 @@ export function describeReadUrlResult(result: {
 							span(
 								truncation?.artifactId
 									? `Output truncated · ${formatFullOutputReference(truncation.artifactId)}`
-									: "Output truncated",
+									: tuiT("ui.fetch.outputTruncated", "Output truncated"),
 								"warning",
 							),
 						],

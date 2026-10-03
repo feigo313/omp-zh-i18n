@@ -33,6 +33,7 @@ import {
 import { plainText } from "../native/spans";
 import { Memo } from "../native/memo";
 import { fileHref, fileRow, inlineErrorView } from "../tools/native-view";
+import { tuiT } from "../i18n-host";
 
 /**
  * Extract the read call's target path. `path` is the canonical arg; `file_path`
@@ -711,7 +712,7 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 		return (
 			plainText(failed?.contentText ?? "")
 				.replace(/^Error:\s*/, "")
-				.trim() || "Read failed"
+				.trim() || tuiT("ui.readGroup.readFailed", "Read failed")
 		);
 	}
 
@@ -729,7 +730,20 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 		const hidden = lines.length - shown;
 		if (hidden > 0) {
 			blocks.push(
-				keyed(text([span(formatCount("more line", hidden), "muted")], { role: "omp.tool.stats" }), "more"),
+				keyed(
+					text(
+						[
+							span(
+								hidden === 1
+									? tuiT("ui.readGroup.moreLine", "{count} more line", { count: hidden })
+									: tuiT("ui.readGroup.moreLines", "{count} more lines", { count: hidden }),
+								"muted",
+							),
+						],
+						{ role: "omp.tool.stats" },
+					),
+					"more",
+				),
 			);
 		}
 		return blocks;

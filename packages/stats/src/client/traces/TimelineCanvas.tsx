@@ -9,6 +9,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { formatDurationMs, formatInteger } from "../data/formatters";
+import { type TranslationFn, useTranslation } from "../i18n";
 import type { TraceMarker, TraceSpan, TraceSpanKind, TraceTrack } from "../types";
 import { buildTicks, formatOffset, type TraceScale } from "./time-scale";
 import { type TraceTheme, useTraceTheme } from "./trace-colors";
@@ -43,13 +44,23 @@ const HIT_SLOP_PX = 4;
 const LABEL_MIN_PX = 56;
 const SPAN_RADIUS = 3;
 
-const LANE_ORDER: Array<{ kind: TraceSpanKind; label: string }> = [
-	{ kind: "turn", label: "Input" },
-	{ kind: "model", label: "Model" },
-	{ kind: "tool", label: "Tools" },
-	{ kind: "subagent", label: "Agents" },
-	{ kind: "background", label: "Bg" },
-];
+const LANE_ORDER: TraceSpanKind[] = ["turn", "model", "tool", "subagent", "background"];
+
+/** Lane captions are locale-dependent, so they are resolved per render. */
+function laneLabel(t: TranslationFn, kind: TraceSpanKind): string {
+	switch (kind) {
+		case "turn":
+			return t("traces.lane.turn");
+		case "model":
+			return t("traces.lane.model");
+		case "tool":
+			return t("traces.lane.tool");
+		case "subagent":
+			return t("traces.lane.subagent");
+		case "background":
+			return t("traces.lane.background");
+	}
+}
 
 interface LaneRow {
 	track: TraceTrack;
@@ -77,7 +88,7 @@ interface TimelineLayout {
 }
 
 /** Compute vertical layout for the visible (non-collapsed) track tree. */
-function buildLayout(tracks: TraceTrack[], collapsed: ReadonlySet<string>): TimelineLayout {
+function buildLayout(tracks: TraceTrack[], collapsed: ReadonlySet<string>, t: TranslationFn): TimelineLayout {
 	const byId = new Map(tracks.map(track => [track.id, track]));
 	const hasChildren = new Set<string>();
 	for (const track of tracks) {
@@ -109,12 +120,12 @@ function buildLayout(tracks: TraceTrack[], collapsed: ReadonlySet<string>): Time
 			y1: y,
 		};
 		y += HEADER_H;
-		for (const { kind, label } of LANE_ORDER) {
+		for (const kind of LANE_ORDER) {
 			const spans = track.spans.filter(span => span.kind === kind);
 			// Main always shows the core lanes; optional lanes appear when populated.
 			const isCore = kind === "turn" || kind === "model" || kind === "tool";
 			if (spans.length === 0 && !(track.id === "main" && isCore)) continue;
-			const lane: LaneRow = { track, kind, label, y, spans };
+			const lane: LaneRow = { track, kind, label: laneLabel(t, kind), y, spans };
 			block.lanes.push(lane);
 			lanes.push(lane);
 			y += LANE_H + LANE_GAP;
@@ -167,6 +178,7 @@ export function TimelineCanvas({
 	traceStart,
 }: TimelineCanvasProps) {
 	const colors = useTraceTheme();
+	const { t } = useTranslation();
 	const containerRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const [canvasWidth, setCanvasWidth] = useState(800);
@@ -180,7 +192,7 @@ export function TimelineCanvas({
 	const viewportRef = useRef(viewport);
 	viewportRef.current = viewport;
 
-	const layout = useMemo(() => buildLayout(tracks, collapsed), [tracks, collapsed]);
+	const layout = useMemo(() => buildLayout(tracks, collapsed, t), [tracks, collapsed, t]);
 
 	// Observe container width (gutter excluded).
 	useEffect(() => {
@@ -439,8 +451,8 @@ export function TimelineCanvas({
 									onClick={() => onToggleCollapse(block.track.id)}
 									aria-label={
 										collapsed.has(block.track.id)
-											? `Expand ${block.track.label}`
-											: `Collapse ${block.track.label}`
+											? t("traces.expandTrack", { track: block.track.label })
+											: t("traces.collapseTrack", { track: block.track.label })
 									}
 									className="traces-chevron"
 								>
@@ -479,7 +491,7 @@ export function TimelineCanvas({
 				style={{ width: canvasWidth, height: layout.totalHeight }}
 				tabIndex={0}
 				role="application"
-				aria-label="Trace timeline. W and S zoom, A and D pan, 0 fits all, F focuses the selection."
+				aria-label={t("traces.timelineAria")}
 				onPointerDown={handlePointerDown}
 				onPointerMove={handlePointerMove}
 				onPointerUp={handlePointerUp}

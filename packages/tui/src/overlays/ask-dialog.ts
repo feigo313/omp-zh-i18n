@@ -96,13 +96,14 @@ import {
 import { actionBar, actionButton } from "../native/overlay";
 import { getKeybindings } from "../keybindings";
 import { plainText } from "../native/spans";
+import { tuiT } from "../i18n-host";
 
 const OTHER_OPTION = "Other (type your own)";
 const SUBMIT_OPTION = "Submit";
 const RECOMMENDED_SUFFIX = " (Recommended)";
 /** Native labels: the free-text row and the answers-review tab. */
-const OTHER_LABEL = "Other…";
-const REVIEW_TAB = "Review";
+const otherLabel = (): string => tuiT("ui.askDialog.other", "Other…");
+const reviewTab = (): string => tuiT("ui.askDialog.reviewTab", "Review");
 
 // Action rows appended by the guest race participant. An option sanitizing
 // to one of these must disambiguate identically on both sides, or the same
@@ -751,7 +752,7 @@ export class AskDialogComponent implements Component {
 				id: String(index),
 				label: questionTabName(question, index),
 			}));
-			items.push({ id: "submit", label: REVIEW_TAB });
+			items.push({ id: "submit", label: reviewTab() });
 			const active = this.#isSubmitTab() ? "submit" : String(this.#activeTabIndex);
 			children.push(
 				node("tabs", { items, active, role: "omp.ask.questions", actions: { click: "select" } }, undefined, "tabs"),
@@ -770,7 +771,7 @@ export class AskDialogComponent implements Component {
 							style: "ring",
 							size: "sm",
 							label: `${Math.ceil(left / 1000)}s`,
-							title: "Answers the recommended option when the time runs out",
+							title: tuiT("ui.askDialog.timerTitle", "Answers the recommended option when the time runs out"),
 						},
 						undefined,
 						"timer",
@@ -810,13 +811,15 @@ export class AskDialogComponent implements Component {
 			// The badge replaces the ANSI `(Recommended)` suffix.
 			const label =
 				rowItem.kind === "other"
-					? OTHER_LABEL
+					? otherLabel()
 					: recommended && rowItem.label.endsWith(RECOMMENDED_SUFFIX)
 						? rowItem.label.slice(0, -RECOMMENDED_SUFFIX.length)
 						: rowItem.label;
 			const detail =
 				describeRowDetail(rowItem, question, state) ??
-				(rowItem.kind === "other" ? [span("Type your own answer", "dim")] : undefined);
+				(rowItem.kind === "other"
+					? [span(tuiT("ui.askDialog.typeYourOwn", "Type your own answer"), "dim")]
+					: undefined);
 			return node(
 				"item",
 				{
@@ -881,31 +884,34 @@ export class AskDialogComponent implements Component {
 	 */
 	#describeActions(blocked: boolean): NativeNode {
 		const cancelKey = getKeybindings().getKeys("tui.select.cancel")[0];
-		const skip = actionButton("Skip", "cancel", cancelKey ? { keys: cancelKey } : {});
+		const skip = actionButton(tuiT("ui.askDialog.skip", "Skip"), "cancel", cancelKey ? { keys: cancelKey } : {});
 		const inputGuard = this.options.inputGuard;
 		if (blocked && inputGuard) {
 			return actionBar([text([span(plainText(inputGuard.hint), "muted")], { truncate: "end" }), null, skip]);
 		}
-		const moves = ["up/down move"];
-		if (this.#hasSubmitTab()) moves.push("tab switches question");
+		const moves = [tuiT("ui.askDialog.hint.upDownMove", "up/down move")];
+		if (this.#hasSubmitTab()) moves.push(tuiT("ui.askDialog.hint.tabSwitches", "tab switches question"));
 		if (this.#isSubmitTab()) {
-			const submit = actionButton("Submit", "submit", {
+			const submit = actionButton(tuiT("ui.askDialog.submit", "Submit"), "submit", {
 				keys: "enter",
 				tone: "accent",
-				title: "Submit answers  enter",
+				title: tuiT("ui.askDialog.submitAnswersTitle", "Submit answers  enter"),
 			});
 			return actionBar([null, skip, submit]);
 		}
 		const question = this.#questions[this.#currentQuestionIndex()];
 		const last = this.#questions.length === 1;
-		const enterLabel = last ? "Submit" : "Next";
-		const tips = question?.multi ? ["space toggles", ...moves] : moves;
+		const enterLabel = last ? tuiT("ui.askDialog.submit", "Submit") : tuiT("ui.askDialog.next", "Next");
+		const tips = question?.multi ? [tuiT("ui.askDialog.hint.spaceToggles", "space toggles"), ...moves] : moves;
 		const submit = actionButton(enterLabel, "submit", {
 			keys: "enter",
 			tone: "accent",
 			title: `${enterLabel}  enter · ${tips.join(" · ")}`,
 		});
-		const note = actionButton("Note", "note", { keys: "n", title: `Add a note to the highlighted answer  n` });
+		const note = actionButton(tuiT("ui.askDialog.note", "Note"), "note", {
+			keys: "n",
+			title: tuiT("ui.askDialog.noteTitle", "Add a note to the highlighted answer  n"),
+		});
 		return actionBar([null, note, skip, submit]);
 	}
 
@@ -1301,7 +1307,10 @@ export class AskDialogComponent implements Component {
 		try {
 			const prefill =
 				state.customInput === undefined ? undefined : { text: state.customInput, images: state.customInputImages };
-			const result = await this.#openPrompt({ title: "Custom answer", question: question.question }, prefill);
+			const result = await this.#openPrompt(
+				{ title: tuiT("ui.askDialog.customAnswer", "Custom answer"), question: question.question },
+				prefill,
+			);
 			if (result === undefined || this.#closed) return;
 			const input = splitPromptInput(result);
 			if (input.text.trim() === "") {

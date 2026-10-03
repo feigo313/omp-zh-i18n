@@ -35,6 +35,7 @@ import { plainText } from "../native/spans";
 import { walkGroupedOutput } from "./grouped-file-output";
 import { diagnosticGlyph, fileHref, fileRow, inlineErrorView } from "./native-view";
 import { activeThemeSymbol } from "../theme/active-symbols";
+import { tuiT } from "../i18n-host";
 
 /** Display arguments for an LSP tool request. */
 export interface LspParams {
@@ -862,7 +863,16 @@ function describeLspDiagnostics(request: Partial<LspParams> | undefined, fallbac
 	const parsed = parseLspDiagnostics(lines);
 	const counts = diagnosticCounts(parsed.diagnostics);
 	const failed =
-		parsed.failures.length > 0 ? [span(formatCount("server failure", parsed.failures.length), "error")] : undefined;
+		parsed.failures.length > 0
+			? [
+					span(
+						parsed.failures.length === 1
+							? tuiT("ui.lsp.serverFailure", "{count} server failure", { count: parsed.failures.length })
+							: tuiT("ui.lsp.serverFailures", "{count} server failures", { count: parsed.failures.length }),
+						"error",
+					),
+				]
+			: undefined;
 	const rows: NativeNode[] = [
 		...parsed.failures.map((message, i) => statusRow(message, "error", `x${i}`)),
 		...parsed.diagnostics.map((diag, i) => diagnosticRow(diag, `d${i}`)),
@@ -949,7 +959,11 @@ function describeLspResult(result: ToolRenderResult<LspToolDetails>, args: LspPa
 	const fallbackAction = result.details?.action ?? "request";
 	const content = result.content?.[0];
 	const text = content?.type === "text" ? (content.text ?? "") : "";
-	if (result.isError) return inlineErrorView(lspNativeHead(request, fallbackAction), text || "LSP request failed");
+	if (result.isError)
+		return inlineErrorView(
+			lspNativeHead(request, fallbackAction),
+			text || tuiT("ui.lsp.requestFailed", "LSP request failed"),
+		);
 	if (!text) return { tool: lspNativeHead(request, fallbackAction, ["No result"]), tone: "warning", inline: true };
 
 	const lines = text.split("\n");

@@ -28,6 +28,7 @@ import type { NativeChild } from "../native/node";
 import { OwnerMemo } from "../native/memo";
 import { plainText } from "../native/spans";
 import { errorText, noteText, resultText } from "./native-view";
+import { tuiT } from "../i18n-host";
 
 const MAX_COLLAPSED_ITEMS = PREVIEW_LIMITS.COLLAPSED_ITEMS;
 
@@ -248,11 +249,9 @@ export function renderSearchCall(
 
 type SearchRenderArgs = { query?: string; [key: string]: unknown };
 
-const SEARCH_TITLE = "Web search";
-
 function searchHead(query: string | undefined, meta?: string, badge?: { text: string; title?: string }) {
 	return {
-		title: SEARCH_TITLE,
+		title: tuiT("ui.webSearch.title", "Web search"),
 		target: query ? plainText(query) : undefined,
 		targetKind: "query" as const,
 		meta: meta ? [meta] : undefined,
@@ -294,7 +293,7 @@ function describeSearchResult(
 		return {
 			tool: searchHead(argQuery, label),
 			tone: "error",
-			body: [errorText(plainText(details.error).trim() || "Web search failed")],
+			body: [errorText(plainText(details.error).trim() || tuiT("ui.webSearch.failed", "Web search failed"))],
 		};
 	}
 

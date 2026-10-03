@@ -28,6 +28,7 @@ import type {
 import { ansi, compact, keyed } from "../native/describe";
 import type { NativeChild } from "../native/node";
 import { footnoteText, resultText } from "./native-view";
+import { tuiT } from "../i18n-host";
 
 /** Default collapsed shell output preview height. */
 export const BASH_DEFAULT_PREVIEW_LINES = DEFAULT_TERMINAL_PREVIEW_LINES;
@@ -379,7 +380,13 @@ function shellFootParts(details: BashToolDetails | undefined, artifactId: string
 	const service = details?.service;
 	if (service) {
 		parts.push(`Service ${service.name}`, service.state);
-		parts.push(service.ready ? "ready" : service.timedOut ? "ready timed out" : "not ready");
+		parts.push(
+			service.ready
+				? tuiT("ui.bash.serviceReady", "ready")
+				: service.timedOut
+					? tuiT("ui.bash.serviceReadyTimedOut", "ready timed out")
+					: tuiT("ui.bash.serviceNotReady", "not ready"),
+		);
 		if (service.pid !== undefined) parts.push(`PID ${service.pid}`);
 	}
 	if (artifactId) parts.push(`Artifact ${artifactId}`);

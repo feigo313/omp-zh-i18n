@@ -25,6 +25,7 @@ import { outputBlockContentWidth, renderStatusLine } from "../render";
 import { framedToolCard } from "../render/tool-card";
 
 import { formatErrorMessage, formatMeta, formatTitle, sanitizeCarriageReturns } from "../render/render-utils";
+import { tuiT } from "../i18n-host";
 
 /** Result for a single question */
 export interface QuestionResult {
@@ -344,7 +345,7 @@ function describeAskCall(args: AskRenderArgs): NativeToolView {
 	return {
 		tool: askHead(first, more),
 		inline: true,
-		body: [text([span("Waiting for your answer…", "muted")])],
+		body: [text([span(tuiT("ui.ask.waitingForAnswer", "Waiting for your answer…"), "muted")])],
 	};
 }
 

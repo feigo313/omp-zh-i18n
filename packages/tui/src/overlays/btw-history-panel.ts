@@ -1,3 +1,4 @@
+import { tuiT } from "../i18n-host";
 import {
 	type Component,
 	type Focusable,
@@ -444,7 +445,10 @@ export class BtwHistoryPanel implements Component, Focusable {
 	}
 
 	#describeFocusLabel(focus: "list" | "answer"): TspSpan[] {
-		const label = focus === "list" ? `History (${this.#records.length})` : "Details";
+		const label =
+			focus === "list"
+				? tuiT("ui.btwHistory.historyCount", "History ({count})", { count: this.#records.length })
+				: tuiT("ui.btwHistory.details", "Details");
 		return this.#focus === focus ? [span(`${theme.nav.cursor} ${label}`, "accent strong")] : [span(label, "muted")];
 	}
 
@@ -466,7 +470,9 @@ export class BtwHistoryPanel implements Component, Focusable {
 			"list",
 			{
 				selected: this.#selectedId ?? null,
-				empty: [span("No side questions yet. Use /btw QUESTION to start one.", "muted")],
+				empty: [
+					span(tuiT("ui.btwHistory.empty", "No side questions yet. Use /btw QUESTION to start one."), "muted"),
+				],
 			},
 			items,
 			"records",
@@ -505,7 +511,10 @@ export class BtwHistoryPanel implements Component, Focusable {
 	#describeFooter(record: BtwHistoryRecord | undefined, canFollowUp: boolean, copied: boolean): NativeNode {
 		if (this.#composer) {
 			return hintsRow([
-				actionHint("tui.input.submit", this.#followUpPending ? "starting…" : "send"),
+				actionHint(
+					"tui.input.submit",
+					this.#followUpPending ? tuiT("ui.btwHistory.starting", "starting…") : tuiT("ui.btwHistory.send", "send"),
+				),
 				actionHint("tui.select.cancel", "cancel"),
 			]);
 		}
@@ -663,7 +672,10 @@ export class BtwHistoryPanel implements Component, Focusable {
 	}
 
 	#focusLabel(focus: "list" | "answer"): string {
-		const label = focus === "list" ? `History (${this.#records.length})` : "Details";
+		const label =
+			focus === "list"
+				? tuiT("ui.btwHistory.historyCount", "History ({count})", { count: this.#records.length })
+				: tuiT("ui.btwHistory.details", "Details");
 		return this.#focus === focus
 			? theme.bold(theme.fg("accent", `${theme.nav.cursor} ${label}`))
 			: theme.fg("muted", `  ${label}`);
@@ -691,7 +703,12 @@ export class BtwHistoryPanel implements Component, Focusable {
 		const latest = record ? getBtwLatestTurn(record) : undefined;
 		const actions = composer
 			? [
-					keyHint("tui.input.submit", this.#followUpPending ? "starting…" : "send"),
+					keyHint(
+						"tui.input.submit",
+						this.#followUpPending
+							? tuiT("ui.btwHistory.starting", "starting…")
+							: tuiT("ui.btwHistory.send", "send"),
+					),
 					keyHint("tui.select.cancel", "cancel"),
 				]
 			: [

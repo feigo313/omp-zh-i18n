@@ -8,6 +8,7 @@
  * - Prompt-style (ask): Enter submits, Shift+Enter inserts newline, legacy ask chrome
  */
 import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { tuiT } from "../i18n-host";
 import { compactImageMarkers, formatVisionMarker, PLACEHOLDER_REGEX } from "../prompt/composer-attachments";
 import { extractImagePastePathsFromText } from "../prompt/custom-editor";
 import {
@@ -177,17 +178,20 @@ export class HookEditorComponent extends OverlayPanel implements Focusable {
 
 		const externalHint: NativeHint = {
 			keys: boundKeys("app.editor.external", ["ctrl+g"]).slice(0, 1),
-			label: "external editor",
+			label: tuiT("ui.hookEditor.externalEditor", "external editor"),
 		};
 		const nativeHints: NativeHint[] = this.#promptStyle
 			? [
-					{ keys: ["enter", primaryFollowUpKey], label: "submit" },
-					{ keys: ["escape"], label: "cancel" },
+					{ keys: ["enter", primaryFollowUpKey], label: tuiT("ui.hookEditor.submit", "submit") },
+					{ keys: ["escape"], label: tuiT("ui.cancel", "cancel") },
 					externalHint,
 				]
 			: [
-					{ keys: followUpKeys, label: "submit" },
-					{ keys: boundKeys("app.interrupt", ["escape"]).slice(0, 1), label: "cancel" },
+					{ keys: followUpKeys, label: tuiT("ui.hookEditor.submit", "submit") },
+					{
+						keys: boundKeys("app.interrupt", ["escape"]).slice(0, 1),
+						label: tuiT("ui.cancel", "cancel"),
+					},
 					externalHint,
 				];
 		const nativeChildren: NativeChild[] = [];

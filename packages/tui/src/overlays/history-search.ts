@@ -1,3 +1,4 @@
+import { tuiT } from "../i18n-host";
 import {
 	type Component,
 	Ellipsis,
@@ -328,9 +329,9 @@ export class HistorySearchComponent extends OverlayPanel {
 			"list",
 		);
 		this.#nativeHints ??= hintsRow([
-			actionHint(["tui.select.up", "tui.select.down"], "navigate"),
-			{ keys: ENTER_KEYS, label: "select" },
-			actionHint("tui.select.cancel", "cancel"),
+			actionHint(["tui.select.up", "tui.select.down"], tuiT("ui.historySearch.hint.navigate", "navigate")),
+			{ keys: ENTER_KEYS, label: tuiT("ui.select", "select") },
+			actionHint("tui.select.cancel", tuiT("ui.cancel", "cancel")),
 		]);
 		const root = overlayCard(this.nativeRole, this.title, [this.#searchInput, list, this.#nativeHints]);
 		this.#nativeMemo = { picker: false, items, selected, query, cursor, node: root };
@@ -356,14 +357,16 @@ export class HistorySearchComponent extends OverlayPanel {
 			layout: "rows",
 			preview: "none",
 			...pickerQuery(this.#searchInput),
-			placeholder: "Search prompts…",
+			placeholder: tuiT("ui.historySearch.searchPrompts", "Search prompts…"),
 			columns: [{ id: "when", format: "time" }],
 			items: rows.rows,
 			selected: selected ? nativeEntryKey(selected) : null,
-			empty: "No history yet",
+			empty: tuiT("ui.historySearch.noHistory", "No history yet"),
 			actions: [
-				pickerAction("insert", "Insert", "enter", { primary: true }),
-				pickerAction("close", "Close", boundKeys("app.interrupt", ["escape"])[0] ?? "escape", { end: true }),
+				pickerAction("insert", tuiT("ui.historySearch.insert", "Insert"), "enter", { primary: true }),
+				pickerAction("close", tuiT("ui.close", "Close"), boundKeys("app.interrupt", ["escape"])[0] ?? "escape", {
+					end: true,
+				}),
 			],
 		});
 	}

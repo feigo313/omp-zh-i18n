@@ -205,8 +205,8 @@ interface TreePickerView {
 
 const FILTER_TABS: readonly { id: TreeFilterMode; label: string }[] = [
 	{ id: "default", label: "Default" },
-	{ id: "no-tools", label: "No tools" },
-	{ id: "user-only", label: "User only" },
+	{ id: "no-tools", label: tuiT("ui.treeSelector.noToolsFilter", "No tools") },
+	{ id: "user-only", label: tuiT("ui.treeSelector.userFilter", "User only") },
 	{ id: "labeled-only", label: "Labeled" },
 	{ id: "all", label: "All" },
 ];
@@ -731,22 +731,35 @@ class TreeList implements Component {
 	/** The empty-state explanation from {@link render}, as spans. */
 	#emptyText(): TspText {
 		const total = this.#tree.allRows.length;
-		if (total === 0) return [span("No entries found", "muted")];
+		if (total === 0) return [span(tuiT("ui.treeSelector.noEntriesFoundTight", "No entries found"), "muted")];
 		const query = this.getSearchQuery();
 		if (query.length > 0) {
 			return [
-				span(`No entries match search "${query}". Press `, "muted"),
+				span(
+					tuiT("ui.treeSelector.noSearchMatchesPrefix", 'No entries match search "{query}". Press ', { query }),
+					"muted",
+				),
 				span("backspace", "key"),
-				span(" to clear the search", "muted"),
+				span(tuiT("ui.treeSelector.toClearSearch", " to clear the search"), "muted"),
 			];
 		}
 		const filterLabel = this.#getFilterLabel().trim() || "[default]";
 		return [
-			span(`${total} entries hidden by the current filter ${filterLabel}. Press `, "muted"),
+			span(
+				tuiT(
+					"ui.treeSelector.entriesHiddenPrefix",
+					"{total} entries hidden by the current filter {filter}. Press ",
+					{
+						total,
+						filter: filterLabel,
+					},
+				),
+				"muted",
+			),
 			span("alt+a", "key"),
-			span(" to show all, ", "muted"),
+			span(tuiT("ui.treeSelector.toShowAll", " to show all, "), "muted"),
 			span("alt+d", "key"),
-			span(" for default", "muted"),
+			span(tuiT("ui.treeSelector.forDefault", " for default"), "muted"),
 		];
 	}
 
@@ -1366,8 +1379,8 @@ class LabelInput implements Component {
 	/** The picker preview while editing: the prompt and the label `Input` (save/cancel sit in the action bar). */
 	get preview(): readonly NativeChild[] {
 		this.#preview ??= [
-			text("Label", { role: "omp.picker.title" }),
-			text([span("Empty to remove", "muted")]),
+			text(tuiT("ui.treeSelector.label", "Label"), { role: "omp.picker.title" }),
+			text([span(tuiT("ui.treeSelector.emptyToRemove", "Empty to remove"), "muted")]),
 			this.#input,
 		];
 		return this.#preview;
@@ -1533,7 +1546,7 @@ export class TreeSelectorComponent extends OverlayPanel {
 			return memo.node;
 		}
 		const props: TspPickerProps = {
-			title: "Session tree",
+			title: tuiT("ui.treeSelector.sessionTree", "Session tree"),
 			...(this.sessionName ? { subtitle: this.sessionName } : {}),
 			icon: "git-branch",
 			noun: "entries",
@@ -1541,7 +1554,7 @@ export class TreeSelectorComponent extends OverlayPanel {
 			layout: "tree",
 			preview: "side",
 			...pickerQuery(this.#treeList.searchInput),
-			placeholder: "Search entries…",
+			placeholder: tuiT("ui.treeSelector.searchPlaceholder", "Search entries…"),
 			tabs: FILTER_TABS,
 			tab: view.filterMode,
 			items: view.items,
@@ -1553,14 +1566,20 @@ export class TreeSelectorComponent extends OverlayPanel {
 			focus: label ? "preview" : "list",
 			actions: label
 				? [
-						pickerAction("label-save", "Save label", "enter", { primary: true }),
-						{ ...CLOSE_ACTION, label: "Cancel" },
+						pickerAction("label-save", tuiT("ui.treeSelector.saveLabel", "Save label"), "enter", {
+							primary: true,
+						}),
+						{ ...CLOSE_ACTION, label: tuiT("ui.cancel", "Cancel") },
 					]
 				: [
 						pickerAction("switch", "Switch", "enter", { primary: true }),
-						pickerAction("summarize", "Summarize & switch", "shift+enter"),
-						pickerAction("label", "Label", "shift+l"),
-						pickerAction("filter", "Filter", "ctrl+o"),
+						pickerAction(
+							"summarize",
+							tuiT("ui.treeSelector.summarizeSwitch", "Summarize & switch"),
+							"shift+enter",
+						),
+						pickerAction("label", tuiT("ui.treeSelector.label", "Label"), "shift+l"),
+						pickerAction("filter", tuiT("ui.treeSelector.filter", "Filter"), "ctrl+o"),
 						CLOSE_ACTION,
 					],
 		};
@@ -1635,13 +1654,16 @@ export class TreeSelectorComponent extends OverlayPanel {
 			search,
 			content,
 			hintsRow([
-				{ keys: ["enter"], label: "switch" },
-				{ keys: ["alt+up", "alt+down"], label: "previous/next turn" },
+				{ keys: ["enter"], label: tuiT("ui.treeSelector.hint.switch", "switch") },
+				{
+					keys: ["alt+up", "alt+down"],
+					label: tuiT("ui.treeSelector.hint.previousNextTurn", "previous/next turn"),
+				},
 				actionHint(["tui.select.pageUp", "tui.select.pageDown"], "page"),
 				{ keys: ["home", "end"], label: "first/last" },
-				{ keys: ["shift+enter"], label: "summarize & switch" },
-				{ keys: ["shift+l"], label: "label" },
-				{ keys: ["ctrl+o"], label: "filter" },
+				{ keys: ["shift+enter"], label: tuiT("ui.treeSelector.hint.summarizeSwitch", "summarize & switch") },
+				{ keys: ["shift+l"], label: tuiT("ui.treeSelector.label", "label") },
+				{ keys: ["ctrl+o"], label: tuiT("ui.treeSelector.filter", "filter") },
 			]),
 		];
 		const result = overlayCard("omp.overlay.tree", "Session Tree", children);

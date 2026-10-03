@@ -42,6 +42,7 @@ import {
 import { type MacOSSpellingFeatures, MacOSSpellingProvider } from "./macos-spelling";
 import { hasMagicKeyword, highlightMagicKeywords, magicKeywordRanges } from "./magic-keywords";
 import type { TspEditorDecoration } from "@oh-my-pi/pi-wire";
+import { tuiT } from "../i18n-host";
 import { isNativeRendering } from "../native/state";
 import { isQueuedMessageList, parseQueueShorthand, QUEUE_LIST_MARKER_RE } from "./queue-input";
 import { type WordCompletionMethod, WordCompletionProvider } from "./word-completion";
@@ -1147,7 +1148,7 @@ export class CustomEditor extends Editor {
 					gap: "xs",
 					align: "center",
 					tone: facts.model.tone,
-					title: modelKey ? `Switch model  ${formatKeyHint(modelKey)}` : "Switch model",
+					title: `${tuiT("ui.editor.switchModel", "Switch model")}${modelKey ? `  ${formatKeyHint(modelKey)}` : ""}`,
 					actions: { click: "status.model" },
 				},
 				[
@@ -1167,7 +1168,7 @@ export class CustomEditor extends Editor {
 					role: "omp.composer.effort",
 					gap: "xs",
 					align: "center",
-					title: thinkingKey ? `Thinking effort  ${formatKeyHint(thinkingKey)}` : "Thinking effort",
+					title: `${tuiT("ui.editor.thinkingEffort", "Thinking effort")}${thinkingKey ? `  ${formatKeyHint(thinkingKey)}` : ""}`,
 					actions: { click: "thinking.cycle" },
 				},
 				[
@@ -1217,12 +1218,20 @@ export class CustomEditor extends Editor {
 			"bar",
 		);
 		if (!shell) return { focus, mode: undefined, bar };
-		const runs = shell.kind === "bash" ? "Runs in your shell" : "Runs in Python";
+		const runs =
+			shell.kind === "bash"
+				? tuiT("ui.editor.runsInShell", "Runs in your shell")
+				: tuiT("ui.editor.runsInPython", "Runs in Python");
 		const mode = keyed(
 			row(
 				compact([
 					shell.excluded &&
-						node("icon", { name: "eye-off", title: "Not sent to the model" }, undefined, "excluded"),
+						node(
+							"icon",
+							{ name: "eye-off", title: tuiT("ui.editor.notSentToModel", "Not sent to the model") },
+							undefined,
+							"excluded",
+						),
 					node(
 						"text",
 						{ spans: [span(shell.kind, shell.kind === "bash" ? "bashMode" : "pythonMode")], wrap: "none" },
@@ -1234,7 +1243,9 @@ export class CustomEditor extends Editor {
 					role: "omp.composer.mode",
 					gap: "xs",
 					align: "center",
-					title: shell.excluded ? `${runs} · not sent to the model` : runs,
+					title: shell.excluded
+						? `${runs} · ${tuiT("ui.editor.notSentToModelSuffix", "not sent to the model")}`
+						: runs,
 				},
 			),
 			"mode",

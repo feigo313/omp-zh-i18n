@@ -159,20 +159,38 @@ export class InspectorPanel implements Component {
 	describePreview(): NativeNode[] {
 		const ext = this.#extension;
 		if (!ext) {
-			return [text([span("Select an extension to view details", "muted")], { wrap: "word" })];
+			return [
+				text([span(tuiT("ui.inspectorPanel.selectToView", "Select an extension to view details"), "muted")], {
+					wrap: "word",
+				}),
+			];
 		}
 		this.#toolFrame = snapshotToolRuntimeSource(this.#toolSource);
 		const view = this.#nativeKindView(ext);
 		const name = sanitizeDisplayLine(ext.displayName);
 		const title = sanitizeDisplayLineField(view.title);
-		const levelLabel = ext.source.level === "user" ? "User" : ext.source.level === "project" ? "Project" : "Native";
+		const levelLabel =
+			ext.source.level === "user"
+				? tuiT("ui.inspector.level.user", "User")
+				: ext.source.level === "project"
+					? tuiT("ui.inspector.level.project", "Project")
+					: tuiT("ui.inspector.level.native", "Native");
 		const filePath = sanitizeDisplayText(ext.path);
 		const facts = kv([
 			...view.runtime,
-			["Status", view.health && ext.state === "active" ? undefined : this.#nativeStatus(ext)],
-			["Origin", `via ${sanitizeDisplayLine(ext.source.providerName)} (${levelLabel})`],
 			[
-				"Path",
+				tuiT("ui.statusLabel", "Status"),
+				view.health && ext.state === "active" ? undefined : this.#nativeStatus(ext),
+			],
+			[
+				tuiT("ui.inspector.origin", "Origin"),
+				tuiT("ui.inspector.via", "via {provider} ({level})", {
+					provider: sanitizeDisplayLine(ext.source.providerName),
+					level: levelLabel,
+				}),
+			],
+			[
+				tuiT("ui.inspector.path", "Path"),
 				[
 					span(
 						sanitizeDisplayText(shortenPath(ext.path, os.homedir())),
@@ -414,7 +432,11 @@ export class InspectorPanel implements Component {
 					...base,
 					description: ext.description,
 					sections: ext.trigger
-						? [this.#nativeSection("Trigger", [text([span(sanitizeDisplayText(ext.trigger), "accent mono")])])]
+						? [
+								this.#nativeSection(tuiT("ui.inspector.trigger", "Trigger"), [
+									text([span(sanitizeDisplayText(ext.trigger), "accent mono")]),
+								]),
+							]
 						: [],
 				};
 		}
@@ -446,7 +468,7 @@ export class InspectorPanel implements Component {
 		const health: MCPConnectionHealth = snap?.health ?? "disconnected";
 		const runtime: [string, TspText | undefined][] = [
 			[
-				"Health",
+				tuiT("ui.inspector.health", "Health"),
 				[
 					span(`${MCP_HEALTH_GLYPH[health]()} ${formatMcpHealthLabel(health)}`, MCP_HEALTH_STYLE[health]),
 					span(`  ${snap?.transport ?? "stdio"}`, "muted"),
@@ -455,8 +477,12 @@ export class InspectorPanel implements Component {
 		];
 		if (snap?.implementationName) {
 			const version = snap.implementationVersion ? ` ${snap.implementationVersion}` : "";
-			runtime.push(["Server", [span(`${snap.implementationName}${version}`, "dim")]]);
-			if (snap.websiteUrl) runtime.push(["Website", [span(snap.websiteUrl, "dim", { href: snap.websiteUrl })]]);
+			runtime.push([tuiT("ui.inspector.server", "Server"), [span(`${snap.implementationName}${version}`, "dim")]]);
+			if (snap.websiteUrl)
+				runtime.push([
+					tuiT("ui.inspector.website", "Website"),
+					[span(snap.websiteUrl, "dim", { href: snap.websiteUrl })],
+				]);
 		}
 		const sections: NativeNode[] = [];
 		if (snap && snap.tools.length > 0) {
@@ -465,9 +491,10 @@ export class InspectorPanel implements Component {
 				this.#nativeCatalogEntry(tool.name, tool.title, tool.description, tool.parameters),
 			);
 			if (hidden > 0) entries.push(this.#nativeMore(hidden, "tools"));
-			sections.push(this.#nativeSection("Tools", entries));
+			sections.push(this.#nativeSection(tuiT("ui.inspector.tools", "Tools"), entries));
 		}
-		if (snap && snap.resources.length > 0) sections.push(this.#nativeNameList("Resources", snap.resources));
+		if (snap && snap.resources.length > 0)
+			sections.push(this.#nativeNameList(tuiT("ui.inspector.resources", "Resources"), snap.resources));
 		if (snap && snap.prompts.length > 0) sections.push(this.#nativeNameList("Prompts", snap.prompts));
 		return {
 			title: snap?.title,
@@ -874,7 +901,12 @@ export class InspectorPanel implements Component {
 
 	#pushOrigin(lines: string[], ext: Extension, width: number): void {
 		lines.push(theme.fg("muted", "Origin:"));
-		const levelLabel = ext.source.level === "user" ? "User" : ext.source.level === "project" ? "Project" : "Native";
+		const levelLabel =
+			ext.source.level === "user"
+				? tuiT("ui.inspector.level.user", "User")
+				: ext.source.level === "project"
+					? tuiT("ui.inspector.level.project", "Project")
+					: tuiT("ui.inspector.level.native", "Native");
 		this.#pushWrapped(
 			lines,
 			theme.italic(`via ${sanitizeDisplayText(ext.source.providerName)} (${levelLabel})`),

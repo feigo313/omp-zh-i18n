@@ -26,6 +26,7 @@ import type {
 	StatusLineSession,
 } from "./host";
 import type { Editor } from "../components/editor";
+import { tuiT } from "../i18n-host";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
 import { sanitizeStatusText } from "../chrome/shared";
 import { getThemeEpoch, theme } from "../theme";
@@ -3407,13 +3408,27 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		const window = ctx.contextWindow;
 		const boundaries = ctx.autoCompactEnabled ? this.#compactionBoundaries(window) : null;
 		const lines = [
-			pct === null ? "Context usage unknown" : `Context ${Math.round(pct)}% used`,
-			window > 0 ? `${formatNumber(ctx.contextTokens)} of ${formatNumber(window)} tokens` : "No context window",
+			pct === null
+				? tuiT("ui.statusLine.contextUsageUnknown", "Context usage unknown")
+				: tuiT("ui.statusLine.contextUsed", "Context {pct}% used", { pct: Math.round(pct) }),
+			window > 0
+				? tuiT("ui.statusLine.contextTokensOf", "{used} of {window} tokens", {
+						used: formatNumber(ctx.contextTokens),
+						window: formatNumber(window),
+					})
+				: tuiT("ui.statusLine.noContextWindow", "No context window"),
 		];
-		if (boundaries) lines.push(`Auto-compact at ${Math.round(boundaries.thresholdPercent)}%`);
+		if (boundaries)
+			lines.push(
+				tuiT("ui.statusLine.autoCompactAt", "Auto-compact at {pct}%", {
+					pct: Math.round(boundaries.thresholdPercent),
+				}),
+			);
 		const speculation = ctx.compactionSpeculation;
-		if (speculation === "running") lines.push("Compaction summary in progress");
-		else if (speculation === "armed") lines.push("Compaction summary ready");
+		if (speculation === "running")
+			lines.push(tuiT("ui.statusLine.compactionSummaryRunning", "Compaction summary in progress"));
+		else if (speculation === "armed")
+			lines.push(tuiT("ui.statusLine.compactionSummaryReady", "Compaction summary ready"));
 		// The line spans the whole window: omp's boundary symbols sit where speculation
 		// starts and compaction fires, and the share past the speculation point is accent.
 		const used = pct === null ? null : Math.min(1, pct / 100);

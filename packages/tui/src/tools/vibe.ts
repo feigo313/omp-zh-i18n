@@ -21,6 +21,7 @@ import {
 	truncateToWidth,
 } from "../render/render-utils";
 import type { NativeToolView, RenderResultOptions, ToolRenderer, ToolRenderResult } from "./renderer";
+import { tuiT } from "../i18n-host";
 /** Operation represented by a worker-session tool result. */
 export type VibeOp = "spawn" | "send" | "wait" | "kill" | "list";
 
@@ -423,7 +424,8 @@ function describeVibeResult(
 ): NativeToolView {
 	const details = result.details;
 	const label = vibeNativeLabel(op, args);
-	if (result.isError) return { ...errorView("Vibe", resultText(result) || "vibe failed", label), inline: true };
+	if (result.isError)
+		return { ...errorView("Vibe", resultText(result) || tuiT("ui.vibe.failed", "vibe failed"), label), inline: true };
 	if (!details) {
 		const fallback = resultText(result).trim();
 		return { head: toolHead("Vibe", label), inline: true, body: fallback ? [noteText(fallback)] : [] };
@@ -459,7 +461,9 @@ function describeVibeResult(
 	}
 
 	if (op === "kill") {
-		const note = details.killed?.cancelledTurn ? "in-flight turn cancelled" : undefined;
+		const note = details.killed?.cancelledTurn
+			? tuiT("ui.vibe.turnCancelled", "in-flight turn cancelled")
+			: undefined;
 		return { head: toolHead("Vibe", `kill ${details.killed?.id ?? args?.session ?? "?"}`, note), inline: true };
 	}
 
@@ -467,7 +471,10 @@ function describeVibeResult(
 	const hiddenKilled = details.hiddenKilled?.length ?? 0;
 	const killedMeta = hiddenKilled > 0 ? span(` · ${hiddenKilled} killed hidden`, "dim") : undefined;
 	if (screens.length === 0) {
-		const gist = hiddenKilled > 0 ? "no live sessions" : resultText(result).trim() || "no sessions";
+		const gist =
+			hiddenKilled > 0
+				? tuiT("ui.vibe.noLiveSessions", "no live sessions")
+				: resultText(result).trim() || tuiT("ui.vibe.noSessions", "no sessions");
 		const head = toolHead("Vibe", op, gist);
 		if (killedMeta) head.push(killedMeta);
 		return { head, tone: "warning", inline: true };
@@ -477,7 +484,7 @@ function describeVibeResult(
 	const title =
 		op === "wait"
 			? details.wait?.waiting === true
-				? "wait — watching the wall"
+				? tuiT("ui.vibe.waitWatching", "wait — watching the wall")
 				: "wait"
 			: `sessions (${screens.length})`;
 	const head: TspSpan[] = toolHead("Vibe", title);
@@ -586,8 +593,9 @@ export function createVibeToolRenderer(op: VibeOp) {
 			const hiddenKilled = details.hiddenKilled?.length ?? 0;
 			const killedMeta = hiddenKilled > 0 ? [uiTheme.fg("dim", `${hiddenKilled} killed hidden`)] : [];
 			if (screens.length === 0) {
-				const fallback = result.content.find(part => part.type === "text")?.text ?? "no sessions";
-				const gist = hiddenKilled > 0 ? "no live sessions" : fallback;
+				const fallback =
+					result.content.find(part => part.type === "text")?.text ?? tuiT("ui.vibe.noSessions", "no sessions");
+				const gist = hiddenKilled > 0 ? tuiT("ui.vibe.noLiveSessions", "no live sessions") : fallback;
 				return new Text(
 					renderStatusLine(
 						{

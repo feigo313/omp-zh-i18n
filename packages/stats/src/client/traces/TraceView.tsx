@@ -8,6 +8,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSessionTrace } from "../api";
 import { useQuery } from "../data/query";
+import { type TranslationFn, useTranslation } from "../i18n";
 import type { TraceSpan, TraceSpanKind, TraceTrack } from "../types";
 import { Card, ChartSkeleton, PageHeader, QueryView, SearchInput, Segmented } from "../ui";
 import { AggregatesPanel } from "./AggregatesPanel";
@@ -25,21 +26,28 @@ export interface TraceViewProps {
 	onBack: () => void;
 }
 
-const MODE_OPTIONS: Array<{ value: AxisMode; label: string; title?: string }> = [
-	{ value: "time", label: "Duration", title: "Real wall-clock time" },
-	{ value: "turns", label: "Turns", title: "Equal width per user turn" },
-	{ value: "calls", label: "Calls", title: "Equal width per model/tool call boundary" },
-];
+// Axis-mode and legend labels are locale-dependent, so they are built per render
+// rather than frozen at module scope.
+function modeOptions(t: TranslationFn): Array<{ value: AxisMode; label: string; title?: string }> {
+	return [
+		{ value: "time", label: t("traces.mode.time"), title: t("traces.mode.timeTitle") },
+		{ value: "turns", label: t("traces.mode.turns"), title: t("traces.mode.turnsTitle") },
+		{ value: "calls", label: t("traces.mode.calls"), title: t("traces.mode.callsTitle") },
+	];
+}
 
-const LEGEND: Array<{ kind: TraceSpanKind; label: string }> = [
-	{ kind: "turn", label: "Input" },
-	{ kind: "model", label: "Model" },
-	{ kind: "tool", label: "Tool" },
-	{ kind: "subagent", label: "Agent" },
-	{ kind: "background", label: "Background" },
-];
+function legendItems(t: TranslationFn): Array<{ kind: TraceSpanKind; label: string }> {
+	return [
+		{ kind: "turn", label: t("traces.legend.turn") },
+		{ kind: "model", label: t("traces.legend.model") },
+		{ kind: "tool", label: t("traces.legend.tool") },
+		{ kind: "subagent", label: t("traces.legend.subagent") },
+		{ kind: "background", label: t("traces.legend.background") },
+	];
+}
 
 export function TraceView({ file, active, onBack }: TraceViewProps) {
+	const { t } = useTranslation();
 	const query = useQuery(["trace", file], () => getSessionTrace(file), { pollMs: 15000, enabled: active });
 	// A previous session's trace must never render under this file's header.
 	const trace = query.stale ? null : query.data;
@@ -201,13 +209,15 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 	const traceStart = trace?.startedAt ?? 0;
 
 	const traceQuery = { ...query, data: trace };
+	const modes = modeOptions(t);
+	const legend = legendItems(t);
 
 	return (
 		<div className="stack traces-view">
 			<div>
 				<button type="button" className="btn" data-variant="ghost" data-size="sm" onClick={onBack}>
 					<ArrowLeft size={14} aria-hidden="true" />
-					Sessions
+					{t("traces.sessions")}
 				</button>
 			</div>
 			<PageHeader
@@ -220,8 +230,8 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 						data-variant="ghost"
 						data-icon="true"
 						onClick={query.refetch}
-						aria-label="Refresh trace"
-						title="Refresh trace"
+						aria-label={t("traces.refresh")}
+						title={t("traces.refresh")}
 					>
 						<RefreshCw size={14} className={query.refreshing ? "traces-spin" : undefined} />
 					</button>
@@ -235,8 +245,8 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 
 						<Card
 							index={1}
-							title="Timeline"
-							description="W/S zoom · A/D pan · drag pan · wheel zoom · 0 fit · F focus selection · dbl-click focus · Esc deselect"
+							title={t("traces.timeline")}
+							description={t("traces.timelineShortcuts")}
 							actions={
 								<>
 									<button
@@ -246,7 +256,7 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 										data-size="sm"
 										onClick={() => collapseAll(false)}
 									>
-										Expand all
+										{t("traces.expandAll")}
 									</button>
 									<button
 										type="button"
@@ -255,7 +265,7 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 										data-size="sm"
 										onClick={() => collapseAll(true)}
 									>
-										Collapse all
+										{t("traces.collapseAll")}
 									</button>
 								</>
 							}
@@ -263,11 +273,11 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 							<div className="stack">
 								<div className="traces-toolbar">
 									<Segmented
-										options={MODE_OPTIONS}
+										options={modes}
 										value={mode}
 										onChange={setMode}
 										size="sm"
-										aria-label="Axis mode"
+										aria-label={t("traces.axisMode")}
 									/>
 									{mode === "time" && (
 										<label className="traces-check">
@@ -276,7 +286,7 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 												checked={compressIdle}
 												onChange={event => setCompressIdle(event.target.checked)}
 											/>
-											Compress idle
+											{t("traces.compressIdle")}
 										</label>
 									)}
 									<div className="traces-search">
@@ -286,7 +296,7 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 												setSearch(value);
 												setMatchIndex(0);
 											}}
-											placeholder="Search spans…"
+											placeholder={t("traces.searchSpans")}
 											width={200}
 										/>
 										{search.trim() && (
@@ -303,7 +313,7 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 													data-size="sm"
 													data-icon="true"
 													onClick={() => cycleMatch(-1)}
-													aria-label="Previous match"
+													aria-label={t("traces.previousMatch")}
 													disabled={matches.length === 0}
 												>
 													<ChevronLeft size={14} />
@@ -315,7 +325,7 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 													data-size="sm"
 													data-icon="true"
 													onClick={() => cycleMatch(1)}
-													aria-label="Next match"
+													aria-label={t("traces.nextMatch")}
 													disabled={matches.length === 0}
 												>
 													<ChevronRight size={14} />
@@ -324,7 +334,7 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 										)}
 									</div>
 									<div className="traces-legend">
-										{LEGEND.map(item => (
+										{legend.map(item => (
 											<span key={item.kind} className="traces-legend-item">
 												<span
 													className="swatch"
@@ -356,12 +366,7 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 							</div>
 						</Card>
 
-						<Card
-							index={2}
-							title="Transcript"
-							description="Every span and marker in order; click to inspect"
-							flush
-						>
+						<Card index={2} title={t("traces.transcript")} description={t("traces.transcriptDescription")} flush>
 							<TranscriptList
 								tracks={tracks}
 								selection={selection}

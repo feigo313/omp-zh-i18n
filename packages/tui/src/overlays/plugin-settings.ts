@@ -32,7 +32,11 @@ import { actionHint, hintsRow, overlayCard } from "../native/overlay";
 
 const PLUGIN_SETTINGS_ROLE = "omp.overlay.plugin-settings";
 /** A plugin row's control on the native settings page: open the plugin's settings. */
-const PLUGIN_CONFIGURE: TspPrefsControl = { k: "action", label: "Configure", act: "open" };
+const pluginConfigure = (): TspPrefsControl => ({
+	k: "action",
+	label: tuiT("ui.pluginSettings.configure", "Configure"),
+	act: "open",
+});
 
 /** The plugins tab as a native settings page draws it (the settings selector puts it in its `prefs` node). */
 export interface PluginPrefsPage {
@@ -56,7 +60,7 @@ function prefsDetailPage(title: string, lead: string, list: SettingsList | undef
 		(item): TspPrefsControl =>
 			item.values?.length === 2 && item.values.includes("true") && item.values.includes("false")
 				? { k: "switch", on: item.currentValue === "true" }
-				: { k: "action", label: item.currentValue.trim() || "Edit…", act: "edit" },
+				: { k: "action", label: item.currentValue.trim() || tuiT("ui.edit", "Edit…"), act: "edit" },
 	);
 	const open = list.openSubmenu;
 	return {
@@ -397,7 +401,7 @@ export class PluginListComponent extends OverlayPanel {
 						}),
 					);
 				}
-				return { id, label: p.name, hint: parts.join(" · "), control: PLUGIN_CONFIGURE };
+				return { id, label: p.name, hint: parts.join(" · "), control: pluginConfigure() };
 			}
 			const s = entry.plugin;
 			const parts = [
@@ -413,7 +417,7 @@ export class PluginListComponent extends OverlayPanel {
 				warning: s.shadowedBy
 					? tuiT("ui.plugins.shadowedByInstall", "Shadowed by the {install} install", { install: s.shadowedBy })
 					: undefined,
-				control: PLUGIN_CONFIGURE,
+				control: pluginConfigure(),
 			};
 		});
 		return {
@@ -464,11 +468,14 @@ export class PluginListComponent extends OverlayPanel {
 								},
 							],
 						}),
-						hintsRow([actionHint("tui.select.cancel", "go back")]),
+						hintsRow([actionHint("tui.select.cancel", tuiT("ui.pluginSettings.goBack", "go back"))]),
 					]
 				: [
 						this.#selectList,
-						hintsRow([actionHint("tui.select.confirm", "configure"), actionHint("tui.select.cancel", "go back")]),
+						hintsRow([
+							actionHint("tui.select.confirm", tuiT("ui.pluginSettings.configureHint", "configure")),
+							actionHint("tui.select.cancel", tuiT("ui.pluginSettings.goBack", "go back")),
+						]),
 					];
 		this.#native = overlayCard(PLUGIN_SETTINGS_ROLE, this.title, body);
 		return this.#native;
@@ -652,7 +659,8 @@ export class PluginDetailComponent extends OverlayPanel {
 	prefsPage(): PluginPrefsPage {
 		return prefsDetailPage(
 			this.plugin.name,
-			this.plugin.manifest.description || "Turn the plugin and its features on and off, and change its settings.",
+			this.plugin.manifest.description ||
+				tuiT("ui.pluginSettings.lead", "Turn the plugin and its features on and off, and change its settings."),
 			this.#settingsList?.settingsList,
 		);
 	}
@@ -1041,7 +1049,12 @@ export class PluginSettingsComponent extends Container {
 		) {
 			return view.prefsPage();
 		}
-		return { lead: "Loading installed plugins…", sections: [], focus: null, editing: null };
+		return {
+			lead: tuiT("ui.pluginSettings.loadingInstalled", "Loading installed plugins…"),
+			sections: [],
+			focus: null,
+			editing: null,
+		};
 	}
 
 	/** Routes a native page event to the current view. */

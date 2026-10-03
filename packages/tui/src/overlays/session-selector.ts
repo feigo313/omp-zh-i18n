@@ -134,7 +134,7 @@ function sessionDayGroup(modified: Date, startOfToday: number): { id: string; la
 	const at = modified.getTime();
 	if (at >= startOfToday) return { id: "today", label: "Today" };
 	if (at >= startOfToday - DAY_MS) return { id: "yesterday", label: "Yesterday" };
-	if (at >= startOfToday - 6 * DAY_MS) return { id: "week", label: "This week" };
+	if (at >= startOfToday - 6 * DAY_MS) return { id: "week", label: tuiT("ui.sessionSelector.thisWeek", "This week") };
 	return { id: "earlier", label: "Earlier" };
 }
 
@@ -169,14 +169,15 @@ function sessionPreview(session: SessionSelectorEntry, forkedFrom: string | unde
 	return compact([
 		node("text", { text: sessionLabel(session), role: "omp.picker.title" }),
 		kv([
-			["Folder", session.cwd ? cwdSpans(session.cwd) : undefined],
-			["Created", created && pickerDate(created)],
-			["Modified", pickerDate(session.modified)],
-			["Size", formatBytes(session.size)],
-			["Status", status && [status]],
-			["Forked from", forkedFrom],
+			[tuiT("ui.sessionSelector.folder", "Folder"), session.cwd ? cwdSpans(session.cwd) : undefined],
+			[tuiT("ui.sessionSelector.created", "Created"), created && pickerDate(created)],
+			[tuiT("ui.sessionSelector.modified", "Modified"), pickerDate(session.modified)],
+			[tuiT("ui.sessionSelector.size", "Size"), formatBytes(session.size)],
+			[tuiT("ui.statusLabel", "Status"), status && [status]],
+			[tuiT("ui.sessionSelector.forkedFrom", "Forked from"), forkedFrom],
 		]),
-		conversation.length > 0 && node("section", { head: "Conversation" }, conversation),
+		conversation.length > 0 &&
+			node("section", { head: tuiT("ui.sessionSelector.conversation", "Conversation") }, conversation),
 	]);
 }
 
@@ -252,8 +253,8 @@ interface SessionPickerMessage {
 }
 
 const SCOPE_TABS: readonly { id: "folder" | "all"; label: string }[] = [
-	{ id: "folder", label: "Current folder" },
-	{ id: "all", label: "All projects" },
+	{ id: "folder", label: tuiT("ui.sessionSelector.currentFolder", "Current folder") },
+	{ id: "all", label: tuiT("ui.sessionSelector.allProjects", "All projects") },
 ];
 
 /** Returns the IDs of sessions whose recorded prompts match a query, best first. */
@@ -1007,7 +1008,16 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 			if (!base) continue;
 			add.push(
 				now.has(key)
-					? { ...base, badges: [...(base.badges ?? []), { text: "history", title: "Matched in prompt history" }] }
+					? {
+							...base,
+							badges: [
+								...(base.badges ?? []),
+								{
+									text: tuiT("ui.sessionSelector.historyBadge", "history"),
+									title: tuiT("ui.sessionSelector.matchedInHistory", "Matched in prompt history"),
+								},
+							],
+						}
 					: base,
 			);
 		}
@@ -1045,8 +1055,12 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 		const memo = this.#listNative;
 		if (memo?.items === items.items && memo.selected === selected && memo.query === query) return memo.node;
 		const empty: TspText = this.#showCwd
-			? [span("No sessions found", "muted")]
-			: [span("No sessions in current folder. Press ", "muted"), span("tab", "key"), span(" to view all.", "muted")];
+			? [span(tuiT("ui.sessionSelector.noSessionsFoundTight", "No sessions found"), "muted")]
+			: [
+					span(tuiT("ui.sessionSelector.noSessionsInPrefix", "No sessions in current folder. Press "), "muted"),
+					span("tab", "key"),
+					span(tuiT("ui.sessionSelector.toViewAll", " to view all."), "muted"),
+				];
 		const list = node(
 			"list",
 			{ selected: selected ?? null, filter: query.trim() || undefined, empty, virtual: true },
@@ -1776,22 +1790,32 @@ export class SessionSelectorComponent<T extends SessionSelectorEntry = SessionSe
 		}
 		const loading = message?.kind === "loading";
 		const toggle = list.onToggleScope !== undefined;
-		const actions = [pickerAction("resume", "Resume", "enter", { primary: true })];
-		if (this.#onDelete) actions.push(pickerAction("delete", "Delete", "backspace"));
+		const actions = [pickerAction("resume", tuiT("ui.sessionSelector.resume", "Resume"), "enter", { primary: true })];
+		if (this.#onDelete) actions.push(pickerAction("delete", tuiT("ui.delete", "Delete"), "backspace"));
 		if (toggle) {
-			actions.push(pickerAction("scope", this.#scope === "all" ? "This folder" : "All projects", "tab"));
+			actions.push(
+				pickerAction(
+					"scope",
+					this.#scope === "all"
+						? tuiT("ui.sessionSelector.thisFolder", "This folder")
+						: tuiT("ui.sessionSelector.allProjects", "All projects"),
+					"tab",
+				),
+			);
 		}
 		actions.push(
-			pickerAction("close", "Close", boundKeys("app.interrupt", ["escape"])[0] ?? "escape", { end: true }),
+			pickerAction("close", tuiT("ui.close", "Close"), boundKeys("app.interrupt", ["escape"])[0] ?? "escape", {
+				end: true,
+			}),
 		);
 		const folder = this.#scopeLabel === false ? undefined : (this.#scopeLabel ?? path.basename(getProjectDir()));
 		const title = this.#pickerTitle;
 		const placeholder =
 			loading || this.#scope === "all"
-				? "Search all sessions…"
+				? tuiT("ui.sessionSelector.searchAllSessions", "Search all sessions…")
 				: folder && !title
-					? `Search sessions in ${folder}…`
-					: "Search sessions…";
+					? tuiT("ui.sessionSelector.searchSessionsIn", "Search sessions in {folder}…", { folder })
+					: tuiT("ui.sessionSelector.searchSessions", "Search sessions…");
 		const result = picker(
 			{
 				...(title ? { title, ...(folder ? { subtitle: folder } : {}) } : {}),
@@ -1817,12 +1841,17 @@ export class SessionSelectorComponent<T extends SessionSelectorEntry = SessionSe
 				actions,
 				state: loading ? "loading" : errorOpen ? "error" : "ready",
 				...(loading || errorOpen ? { message: message!.text } : {}),
-				empty: this.#scope === "all" || !toggle ? "No sessions yet" : "No sessions in this folder yet",
+				empty:
+					this.#scope === "all" || !toggle
+						? tuiT("ui.sessionSelector.noSessionsYet", "No sessions yet")
+						: tuiT("ui.sessionSelector.noSessionsInFolderYet", "No sessions in this folder yet"),
 				confirm: choice
 					? {
-							text: `Delete “${sessionLabel(choice.session)}”? This removes the session file.`,
+							text: tuiT("ui.sessionSelector.confirmDelete", "Delete “{name}”? This removes the session file.", {
+								name: sessionLabel(choice.session),
+							}),
 							act: "delete-confirm",
-							label: "Delete",
+							label: tuiT("ui.delete", "Delete"),
 						}
 					: null,
 			},

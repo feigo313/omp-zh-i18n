@@ -11,6 +11,7 @@ import { formatKeyHint, formatKeyHints } from "../app-keybindings";
 import { KeyValueList, type KeyValueRow } from "../components/key-value-list";
 import { ScrollView } from "../components/scroll-view";
 import { renderTableRow, type TableColumn } from "../components/table";
+import { tuiT } from "../i18n-host";
 import { matchesKey } from "../keys";
 import { ProcessTerminal } from "../terminal";
 import { type Component, TUI } from "../tui";
@@ -413,8 +414,8 @@ export class PsTopComponent implements Component {
 				node("icon", {
 					name: "back",
 					role: "omp.app.ibtn",
-					title: "Back  esc",
-					aria: "Back",
+					title: tuiT("ui.psTop.backHint", "Back  esc"),
+					aria: tuiT("ui.psTop.back", "Back"),
 					actions: { click: "back" },
 				}),
 				text(
@@ -440,10 +441,10 @@ export class PsTopComponent implements Component {
 								id: "current",
 								label:
 									this.#target.dir !== undefined || this.#target.global !== undefined
-										? "Target"
-										: "This project",
+										? tuiT("ui.psTop.target", "Target")
+										: tuiT("ui.psTop.thisProject", "This project"),
 							},
-							{ id: "all", label: "All scopes" },
+							{ id: "all", label: tuiT("ui.psTop.allScopes", "All scopes") },
 						],
 						active: this.#all ? "all" : "current",
 						role: "omp.app.seg",
@@ -512,7 +513,7 @@ export class PsTopComponent implements Component {
 		}
 		if (this.#view !== "table") {
 			return actionBar([
-				actionButton("Back", "back", { keys: "escape", tone: "accent" }),
+				actionButton(tuiT("ui.psTop.back", "Back"), "back", { keys: "escape", tone: "accent" }),
 				...(this.#view === "info" ? [actionButton("Logs", "logs")] : []),
 			]);
 		}
@@ -533,10 +534,15 @@ export class PsTopComponent implements Component {
 			return keyed(
 				col(
 					[
-						text("No broker scopes", { role: "omp.app.empty-title" }),
+						text(tuiT("ui.psTop.noBrokerScopes", "No broker scopes"), { role: "omp.app.empty-title" }),
 						text([
-							span("No omp process broker runs here. ", "muted"),
-							span(this.#all ? "Nothing runs anywhere." : "Show every scope with ", "muted"),
+							span(tuiT("ui.psTop.noBrokerHere", "No omp process broker runs here. "), "muted"),
+							span(
+								this.#all
+									? tuiT("ui.psTop.nothingRunsAnywhere", "Nothing runs anywhere.")
+									: tuiT("ui.psTop.showEveryScopeWith", "Show every scope with "),
+								"muted",
+							),
 							...(this.#all ? [] : [span("a", "key"), span(".", "muted")]),
 						]),
 					],
@@ -558,7 +564,7 @@ export class PsTopComponent implements Component {
 								selected && selected.scope.runtimeDir === report.scope.runtimeDir
 									? stableKey(flatKey(selected))
 									: null,
-							empty: "No processes",
+							empty: tuiT("ui.psTop.noProcesses", "No processes"),
 							role: "omp.ps.processes",
 						},
 						report.daemons.map(daemon => describeProcess(report.scope, daemon)),
@@ -593,7 +599,7 @@ export class PsTopComponent implements Component {
 		const body: NativeNode[] = [];
 		if (!TERMINAL_STATES[daemon.state]) {
 			body.push(
-				row([text([span("Up for", "muted")]), elapsed(Date.now() - daemon.startedAt)], {
+				row([text([span(tuiT("ui.psTop.upFor", "Up for"), "muted")]), elapsed(Date.now() - daemon.startedAt)], {
 					gap: "xs",
 					role: "omp.app.fresh",
 				}),
@@ -779,13 +785,19 @@ function daemonTone(snapshot: DaemonSnapshot): TspTone {
 function scopeSpans(scope: PsScope): TspSpan[] {
 	const spans =
 		scope.kind === "global"
-			? [span("global "), span(scope.service ?? path.basename(scope.runtimeDir), "strong")]
-			: [span("project "), span(scope.projectDir ?? path.basename(scope.runtimeDir), "strong path")];
+			? [
+					span(tuiT("ui.psTop.scopeGlobal", "global ")),
+					span(scope.service ?? path.basename(scope.runtimeDir), "strong"),
+				]
+			: [
+					span(tuiT("ui.psTop.scopeProject", "project ")),
+					span(scope.projectDir ?? path.basename(scope.runtimeDir), "strong path"),
+				];
 	spans.push(span(" — ", "dim"));
 	spans.push(
 		scope.brokerPid !== undefined
-			? span(`broker pid ${scope.brokerPid}`, "success")
-			: span("broker not running", "dim"),
+			? span(tuiT("ui.psTop.brokerPid", "broker pid {pid}", { pid: scope.brokerPid }), "success")
+			: span(tuiT("ui.psTop.brokerNotRunning", "broker not running"), "dim"),
 	);
 	return spans;
 }

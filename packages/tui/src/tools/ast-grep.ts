@@ -19,6 +19,7 @@ import type { NativeChild } from "../native/node";
 import { errorText, noteText, resultText, toolHead } from "./native-view";
 import type { OutputMeta } from "./output-meta";
 import type { NativeToolView, RenderResultOptions, ToolRenderer } from "./renderer";
+import { tuiT } from "../i18n-host";
 
 /** Display metadata returned by ast-grep. */
 export interface AstGrepToolDetails {
@@ -94,7 +95,12 @@ export const astGrepToolRenderer = {
 			const header = renderStatusLine({ icon: "warning", title: "AST Grep", description, meta }, uiTheme);
 			const lines = [header, formatEmptyMessage("No matches found", uiTheme)];
 			if (details?.parseErrors?.length) {
-				lines.push(uiTheme.fg("warning", "Query may be mis-scoped; narrow `path` before concluding absence"));
+				lines.push(
+					uiTheme.fg(
+						"warning",
+						tuiT("ui.astGrep.misScoped", "Query may be mis-scoped; narrow `path` before concluding absence"),
+					),
+				);
 				appendParseErrorsBulletList(lines, details.parseErrors, uiTheme, details.parseErrorsTotal);
 			}
 			return new Text(lines.join("\n"), 0, 0);
@@ -220,7 +226,10 @@ export const astGrepToolRenderer = {
 				body: compact<NativeChild>([
 					noteText("No matches found"),
 					parseErrors.length > 0 &&
-						noteText("Query may be mis-scoped; narrow `path` before concluding absence", "warning"),
+						noteText(
+							tuiT("ui.astGrep.misScoped", "Query may be mis-scoped; narrow `path` before concluding absence"),
+							"warning",
+						),
 					parseNote,
 				]),
 			};

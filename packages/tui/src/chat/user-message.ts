@@ -204,13 +204,13 @@ export class UserMessageComponent extends Container implements ReactionTarget {
 				text("Copy", {
 					role: "omp.user.tool",
 					actions: { click: "copy-message" },
-					title: "Copy message",
+					title: tuiT("ui.userMessage.copyMessage", "Copy message"),
 					key: "copy",
 				}),
 				text("Rewind", {
 					role: "omp.user.tool",
 					actions: { click: "rewind" },
-					title: "Rewind the conversation to an earlier message",
+					title: tuiT("ui.userMessage.rewindTitle", "Rewind the conversation to an earlier message"),
 					key: "rewind",
 				}),
 			);
@@ -239,7 +239,7 @@ export class UserMessageComponent extends Container implements ReactionTarget {
 				node("badge", {
 					text: "steered",
 					tone: "accent",
-					title: "Delivered into the response that was streaming",
+					title: tuiT("ui.userMessage.steeredTitle", "Delivered into the response that was streaming"),
 				}),
 			);
 		}

@@ -16,6 +16,7 @@ import type { Theme } from "../theme/theme";
 import { Ellipsis, padToWidth, renderStatusLine, truncateToWidth } from "../render";
 
 import { replaceTabs } from "../render/render-utils";
+import { tuiT } from "../i18n-host";
 
 /** Device name for applying a staged action. */
 export const RESOLVE_DEVICE_NAME = "resolve";
@@ -155,7 +156,9 @@ export const resolveRenderer = {
 			head.push(
 				span(" "),
 				span(
-					args.action === "apply" ? "proposed → resolved" : "proposed → rejected",
+					args.action === "apply"
+						? tuiT("ui.resolve.proposedResolved", "proposed → resolved")
+						: tuiT("ui.resolve.proposedRejected", "proposed → rejected"),
 					args.action === "apply" ? "success" : "warning",
 				),
 			);

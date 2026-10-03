@@ -211,8 +211,8 @@ const ESCAPE_GO_BACK = tuiT("ui.mcpAddWizard.escapeGoBack", "go back");
 /** Native form of {@link choiceHint}. */
 function choiceHints(escapeAction: string): readonly (NativeHint | undefined)[] {
 	return [
-		actionHint(["tui.select.up", "tui.select.down"], "navigate"),
-		{ keys: ["enter"], label: "select" },
+		actionHint(["tui.select.up", "tui.select.down"], tuiT("ui.mcpAddWizard.hint.navigate", "navigate")),
+		{ keys: ["enter"], label: tuiT("ui.mcpAddWizard.hint.select", "select") },
 		interruptHint(escapeAction),
 	];
 }
@@ -417,7 +417,7 @@ export class MCPAddWizard extends OverlayPanel {
 				body,
 				hints:
 					options.escape === undefined
-						? [actionHint("tui.input.submit", "skip or continue")]
+						? [actionHint("tui.input.submit", tuiT("ui.mcpAddWizard.skipOrContinueHint", "skip or continue"))]
 						: [actionHint("tui.input.submit", "continue"), actionHint("tui.select.cancel", options.escape)],
 			},
 		);
@@ -516,7 +516,13 @@ export class MCPAddWizard extends OverlayPanel {
 		// The wizard replaces the editor in the dock; its sheet hoists into the terminal's layer.
 		const sheet = node(
 			"overlay",
-			{ role: this.nativeRole, head: "Add MCP server", anchor: "center", size: "md", modal: true },
+			{
+				role: this.nativeRole,
+				head: tuiT("ui.mcpAddWizard.addServerTitle", "Add MCP server"),
+				anchor: "center",
+				size: "md",
+				modal: true,
+			},
 			[col(children, { gap: "md" })],
 			"sheet",
 		);
@@ -1489,7 +1495,7 @@ export class MCPAddWizard extends OverlayPanel {
 					0,
 					0,
 				),
-				interruptHint("go back"),
+				interruptHint(ESCAPE_GO_BACK),
 			);
 			this.#requestRender();
 			return;
@@ -1518,8 +1524,16 @@ export class MCPAddWizard extends OverlayPanel {
 			authBody,
 			[
 				text(tuiT("ui.mcpAddWizard.launchingOauth", "Launching OAuth flow...")),
-				text([span("Browser will open automatically.", "muted")]),
-				text([span("If browser doesn't open, copy the URL from chat.", "warning")], { wrap: "word" }),
+				text([span(tuiT("ui.mcpAddWizard.browserOpensAuto", "Browser will open automatically."), "muted")]),
+				text(
+					[
+						span(
+							tuiT("ui.mcpAddWizard.copyUrlIfNoBrowser", "If browser doesn't open, copy the URL from chat."),
+							"warning",
+						),
+					],
+					{ wrap: "word" },
+				),
 			],
 			new Text(
 				theme.fg(

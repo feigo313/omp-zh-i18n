@@ -43,6 +43,7 @@ import { pickerFuzzyHits } from "../native/picker";
 import type { NativeChild, NativeNode, NativeUiEvent } from "../native/node";
 import { sameItems } from "../native/memo";
 import { plainText } from "../native/spans";
+import { tuiT } from "../i18n-host";
 
 /** Canonical display ordering of built-in model roles. */
 export type ModelRole =
@@ -663,8 +664,14 @@ function withCreditBadge(model: Model, price: string): string {
 const PRICING_STATUS_LABELS: Record<Exclude<ModelPricingStatus, "fixed">, { short: string; detail: string }> = {
 	free: { short: "free", detail: "free" },
 	included: { short: "included", detail: "included" },
-	variable: { short: "varies", detail: "price varies" },
-	unknown: { short: "unknown", detail: "pricing unknown" },
+	variable: {
+		short: tuiT("ui.modelBrowser.priceVariesShort", "varies"),
+		detail: tuiT("ui.modelBrowser.priceVaries", "price varies"),
+	},
+	unknown: {
+		short: tuiT("ui.modelBrowser.pricingUnknownShort", "unknown"),
+		detail: tuiT("ui.modelBrowser.pricingUnknown", "pricing unknown"),
+	},
 };
 
 /** `$in/out` per-million cost pair with any credit badge; `free` when nothing is charged; a declared pricing state otherwise. */
@@ -1523,7 +1530,9 @@ export class ModelBrowser implements Component {
 			items.length > 0
 				? ""
 				: plainText(this.#emptyText?.() ?? "").trim() ||
-					(filter ? "No matching models" : "No models available in this scope");
+					(filter
+						? tuiT("ui.modelBrowser.noMatchingModels", "No matching models")
+						: tuiT("ui.modelHub.noModelsInScope", "No models available in this scope"));
 		const prev = this.#nativeListNode;
 		if (
 			prev?.children === cached.children &&
@@ -1600,9 +1609,13 @@ export class ModelBrowser implements Component {
 		if (selected) {
 			const model = selected.model;
 			const head: NativeChild[] = [text([span(model.name, "strong")])];
-			if (model.isNew) head.push(node("badge", { text: "new", tone: "accent" }));
-			if (model.isBeta) head.push(node("badge", { text: "beta", tone: "warning" }));
-			if (model.isRecommended) head.push(node("badge", { text: "recommended", tone: "success" }));
+			if (model.isNew) head.push(node("badge", { text: tuiT("ui.modelBrowser.badge.new", "new"), tone: "accent" }));
+			if (model.isBeta)
+				head.push(node("badge", { text: tuiT("ui.modelBrowser.badge.beta", "beta"), tone: "warning" }));
+			if (model.isRecommended)
+				head.push(
+					node("badge", { text: tuiT("ui.modelBrowser.badge.recommended", "recommended"), tone: "success" }),
+				);
 			children.push(row(head, { gap: "sm", align: "center", wrap: true }));
 
 			const facts: string[] = [];
@@ -1740,9 +1753,9 @@ export class ModelBrowser implements Component {
 				title: `Context ${formatNumber(this.#currentContextTokens).toLowerCase()} exceeds this model's limit; picking it compacts first`,
 			});
 		}
-		if (model.isNew) badges.push({ text: "new", tone: "accent" });
-		if (model.isBeta) badges.push({ text: "beta", tone: "warning" });
-		if (isFreeModel(model)) badges.push({ text: "free", tone: "success" });
+		if (model.isNew) badges.push({ text: tuiT("ui.modelBrowser.badge.new", "new"), tone: "accent" });
+		if (model.isBeta) badges.push({ text: tuiT("ui.modelBrowser.badge.beta", "beta"), tone: "warning" });
+		if (isFreeModel(model)) badges.push({ text: tuiT("ui.modelBrowser.badge.free", "free"), tone: "success" });
 		const chips = heldRoles.map(({ role, assignment }) => {
 			const info = this.#settings.getRoleInfo(role);
 			const dot = thinkingDotToken(assignment.thinkingLevel);
@@ -1923,13 +1936,20 @@ export class ModelBrowser implements Component {
 
 		if (mode === "compact") {
 			const facts: { k: TspText; v: TspText }[] = [];
-			if (ctx > 0) facts.push({ k: "ctx", v: formatNumber(ctx).toLowerCase() });
-			if (out > 0) facts.push({ k: "out", v: formatNumber(out).toLowerCase() });
-			facts.push({ k: "price", v: isFreeModel(model) ? "free" : formatCostDetail(model) });
-			facts.push({ k: "reasoning", v: model.reasoning ? "yes" : "no" });
+			if (ctx > 0) facts.push({ k: tuiT("ui.modelBrowser.fact.ctx", "ctx"), v: formatNumber(ctx).toLowerCase() });
+			if (out > 0) facts.push({ k: tuiT("ui.modelBrowser.fact.out", "out"), v: formatNumber(out).toLowerCase() });
+			facts.push({
+				k: tuiT("ui.modelBrowser.fact.price", "price"),
+				v: isFreeModel(model) ? tuiT("ui.modelBrowser.free", "free") : formatCostDetail(model),
+			});
+			facts.push({
+				k: tuiT("ui.modelBrowser.fact.reasoning", "reasoning"),
+				v: model.reasoning ? tuiT("ui.yes", "yes") : tuiT("ui.no", "no"),
+			});
 			const children: NativeChild[] = [node("kv", { items: facts, layout: "inline" })];
 			const chips: NativeChild[] = [];
-			if (item.selector === current) chips.push(node("badge", { text: "current", tone: "success" }));
+			if (item.selector === current)
+				chips.push(node("badge", { text: tuiT("ui.modelBrowser.badge.current", "current"), tone: "success" }));
 			for (const { role, assignment } of held) chips.push(roleBadge(role, assignment));
 			if (chips.length > 0) children.push(row(chips, { gap: "xs", wrap: true }));
 			if (warning) children.push(warning);
@@ -1938,15 +1958,25 @@ export class ModelBrowser implements Component {
 
 		const children: NativeChild[] = [
 			text(model.name, { role: "omp.picker.title" }),
-			text([span(selector, "mono")], { actions: { click: "copy" }, title: "Copy model id", truncate: "middle" }),
+			text([span(selector, "mono")], {
+				actions: { click: "copy" },
+				title: tuiT("ui.modelBrowser.copyModelId", "Copy model id"),
+				truncate: "middle",
+			}),
 		];
 		const badges: NativeChild[] = [];
-		if (item.selector === current) badges.push(node("badge", { text: "current", tone: "success" }));
-		if (model.isNew) badges.push(node("badge", { text: "new", tone: "accent" }));
-		if (model.isBeta) badges.push(node("badge", { text: "beta", tone: "warning" }));
-		if (model.isRecommended) badges.push(node("badge", { text: "recommended", tone: "success" }));
-		if (model.reasoning) badges.push(node("badge", { text: "reasoning" }));
-		if (model.input.includes("image")) badges.push(node("badge", { text: "vision" }));
+		if (item.selector === current)
+			badges.push(node("badge", { text: tuiT("ui.modelBrowser.badge.current", "current"), tone: "success" }));
+		if (model.isNew) badges.push(node("badge", { text: tuiT("ui.modelBrowser.badge.new", "new"), tone: "accent" }));
+		if (model.isBeta)
+			badges.push(node("badge", { text: tuiT("ui.modelBrowser.badge.beta", "beta"), tone: "warning" }));
+		if (model.isRecommended)
+			badges.push(
+				node("badge", { text: tuiT("ui.modelBrowser.badge.recommended", "recommended"), tone: "success" }),
+			);
+		if (model.reasoning) badges.push(node("badge", { text: tuiT("ui.modelBrowser.badge.reasoning", "reasoning") }));
+		if (model.input.includes("image"))
+			badges.push(node("badge", { text: tuiT("ui.modelBrowser.badge.vision", "vision") }));
 		if (badges.length > 0) children.push(row(badges, { gap: "xs", wrap: true }));
 
 		const speed: string[] = [];
@@ -1961,13 +1991,22 @@ export class ModelBrowser implements Component {
 		const fact = (k: string, v: string | undefined) => {
 			if (v) facts.push({ k: [span(k, "muted")], v: [span(v, "mono")] });
 		};
-		fact("Context", ctx > 0 ? ctx.toLocaleString("en-US") : undefined);
-		fact("Max output", out > 0 ? out.toLocaleString("en-US") : undefined);
-		fact("Price", isFreeModel(model) ? "free" : `${previewPrice(model)} per M`);
-		fact("Speed", speed.length > 0 ? speed.join(" · ") : undefined);
-		fact("Intelligence", model.int != null && Number.isFinite(model.int) ? String(Math.round(model.int)) : undefined);
-		fact("Input", model.input.join(" · "));
-		fact("Reasoning", model.reasoning ? "yes" : "no");
+		fact(tuiT("ui.modelBrowser.context", "Context"), ctx > 0 ? ctx.toLocaleString("en-US") : undefined);
+		fact(tuiT("ui.modelBrowser.maxOutput", "Max output"), out > 0 ? out.toLocaleString("en-US") : undefined);
+		fact(
+			tuiT("ui.modelBrowser.price", "Price"),
+			isFreeModel(model) ? tuiT("ui.modelBrowser.free", "free") : `${previewPrice(model)} per M`,
+		);
+		fact(tuiT("ui.modelBrowser.speed", "Speed"), speed.length > 0 ? speed.join(" · ") : undefined);
+		fact(
+			tuiT("ui.modelBrowser.intelligence", "Intelligence"),
+			model.int != null && Number.isFinite(model.int) ? String(Math.round(model.int)) : undefined,
+		);
+		fact(tuiT("ui.modelBrowser.input", "Input"), model.input.join(" · "));
+		fact(
+			tuiT("ui.modelBrowser.reasoning", "Reasoning"),
+			model.reasoning ? tuiT("ui.yes", "yes") : tuiT("ui.no", "no"),
+		);
 		children.push(node("kv", { items: facts }));
 		if (warning) children.push(warning);
 

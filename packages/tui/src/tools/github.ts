@@ -463,7 +463,8 @@ function describeWatch(watch: GhRunWatchViewDetails, isError: boolean): NativeTo
 	const failed = (watch.failedLogs ?? []).flatMap((entry): NativeChild[] => {
 		const context = entry.workflowName ? `${entry.workflowName}  #${entry.runId}` : `run #${entry.runId}`;
 		const title = text([span(plainText(entry.jobName), "error"), span(`  ${plainText(context)}`, "muted")]);
-		if (!entry.available || !entry.tail) return [title, noteText("log tail unavailable")];
+		if (!entry.available || !entry.tail)
+			return [title, noteText(tuiT("ui.github.logTailUnavailable", "log tail unavailable"))];
 		return [title, ansi(entry.tail, { follow: true, preview: { lines: PREVIEW_LIMITS.OUTPUT_COLLAPSED } })];
 	});
 	return {
@@ -597,6 +598,7 @@ export const githubToolRenderer = {
 
 import type { OutputMeta } from "./output-meta";
 import type { IsoBackendKind } from "@oh-my-pi/pi-natives";
+import { tuiT } from "../i18n-host";
 /** Display metadata for GitHub operations. */
 export interface GhToolDetails {
 	meta?: OutputMeta;

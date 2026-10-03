@@ -43,6 +43,7 @@ import type { TspPrefsProps, TspPrefsRow, TspSpan } from "@oh-my-pi/pi-wire";
 import { col, node, span, text } from "../native/describe";
 import type { DescribeContext, NativeChild, NativeNode, NativeUiEvent } from "../native/node";
 import { actionHint, hintsRow, type NativeHint, overlayCard } from "../native/overlay";
+import { tuiT } from "../i18n-host";
 
 export const ADVISOR_REVIEW_MODES = ["turn", "agent-end"] as const;
 export const ADVISOR_SYNC_BACKLOG_MODES = ["off", "1", "3", "5", "strict"] as const;
@@ -215,11 +216,16 @@ function formatReviewCadence(advisor: AdvisorConfig): string {
 function describeSyncBacklogMode(mode: AdvisorSyncBacklog): string {
 	switch (mode) {
 		case "off":
-			return "Never wait for this advisor's backlog.";
+			return tuiT("ui.advisorConfig.backlogOff", "Never wait for this advisor's backlog.");
 		case "strict":
-			return "Wait for all of this advisor's scheduled reviews; no wall-clock cap.";
+			return tuiT(
+				"ui.advisorConfig.backlogStrict",
+				"Wait for all of this advisor's scheduled reviews; no wall-clock cap.",
+			);
 		default:
-			return `Wait until fewer than ${mode} scheduled reviews remain (30s cap).`;
+			return tuiT("ui.advisorConfig.backlogN", "Wait until fewer than {n} scheduled reviews remain (30s cap).", {
+				n: mode,
+			});
 	}
 }
 
@@ -251,21 +257,33 @@ function screenHints(screen: Screen): (NativeHint | undefined)[] {
 				actionHint("tui.select.cancel", "close"),
 			];
 		case "detail":
-			return [actionHint("tui.select.confirm", "edit field"), actionHint("tui.select.cancel", "back")];
+			return [
+				actionHint("tui.select.confirm", tuiT("ui.advisorConfig.hint.editField", "edit field")),
+				actionHint("tui.select.cancel", tuiT("ui.back", "back")),
+			];
 		case "name":
-			return [actionHint("tui.input.submit", "save"), actionHint("tui.select.cancel", "cancel")];
+			return [
+				actionHint("tui.input.submit", tuiT("ui.save", "save")),
+				actionHint("tui.select.cancel", tuiT("ui.cancel", "cancel")),
+			];
 		case "model":
 			return [
-				{ keys: [], label: "type to search" },
-				{ keys: ["enter"], label: "pick" },
-				actionHint("tui.select.cancel", "back"),
+				{ keys: [], label: tuiT("ui.typeToSearch", "type to search") },
+				{ keys: ["enter"], label: tuiT("ui.select", "pick") },
+				actionHint("tui.select.cancel", tuiT("ui.back", "back")),
 			];
 		case "thinking":
 		case "review-mode":
 		case "sync-backlog":
-			return [actionHint("tui.select.confirm", "pick"), actionHint("tui.select.cancel", "back")];
+			return [
+				actionHint("tui.select.confirm", tuiT("ui.select", "pick")),
+				actionHint("tui.select.cancel", tuiT("ui.back", "back")),
+			];
 		case "review-interval":
-			return [actionHint("tui.input.submit", "save"), actionHint("tui.select.cancel", "cancel")];
+			return [
+				actionHint("tui.input.submit", tuiT("ui.save", "save")),
+				actionHint("tui.select.cancel", tuiT("ui.cancel", "cancel")),
+			];
 		case "tools":
 			return [
 				actionHint("tui.select.confirm", "toggle"),
@@ -439,48 +457,61 @@ export class AdvisorConfigOverlayComponent implements Component {
 		const advisor = shared ? undefined : doc.advisors[index];
 		const pages: TspPrefsProps["pages"][number][] = doc.advisors.map((a, i) => ({
 			id: `advisor:${i}`,
-			label: a.name || "(unnamed)",
+			label: a.name || tuiT("ui.advisorConfig.unnamed", "(unnamed)"),
 			icon: "advisor",
-			group: "Advisors",
+			group: tuiT("ui.advisorConfig.advisors", "Advisors"),
 		}));
-		pages.push({ id: "shared", label: "Shared instructions", icon: "doc", group: "All advisors" });
+		pages.push({
+			id: "shared",
+			label: tuiT("ui.advisorConfig.sharedInstructions", "Shared instructions"),
+			icon: "doc",
+			group: tuiT("ui.advisorConfig.allAdvisors", "All advisors"),
+		});
 
 		const sections: TspPrefsProps["sections"][number][] = [];
 		if (doc.warnings?.length) {
 			sections.push({
 				id: "warnings",
-				title: "Config problems",
+				title: tuiT("ui.advisorConfig.configProblems", "Config problems"),
 				rows: sanitizeDisplayWarnings(doc.warnings).map((warning, i) => ({
 					id: `warning:${i}`,
-					label: "Dropped while loading",
+					label: tuiT("ui.advisorConfig.droppedWhileLoading", "Dropped while loading"),
 					warning,
-					control: { k: "action", label: "Save to rewrite", act: "save" },
+					control: { k: "action", label: tuiT("ui.advisorConfig.saveToRewrite", "Save to rewrite"), act: "save" },
 				})),
 			});
 		}
 		if (advisor) {
 			const model = advisor.model?.trim();
 			const tools = advisor.tools ?? [...this.#deps.defaultToolNames];
+			const roleDefault = tuiT("ui.advisorConfig.roleDefault", "advisor role default");
 			const rows: TspPrefsRow[] = [
 				{
 					id: "toggleEnabled",
-					label: "Enabled",
-					hint: "Run this advisor alongside the session.",
+					label: tuiT("ui.enabled", "Enabled"),
+					hint: tuiT("ui.advisorConfig.hint.runAlongside", "Run this advisor alongside the session."),
 					control: { k: "switch", on: advisor.enabled !== false },
 				},
-				{ id: "name", label: "Name", control: { k: "text", value: advisor.name } },
+				{ id: "name", label: tuiT("ui.advisorConfig.name", "Name"), control: { k: "text", value: advisor.name } },
 				{
 					id: "model",
-					label: "Model",
-					hint: model ? undefined : `Uses the advisor role default (${this.#defaultModelLabel ?? "unset"}).`,
+					label: tuiT("ui.advisorConfig.model", "Model"),
+					hint: model
+						? undefined
+						: tuiT("ui.advisorConfig.hint.usesRoleDefault", "Uses the advisor role default ({model}).", {
+								model: this.#defaultModelLabel ?? tuiT("ui.advisorConfig.unset", "unset"),
+							}),
 					changed: model ? true : undefined,
-					defaultLabel: model ? (this.#defaultModelLabel ?? "advisor role default") : undefined,
-					control: { k: "action", label: model || this.#defaultModelLabel || "advisor role default", act: "edit" },
+					defaultLabel: model ? (this.#defaultModelLabel ?? roleDefault) : undefined,
+					control: { k: "action", label: model || this.#defaultModelLabel || roleDefault, act: "edit" },
 				},
 				{
 					id: "reviewMode",
-					label: "Review mode",
-					hint: "turn reviews every primary turn; agent-end reviews only final yields.",
+					label: tuiT("ui.advisorConfig.reviewMode", "Review mode"),
+					hint: tuiT(
+						"ui.advisorConfig.hint.reviewMode",
+						"turn reviews every primary turn; agent-end reviews only final yields.",
+					),
 					changed: advisor.reviewMode !== undefined ? true : undefined,
 					control: {
 						k: "choice",
@@ -491,21 +522,30 @@ export class AdvisorConfigOverlayComponent implements Component {
 				},
 				{
 					id: "reviewInterval",
-					label: "Review interval",
-					hint: "Review every Nth eligible update; skipped updates join the next review.",
+					label: tuiT("ui.advisorConfig.reviewInterval", "Review interval"),
+					hint: tuiT(
+						"ui.advisorConfig.hint.reviewInterval",
+						"Review every Nth eligible update; skipped updates join the next review.",
+					),
 					changed: advisor.reviewInterval !== undefined ? true : undefined,
 					control: { k: "number", value: advisor.reviewInterval ?? 1, min: 1, step: 1 },
 				},
 				{
 					id: "syncBacklog",
-					label: "Sync backlog",
-					hint: `Catch-up policy; inherit follows advisor.syncBacklog (currently ${this.#deps.syncBacklog ?? "off"}).`,
+					label: tuiT("ui.advisorConfig.syncBacklog", "Sync backlog"),
+					hint: tuiT(
+						"ui.advisorConfig.hint.catchUpPolicy",
+						"Catch-up policy; inherit follows advisor.syncBacklog (currently {mode}).",
+						{
+							mode: this.#deps.syncBacklog ?? "off",
+						},
+					),
 					changed: advisor.syncBacklog !== undefined ? true : undefined,
 					control: {
 						k: "choice",
 						value: advisor.syncBacklog ?? SYNC_BACKLOG_INHERIT,
 						options: [
-							{ value: SYNC_BACKLOG_INHERIT, label: "inherit" },
+							{ value: SYNC_BACKLOG_INHERIT, label: tuiT("ui.advisorConfig.inherit", "inherit") },
 							...ADVISOR_SYNC_BACKLOG_MODES.map(mode => ({
 								value: mode,
 								label: mode,
@@ -517,8 +557,8 @@ export class AdvisorConfigOverlayComponent implements Component {
 				},
 				{
 					id: "tools",
-					label: "Tools",
-					hint: "None means no tools; read, grep and glob are the default.",
+					label: tuiT("ui.advisorConfig.tools", "Tools"),
+					hint: tuiT("ui.advisorConfig.hint.noTools", "None means no tools; read, grep and glob are the default."),
 					control: {
 						k: "multi",
 						values: tools,
@@ -527,23 +567,27 @@ export class AdvisorConfigOverlayComponent implements Component {
 				},
 				{
 					id: "instructions",
-					label: "Instructions",
+					label: tuiT("ui.advisorConfig.instructions", "Instructions"),
 					hint: previewLineOrNone(advisor.instructions),
-					control: { k: "action", label: "Edit…", act: "edit" },
+					control: { k: "action", label: tuiT("ui.edit", "Edit…"), act: "edit" },
 				},
-				{ id: "delete", label: "Delete this advisor", control: { k: "action", label: "Delete", act: "delete" } },
+				{
+					id: "delete",
+					label: tuiT("ui.advisorConfig.deleteThisAdvisor", "Delete this advisor"),
+					control: { k: "action", label: tuiT("ui.delete", "Delete"), act: "delete" },
+				},
 			];
-			sections.push({ id: "advisor", title: advisor.name || "Advisor", rows });
+			sections.push({ id: "advisor", title: advisor.name || tuiT("ui.advisorConfig.advisor", "Advisor"), rows });
 		} else {
 			sections.push({
 				id: "shared",
-				title: "Shared instructions",
+				title: tuiT("ui.advisorConfig.sharedInstructions", "Shared instructions"),
 				rows: [
 					{
 						id: "shared",
-						label: "Instructions",
+						label: tuiT("ui.advisorConfig.instructions", "Instructions"),
 						hint: previewLineOrNone(doc.instructions),
-						control: { k: "action", label: "Edit…", act: "edit" },
+						control: { k: "action", label: tuiT("ui.edit", "Edit…"), act: "edit" },
 					},
 				],
 			});
@@ -554,22 +598,39 @@ export class AdvisorConfigOverlayComponent implements Component {
 			rows: [
 				{
 					id: "save",
-					label: "Save & apply",
-					hint: "Write this file and reload the live advisors without a restart.",
-					warning: this.#dirty ? "Unsaved changes" : undefined,
-					control: { k: "action", label: "Save", act: "save" },
+					label: tuiT("ui.advisorConfig.saveAndApply", "Save & apply"),
+					hint: tuiT(
+						"ui.advisorConfig.hint.writeAndReload",
+						"Write this file and reload the live advisors without a restart.",
+					),
+					warning: this.#dirty ? tuiT("ui.advisorConfig.unsavedChanges", "Unsaved changes") : undefined,
+					control: { k: "action", label: tuiT("ui.save", "Save"), act: "save" },
 				},
 				{
 					id: "add",
-					label: "Add advisor",
-					hint: "Create a new advisor entry, then set its model, tools and instructions.",
-					control: { k: "action", label: "Add", act: "add" },
+					label: tuiT("ui.advisorConfig.addAdvisor", "Add advisor"),
+					hint: tuiT(
+						"ui.advisorConfig.hint.createAdvisor",
+						"Create a new advisor entry, then set its model, tools and instructions.",
+					),
+					control: { k: "action", label: tuiT("ui.add", "Add"), act: "add" },
 				},
 				{
 					id: "scope",
-					label: "Scope",
-					hint: `Editing the ${this.#scope} file. Switch to the ${this.#otherScope()} file.`,
-					control: { k: "action", label: `Open ${this.#otherScope()}`, act: "scope" },
+					label: tuiT("ui.advisorConfig.scope", "Scope"),
+					hint: tuiT(
+						"ui.advisorConfig.hint.editingScope",
+						"Editing the {scope} file. Switch to the {other} file.",
+						{
+							scope: this.#scope,
+							other: this.#otherScope(),
+						},
+					),
+					control: {
+						k: "action",
+						label: tuiT("ui.advisorConfig.openScope", "Open {scope}", { scope: this.#otherScope() }),
+						act: "scope",
+					},
 				},
 			],
 		});
@@ -593,12 +654,17 @@ export class AdvisorConfigOverlayComponent implements Component {
 				? (this.#active.getSelectedItem()?.value ?? null)
 				: null;
 		const props: TspPrefsProps = {
-			title: this.#dirty ? "Advisors · unsaved" : "Advisors",
+			title: this.#dirty
+				? tuiT("ui.advisorConfig.titleUnsaved", "Advisors · unsaved")
+				: tuiT("ui.advisorConfig.title", "Advisors"),
 			pages,
 			page: shared ? "shared" : `advisor:${index}`,
 			lead: shared
-				? "Instructions every advisor gets before its own."
-				: "An advisor watches the session and leaves notes; set its model, tools and instructions here.",
+				? tuiT("ui.advisorConfig.leadShared", "Instructions every advisor gets before its own.")
+				: tuiT(
+						"ui.advisorConfig.leadAdvisor",
+						"An advisor watches the session and leaves notes; set its model, tools and instructions here.",
+					),
 			sections,
 			focus,
 			editing,
@@ -713,8 +779,10 @@ export class AdvisorConfigOverlayComponent implements Component {
 		) {
 			return prev.node;
 		}
-		const head: TspSpan[] = [span(`Advisor configuration · ${this.#scope}`)];
-		if (this.#dirty) head.push(span("  ● unsaved", "warning"));
+		const head: TspSpan[] = [
+			span(tuiT("ui.advisorConfig.head", "Advisor configuration · {scope}", { scope: this.#scope })),
+		];
+		if (this.#dirty) head.push(span(tuiT("ui.advisorConfig.headUnsaved", "  ● unsaved"), "warning"));
 		const body: NativeNode = preview
 			? node(
 					"row",
@@ -742,7 +810,12 @@ export class AdvisorConfigOverlayComponent implements Component {
 					"col",
 					{ tone: "warning" },
 					[
-						text([span("⚠ Config problems — dropped while loading:", "warning")]),
+						text([
+							span(
+								tuiT("ui.advisorConfig.configProblemsBanner", "⚠ Config problems — dropped while loading:"),
+								"warning",
+							),
+						]),
 						...sanitizeDisplayWarnings(this.#doc.warnings).map(warning =>
 							text([span(warning, "warning")], { wrap: "word" }),
 						),
@@ -760,19 +833,31 @@ export class AdvisorConfigOverlayComponent implements Component {
 		} else if (value === "shared") {
 			const instructions = this.#doc.instructions?.trim();
 			children.push(
-				text([span("Shared instructions", "strong")]),
-				instructions ? text(instructions, { wrap: "word" }) : text([span("(none)", "muted")]),
+				text([span(tuiT("ui.advisorConfig.sharedInstructions", "Shared instructions"), "strong")]),
+				instructions
+					? text(instructions, { wrap: "word" })
+					: text([span(tuiT("ui.advisorConfig.none", "(none)"), "muted")]),
 			);
 		} else {
 			const help =
 				value === "add"
-					? "Create a new advisor entry, then edit its model, tools, and instructions."
+					? tuiT(
+							"ui.advisorConfig.help.add",
+							"Create a new advisor entry, then edit its model, tools, and instructions.",
+						)
 					: value === "scope"
-						? `Switch between the project and user WATCHDOG.yml. Currently editing the ${this.#scope}-level file.`
+						? tuiT(
+								"ui.advisorConfig.help.scope",
+								"Switch between the project and user WATCHDOG.yml. Currently editing the {scope}-level file.",
+								{ scope: this.#scope },
+							)
 						: value === "save"
-							? "Write this scope's WATCHDOG.yml and reload the live advisors without a restart."
+							? tuiT(
+									"ui.advisorConfig.help.save",
+									"Write this scope's WATCHDOG.yml and reload the live advisors without a restart.",
+								)
 							: value === "close"
-								? "Close the editor. Unsaved changes are discarded."
+								? tuiT("ui.advisorConfig.help.close", "Close the editor. Unsaved changes are discarded.")
 								: "";
 			if (help) children.push(text([span(help, "muted")], { wrap: "word" }));
 		}
@@ -787,18 +872,20 @@ export class AdvisorConfigOverlayComponent implements Component {
 		const model = advisor.model?.trim() || this.#defaultModelLabel || "advisor role default";
 		const instructions = advisor.instructions?.trim();
 		const out: NativeNode[] = [
-			text([span(advisor.name || "(unnamed)", "strong")]),
+			text([span(advisor.name || tuiT("ui.advisorConfig.unnamed", "(unnamed)"), "strong")]),
 			node("kv", {
 				items: [
-					{ k: "Enabled", v: advisor.enabled === false ? "○ off" : "● on" },
-					{ k: "Model", v: model },
-					{ k: "Tools", v: formatAdvisorTools(advisor.tools, "no tools") },
-					{ k: "Review", v: formatReviewCadence(advisor) },
-					{ k: "Sync backlog", v: this.#syncBacklogLabel(advisor) },
+					{ k: tuiT("ui.enabled", "Enabled"), v: advisor.enabled === false ? "○ off" : "● on" },
+					{ k: tuiT("ui.advisorConfig.model", "Model"), v: model },
+					{ k: tuiT("ui.advisorConfig.tools", "Tools"), v: formatAdvisorTools(advisor.tools, "no tools") },
+					{ k: tuiT("ui.advisorConfig.review", "Review"), v: formatReviewCadence(advisor) },
+					{ k: tuiT("ui.advisorConfig.syncBacklog", "Sync backlog"), v: this.#syncBacklogLabel(advisor) },
 				],
 			}),
-			text([span("Instructions:", "dim")]),
-			instructions ? text(instructions, { wrap: "word" }) : text([span("(none)", "muted")]),
+			text([span(tuiT("ui.advisorConfig.instructionsColon", "Instructions:"), "dim")]),
+			instructions
+				? text(instructions, { wrap: "word" })
+				: text([span(tuiT("ui.advisorConfig.none", "(none)"), "muted")]),
 		];
 		const liveStat = this.#cb.getAdvisorStats?.()?.find(s => s.name === (advisor.name || "default"));
 		if (liveStat && (liveStat.status === "running" || liveStat.status === "quota_exhausted")) {
@@ -807,16 +894,16 @@ export class AdvisorConfigOverlayComponent implements Component {
 				`${liveStat.tokens.output.toLocaleString()} out`,
 			];
 			if (liveStat.tokens.cacheRead > 0) spendParts.push(`${liveStat.tokens.cacheRead.toLocaleString()} cache`);
-			const usage: { k: string; v: string }[] = [{ k: "Tokens", v: spendParts.join(", ") }];
-			if (liveStat.cost > 0) usage.push({ k: "Cost", v: `$${liveStat.cost.toFixed(4)}` });
+			const usage: { k: string; v: string }[] = [{ k: tuiT("ui.tokens", "Tokens"), v: spendParts.join(", ") }];
+			if (liveStat.cost > 0) usage.push({ k: tuiT("ui.cost", "Cost"), v: `$${liveStat.cost.toFixed(4)}` });
 			if (liveStat.contextWindow > 0) {
 				const pct = Math.round((liveStat.contextTokens / liveStat.contextWindow) * 100);
 				usage.push({
-					k: "Context",
+					k: tuiT("ui.context", "Context"),
 					v: `${liveStat.contextTokens.toLocaleString()}/${liveStat.contextWindow.toLocaleString()} (${pct}%)`,
 				});
 			}
-			out.push(text([span("Usage:", "dim")]), node("kv", { items: usage }));
+			out.push(text([span(tuiT("ui.advisorConfig.usageColon", "Usage:"), "dim")]), node("kv", { items: usage }));
 		}
 		const quotaProvider =
 			(advisor.model?.includes("/") ? advisor.model.split("/")[0] : null) ?? liveStat?.model?.provider;
@@ -892,7 +979,10 @@ export class AdvisorConfigOverlayComponent implements Component {
 		// until a successful save rewrites the file without them.
 		const warnings = this.#doc.warnings?.length
 			? [
-					theme.fg("warning", "⚠ Config problems — dropped while loading:"),
+					theme.fg(
+						"warning",
+						tuiT("ui.advisorConfig.configProblemsBanner", "⚠ Config problems — dropped while loading:"),
+					),
 					...sanitizeDisplayWarnings(this.#doc.warnings).flatMap(warning =>
 						wrap(warning, bodyWidth).map(line => theme.fg("warning", line)),
 					),
@@ -907,58 +997,87 @@ export class AdvisorConfigOverlayComponent implements Component {
 			if (advisor) return [...warnings, ...this.#advisorPreview(advisor, bodyWidth)];
 		}
 		if (value === "shared") {
-			const lines = [...warnings, theme.bold("Shared instructions"), ""];
+			const lines = [
+				...warnings,
+				theme.bold(tuiT("ui.advisorConfig.sharedInstructions", "Shared instructions")),
+				"",
+			];
 			const text = this.#doc.instructions?.trim();
-			lines.push(...(text ? wrap(text, bodyWidth) : [theme.fg("muted", "(none)")]));
+			lines.push(...(text ? wrap(text, bodyWidth) : [theme.fg("muted", tuiT("ui.advisorConfig.none", "(none)"))]));
 			return lines.map(line => truncateToWidth(line, bodyWidth));
 		}
 		const help =
 			value === "add"
-				? "Create a new advisor entry, then edit its model, tools, and instructions."
+				? tuiT(
+						"ui.advisorConfig.help.add",
+						"Create a new advisor entry, then edit its model, tools, and instructions.",
+					)
 				: value === "scope"
-					? `Switch between the project and user WATCHDOG.yml. Currently editing the ${this.#scope}-level file.`
+					? tuiT(
+							"ui.advisorConfig.help.scope",
+							"Switch between the project and user WATCHDOG.yml. Currently editing the {scope}-level file.",
+							{ scope: this.#scope },
+						)
 					: value === "save"
-						? "Write this scope's WATCHDOG.yml and reload the live advisors without a restart."
+						? tuiT(
+								"ui.advisorConfig.help.save",
+								"Write this scope's WATCHDOG.yml and reload the live advisors without a restart.",
+							)
 						: value === "close"
-							? "Close the editor. Unsaved changes are discarded."
+							? tuiT("ui.advisorConfig.help.close", "Close the editor. Unsaved changes are discarded.")
 							: "";
 		return [...warnings, ...wrap(help, bodyWidth).map(line => truncateToWidth(theme.fg("muted", line), bodyWidth))];
 	}
 
 	#advisorPreview(advisor: AdvisorConfig, bodyWidth: number): string[] {
-		const model = advisor.model?.trim() || this.#defaultModelLabel || "advisor role default";
+		const model =
+			advisor.model?.trim() ||
+			this.#defaultModelLabel ||
+			tuiT("ui.advisorConfig.roleDefault", "advisor role default");
 		const tools = formatAdvisorTools(advisor.tools, "no tools");
 		const syncBacklog = this.#syncBacklogLabel(advisor);
 		const lines = [
-			theme.bold(advisor.name || "(unnamed)"),
+			theme.bold(advisor.name || tuiT("ui.advisorConfig.unnamed", "(unnamed)")),
 			"",
-			`${theme.fg("dim", "Enabled:")} ${advisor.enabled === false ? "○ off" : "● on"}`,
-			`${theme.fg("dim", "Model:")} ${model}`,
-			`${theme.fg("dim", "Tools:")} ${tools}`,
-			`${theme.fg("dim", "Review:")} ${formatReviewCadence(advisor)}`,
-			`${theme.fg("dim", "Sync backlog:")} ${syncBacklog}`,
+			`${theme.fg("dim", tuiT("ui.advisorConfig.enabledColon", "Enabled:"))} ${advisor.enabled === false ? "○ off" : "● on"}`,
+			`${theme.fg("dim", tuiT("ui.advisorConfig.modelColon", "Model:"))} ${model}`,
+			`${theme.fg("dim", tuiT("ui.advisorConfig.toolsColon", "Tools:"))} ${tools}`,
+			`${theme.fg("dim", tuiT("ui.advisorConfig.reviewColon", "Review:"))} ${formatReviewCadence(advisor)}`,
+			`${theme.fg("dim", tuiT("ui.advisorConfig.syncBacklogColon", "Sync backlog:"))} ${syncBacklog}`,
 			"",
-			theme.fg("dim", "Instructions:"),
+			theme.fg("dim", tuiT("ui.advisorConfig.instructionsColon", "Instructions:")),
 		];
 		const instr = advisor.instructions?.trim();
-		lines.push(...(instr ? wrap(instr, bodyWidth) : [theme.fg("muted", "(none)")]));
+		lines.push(...(instr ? wrap(instr, bodyWidth) : [theme.fg("muted", tuiT("ui.advisorConfig.none", "(none)"))]));
 		// Show live usage stats when available from the session.
 		const liveStat = this.#cb.getAdvisorStats?.()?.find(s => s.name === (advisor.name || "default"));
 		if (liveStat && (liveStat.status === "running" || liveStat.status === "quota_exhausted")) {
-			lines.push("", theme.fg("dim", "Usage:"));
+			lines.push("", theme.fg("dim", tuiT("ui.advisorConfig.usageColon", "Usage:")));
 			const spendParts: string[] = [
 				`${liveStat.tokens.input.toLocaleString()} in`,
 				`${liveStat.tokens.output.toLocaleString()} out`,
 			];
 			if (liveStat.tokens.cacheRead > 0) spendParts.push(`${liveStat.tokens.cacheRead.toLocaleString()} cache`);
-			lines.push(theme.fg("dim", `  Tokens: ${spendParts.join(", ")}`));
-			if (liveStat.cost > 0) lines.push(theme.fg("dim", `  Cost: $${liveStat.cost.toFixed(4)}`));
+			lines.push(
+				theme.fg("dim", tuiT("ui.advisorConfig.tokensLine", "  Tokens: {parts}", { parts: spendParts.join(", ") })),
+			);
+			if (liveStat.cost > 0)
+				lines.push(
+					theme.fg(
+						"dim",
+						tuiT("ui.advisorConfig.costLine", "  Cost: {cost}", { cost: `$${liveStat.cost.toFixed(4)}` }),
+					),
+				);
 			if (liveStat.contextWindow > 0) {
 				const pct = Math.round((liveStat.contextTokens / liveStat.contextWindow) * 100);
 				lines.push(
 					theme.fg(
 						"dim",
-						`  Context: ${liveStat.contextTokens.toLocaleString()}/${liveStat.contextWindow.toLocaleString()} (${pct}%)`,
+						tuiT("ui.advisorConfig.contextLine", "  Context: {used}/{window} ({pct}%)", {
+							used: liveStat.contextTokens.toLocaleString(),
+							window: liveStat.contextWindow.toLocaleString(),
+							pct,
+						}),
 					),
 				);
 			}
@@ -1071,7 +1190,12 @@ export class AdvisorConfigOverlayComponent implements Component {
 		}
 		if (value === "scope") {
 			if (this.#dirty) {
-				this.#cb.notify('Unsaved changes — "Save & apply" or Close before switching scope.');
+				this.#cb.notify(
+					tuiT(
+						"ui.advisorConfig.warnUnsavedScope",
+						'Unsaved changes — "Save & apply" or Close before switching scope.',
+					),
+				);
 				return;
 			}
 			const next = this.#otherScope();
@@ -1115,34 +1239,48 @@ export class AdvisorConfigOverlayComponent implements Component {
 			return;
 		}
 		this.#detailIndex = index;
-		const modelDescription = advisor.model?.trim() || this.#defaultModelLabel || "advisor role default";
+		const modelDescription =
+			advisor.model?.trim() ||
+			this.#defaultModelLabel ||
+			tuiT("ui.advisorConfig.roleDefault", "advisor role default");
 		const toolsDescription = formatAdvisorTools(advisor.tools, "no tools");
 		const reviewMode = advisor.reviewMode ?? "turn";
 		const reviewInterval = advisor.reviewInterval ?? 1;
 		const items: SelectItem[] = [
-			{ value: "name", label: "Name", description: advisor.name },
+			{ value: "name", label: tuiT("ui.advisorConfig.name", "Name"), description: advisor.name },
 			{
 				value: "toggleEnabled",
-				label: "Enabled",
+				label: tuiT("ui.enabled", "Enabled"),
 				description: advisor.enabled === false ? "○ off" : "● on",
 			},
-			{ value: "model", label: "Model", description: modelDescription },
-			{ value: "reviewMode", label: "Review mode", description: reviewMode },
-			{ value: "reviewInterval", label: "Review interval", description: String(reviewInterval) },
+			{ value: "model", label: tuiT("ui.advisorConfig.model", "Model"), description: modelDescription },
+			{ value: "reviewMode", label: tuiT("ui.advisorConfig.reviewMode", "Review mode"), description: reviewMode },
+			{
+				value: "reviewInterval",
+				label: tuiT("ui.advisorConfig.reviewInterval", "Review interval"),
+				description: String(reviewInterval),
+			},
 			{
 				value: "syncBacklog",
-				label: "Sync backlog",
+				label: tuiT("ui.advisorConfig.syncBacklog", "Sync backlog"),
 				description: this.#syncBacklogLabel(advisor),
 			},
 		];
 		if (advisor.model?.trim()) {
-			items.push({ value: "resetModel", label: "Reset model to advisor-role default" });
+			items.push({
+				value: "resetModel",
+				label: tuiT("ui.advisorConfig.resetModelTo", "Reset model to advisor-role default"),
+			});
 		}
 		items.push(
-			{ value: "tools", label: "Tools", description: toolsDescription },
-			{ value: "instructions", label: "Instructions", description: previewLineOrNone(advisor.instructions) },
-			{ value: "delete", label: "Delete this advisor" },
-			{ value: "back", label: "Back" },
+			{ value: "tools", label: tuiT("ui.advisorConfig.tools", "Tools"), description: toolsDescription },
+			{
+				value: "instructions",
+				label: tuiT("ui.advisorConfig.instructions", "Instructions"),
+				description: previewLineOrNone(advisor.instructions),
+			},
+			{ value: "delete", label: tuiT("ui.advisorConfig.deleteThisAdvisor", "Delete this advisor") },
+			{ value: "back", label: tuiT("ui.back", "Back") },
 		);
 		const list = new SelectList(items, Math.max(1, items.length), getSelectListTheme());
 		list.onSelect = item => this.#onDetailSelect(index, item.value);
@@ -1281,11 +1419,11 @@ export class AdvisorConfigOverlayComponent implements Component {
 		const current = advisor.reviewMode ?? ADVISOR_REVIEW_MODES[0];
 		const items: SelectItem[] = ADVISOR_REVIEW_MODES.map(mode => ({
 			value: mode,
-			label: mode === current ? `${mode} (current)` : mode,
+			label: mode === current ? tuiT("ui.advisorConfig.currentSuffix", "{mode} (current)", { mode }) : mode,
 			description:
 				mode === "turn"
-					? "Review every primary turn (tool-call round)."
-					: "Review only at agent end (once per run).",
+					? tuiT("ui.advisorConfig.describeTurn", "Review every primary turn (tool-call round).")
+					: tuiT("ui.advisorConfig.describeAgentEnd", "Review only at agent end (once per run)."),
 		}));
 		const list = new SelectList(items, Math.max(1, items.length), getSelectListTheme());
 		list.setSelectedIndex(ADVISOR_REVIEW_MODES.indexOf(current));
@@ -1313,7 +1451,9 @@ export class AdvisorConfigOverlayComponent implements Component {
 		input.onSubmit = value => {
 			const interval = Number(value.trim());
 			if (!Number.isSafeInteger(interval) || interval < 1) {
-				this.#cb.notify("Review interval must be a positive integer.");
+				this.#cb.notify(
+					tuiT("ui.advisorConfig.errIntervalPositive", "Review interval must be a positive integer."),
+				);
 				return;
 			}
 			advisor.reviewInterval = interval === 1 ? undefined : interval;
@@ -1339,12 +1479,21 @@ export class AdvisorConfigOverlayComponent implements Component {
 		const items: SelectItem[] = [
 			{
 				value: SYNC_BACKLOG_INHERIT,
-				label: current === undefined ? "inherit (current)" : "inherit",
-				description: `Follow the global advisor.syncBacklog setting (currently "${global}").`,
+				label:
+					current === undefined
+						? tuiT("ui.advisorConfig.inheritCurrent", "inherit (current)")
+						: tuiT("ui.advisorConfig.inherit", "inherit"),
+				description: tuiT(
+					"ui.advisorConfig.describeInherit",
+					'Follow the global advisor.syncBacklog setting (currently "{mode}").',
+					{
+						mode: global,
+					},
+				),
 			},
 			...ADVISOR_SYNC_BACKLOG_MODES.map(mode => ({
 				value: mode,
-				label: mode === current ? `${mode} (current)` : mode,
+				label: mode === current ? tuiT("ui.advisorConfig.currentSuffix", "{mode} (current)", { mode }) : mode,
 				description: describeSyncBacklogMode(mode),
 			})),
 		];

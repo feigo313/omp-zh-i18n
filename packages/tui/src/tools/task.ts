@@ -55,6 +55,7 @@ import { errorText, noteText, resultText } from "./native-view";
 import { describeJsonTree } from "./json-tree";
 import { taskSummary } from "../overlays/agent-hub-renderer";
 import type { NativeToolView, ToolRenderResult } from "./renderer";
+import { tuiT } from "../i18n-host";
 
 /** Render context threaded in from `ToolExecutionComponent.#buildRenderContext`. */
 interface TaskRenderContext {
@@ -2007,7 +2008,7 @@ function describeTaskResult(
 			return {
 				tool: { title: "Task", target: agentLabel, targetKind: "text" },
 				tone: "error",
-				body: compact([context, errorText(fallback || "Task failed")]),
+				body: compact([context, errorText(fallback || tuiT("ui.task.failed", "Task failed"))]),
 			};
 		}
 		return {

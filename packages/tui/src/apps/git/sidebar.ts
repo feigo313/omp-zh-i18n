@@ -16,6 +16,7 @@ import { Image, type ImageBudget } from "../../components/image";
 import { MenuSelection } from "../../components/menu-selection";
 import { ScrollView } from "../../components/scroll-view";
 import { TreeView } from "../../components/tree-view";
+import { tuiT } from "../../i18n-host";
 import { matchesKey } from "../../keys";
 import { col, compact, item, keyed, list, node, row, span, stableKey, text } from "../../native/describe";
 import { Memo } from "../../native/memo";
@@ -1126,21 +1127,31 @@ export class Sidebar {
 		const actions: NativeNode[] =
 			area === "unstaged"
 				? [
-						quietButton("Stage all", "stage-all", "Stage every change (space on the head)"),
+						quietButton(
+							tuiT("ui.gitSidebar.stageAll", "Stage all"),
+							"stage-all",
+							tuiT("ui.gitSidebar.stageAllHint", "Stage every change (space on the head)"),
+						),
 						node(
 							"icon",
 							{
 								name: "wand",
 								role: "omp.app.ibtn",
-								title: "Stage by description…",
-								aria: "Stage by description",
+								title: tuiT("ui.gitSidebar.stageByDescriptionTitle", "Stage by description…"),
+								aria: tuiT("ui.gitSidebar.stageByDescription", "Stage by description"),
 								actions: { click: "stage-ai" },
 							},
 							undefined,
 							"ai",
 						),
 					]
-				: [quietButton("Unstage all", "unstage-all", "Unstage every change (space on the head)")];
+				: [
+						quietButton(
+							tuiT("ui.gitSidebar.unstageAll", "Unstage all"),
+							"unstage-all",
+							tuiT("ui.gitSidebar.unstageAllHint", "Unstage every change (space on the head)"),
+						),
+					];
 		const head = row(
 			[
 				row(
@@ -1183,7 +1194,10 @@ export class Sidebar {
 					entries.map(entry => this.#describeEntry(entry)),
 					{
 						selected: selected ? this.#nativeKey(selected.target) : null,
-						empty: area === "unstaged" ? "Nothing to stage" : "Nothing staged yet",
+						empty:
+							area === "unstaged"
+								? tuiT("ui.gitSidebar.nothingToStage", "Nothing to stage")
+								: tuiT("ui.gitSidebar.nothingStaged", "Nothing staged yet"),
 						role: "omp.app.git.files",
 						actions: { click: "select", dblclick: "activate" },
 					},
@@ -1266,12 +1280,12 @@ export class Sidebar {
 		const canCommit =
 			hasChanges && !this.generating && (summary.trim().length > 0 || description.trim().length === 0);
 		const label = this.generating
-			? "Generating message…"
+			? tuiT("ui.gitSidebar.generatingMessage", "Generating message…")
 			: summary.trim().length === 0 && description.trim().length === 0
-				? "Generate message"
+				? tuiT("ui.gitSidebar.generateMessage", "Generate message")
 				: this.#model.staged.length > 0
 					? "Commit"
-					: "Stage all & commit";
+					: tuiT("ui.gitSidebar.stageAllAndCommit", "Stage all & commit");
 		// The panels' button (omp-panels.css `omp.btn`): accent while the keyboard is on it, muted when it can't run.
 		const commitTone = !canCommit ? "muted" : on({ kind: "commit-button" }) ? "accent" : undefined;
 		return col(
@@ -1286,7 +1300,7 @@ export class Sidebar {
 								align: "center",
 								role: `omp.app.git.toggle${this.amend ? ".set" : ""}${on({ kind: "amend" }) ? ".on" : ""}`,
 								actions: { click: "amend" },
-								title: "Amend the previous commit",
+								title: tuiT("ui.gitSidebar.amendHint", "Amend the previous commit"),
 							}),
 							row(compact([this.generating && node("spinner", { style: "dots" }), text(label)]), {
 								gap: "xs",
@@ -1296,8 +1310,8 @@ export class Sidebar {
 								actions: canCommit ? { click: "commit" } : undefined,
 								title:
 									this.#model.staged.length > 0
-										? "Commit the staged changes"
-										: "Stage everything, then commit",
+										? tuiT("ui.gitSidebar.commitStagedHint", "Commit the staged changes")
+										: tuiT("ui.gitSidebar.stageEverythingThenCommit", "Stage everything, then commit"),
 							}),
 						],
 						{ justify: "between", align: "center", role: "omp.app.git.foot" },
@@ -1313,7 +1327,14 @@ export class Sidebar {
 	#describeHead(selectedKey: string | undefined): NativeChild[] {
 		const head = this.#model.headCommit;
 		if (!head) {
-			return [keyed(text([span("No commits yet", "muted")], { role: "omp.app.git.empty" }), "empty")];
+			return [
+				keyed(
+					text([span(tuiT("ui.gitSidebar.noCommitsYet", "No commits yet"), "muted")], {
+						role: "omp.app.git.empty",
+					}),
+					"empty",
+				),
+			];
 		}
 		const when = head.authorDate ? new Date(head.authorDate) : null;
 		const initials = head.authorName
@@ -1356,7 +1377,12 @@ export class Sidebar {
 		);
 		const out: NativeChild[] = [keyed(commit, "head")];
 		if (!head.filesLoaded) {
-			out.push(keyed(text([span("Loading changed files…", "muted")]), "loading"));
+			out.push(
+				keyed(
+					text([span(tuiT("ui.gitSidebar.loadingChangedFiles", "Loading changed files…"), "muted")]),
+					"loading",
+				),
+			);
 			return out;
 		}
 		const additions = head.files.reduce((sum, file) => sum + (file.additions ?? 0), 0);
