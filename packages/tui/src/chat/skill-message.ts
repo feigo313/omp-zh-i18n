@@ -223,7 +223,11 @@ export class SkillMessageComponent extends Container {
 		const chip = skillChipStyle(label, bubbleReset());
 		const parts = [details?.path ? fileHyperlink(details.path, chip, { line: 1 }) : chip];
 		if (typeof details?.lineCount === "number") {
-			parts.push(theme.fg("muted", tuiT("ui.lineCount", "{count} line(s)", { count: details.lineCount })));
+			const lineLabel =
+				details.lineCount === 1
+					? tuiT("ui.lineCount", "{count} line", { count: details.lineCount })
+					: tuiT("ui.lineCountPlural", "{count} lines", { count: details.lineCount });
+			parts.push(theme.fg("muted", lineLabel));
 		}
 		return parts.join("  ");
 	}

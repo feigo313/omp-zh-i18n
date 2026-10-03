@@ -131,7 +131,9 @@ export function resolveAbortLabel(
 		return message.errorMessage!;
 	}
 	if (retryAttempt > 0) {
-		return tuiT("ui.abortedAfterRetries", "Aborted after {count} retry attempt(s)", { count: retryAttempt });
+		return retryAttempt > 1
+			? tuiT("ui.abortedAfterRetriesPlural", "Aborted after {count} retry attempts", { count: retryAttempt })
+			: tuiT("ui.abortedAfterRetries", "Aborted after {count} retry attempt", { count: retryAttempt });
 	}
 	return tuiT("ui.operationAborted", "Operation aborted");
 }

@@ -451,7 +451,11 @@ function summarizeSyntheticInput(text: string): string {
 	const size = formatBytes(Buffer.byteLength(text, "utf-8"));
 	const lineCount = text === "" ? 0 : text.split("\n").length;
 	const dot = theme.sep.dot.trim();
-	return `${syntheticInputLabel(text)} ${dot} ${size} ${dot} ${tuiT("ui.lineCount", "{count} line(s)", { count: lineCount })}`;
+	const lineLabel =
+		lineCount === 1
+			? tuiT("ui.lineCount", "{count} line", { count: lineCount })
+			: tuiT("ui.lineCountPlural", "{count} lines", { count: lineCount });
+	return `${syntheticInputLabel(text)} ${dot} ${size} ${dot} ${lineLabel}`;
 }
 
 /** First Markdown heading text in `text`, else `Synthetic input`. */
