@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSessionTrace } from "../api";
 import { useQuery } from "../data/query";
 import { type TranslationFn, useTranslation } from "../i18n";
-import type { TraceSpan, TraceSpanKind, TraceTrack } from "../types";
+import type { SessionTrace, TraceSpan, TraceSpanKind, TraceTrack } from "../types";
 import { Card, ChartSkeleton, PageHeader, QueryView, SearchInput, Segmented } from "../ui";
 import { AggregatesPanel } from "./AggregatesPanel";
 import { Minimap } from "./Minimap";
@@ -48,7 +48,11 @@ function legendItems(t: TranslationFn): Array<{ kind: TraceSpanKind; label: stri
 
 export function TraceView({ file, active, onBack }: TraceViewProps) {
 	const { t } = useTranslation();
-	const query = useQuery(["trace", file], () => getSessionTrace(file), { pollMs: 15000, enabled: active });
+	const query = useQuery<SessionTrace>(
+		["trace", file],
+		({ signal }, previous) => getSessionTrace(file, signal, previous),
+		{ pollMs: 15000, enabled: active },
+	);
 	// A previous session's trace must never render under this file's header.
 	const trace = query.stale ? null : query.data;
 
@@ -97,7 +101,10 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 		});
 	}, [scale]);
 
-	const effectiveViewport: TimelineViewport = viewport ?? { u0: scale.domain[0], u1: scale.domain[1] };
+	const effectiveViewport = useMemo<TimelineViewport>(
+		() => viewport ?? { u0: scale.domain[0], u1: scale.domain[1] },
+		[viewport, scale],
+	);
 
 	const allSpans = useMemo(() => {
 		const spans: Array<{ span: TraceSpan; track: TraceTrack }> = [];
@@ -113,6 +120,11 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 		if (!needle) return [];
 		return allSpans.filter(({ span }) => `${span.label} ${span.detail ?? ""}`.toLowerCase().includes(needle));
 	}, [allSpans, search]);
+	// Shared with the canvas and transcript so the match test runs once per search.
+	const matchIds = useMemo(
+		() => (search.trim() ? new Set(matches.map(({ span }) => span.id)) : null),
+		[matches, search],
+	);
 
 	const centerOnSpan = useCallback(
 		(span: TraceSpan) => {
@@ -205,6 +217,15 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 		},
 		[tracks],
 	);
+
+	const openFromTranscript = useCallback(
+		(spanId: string) => {
+			selectAndReveal(spanId);
+			setDrawerOpen(true);
+		},
+		[selectAndReveal],
+	);
+	const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
 	const traceStart = trace?.startedAt ?? 0;
 
@@ -356,9 +377,9 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 									scale={scale}
 									viewport={effectiveViewport}
 									onViewportChange={setViewport}
-									selection={selection}
+									selected={selected}
 									onSelect={selectAndOpen}
-									search={search}
+									matchIds={matchIds}
 									collapsed={collapsed}
 									onToggleCollapse={toggleCollapse}
 									traceStart={traceStart}
@@ -370,11 +391,9 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 							<TranscriptList
 								tracks={tracks}
 								selection={selection}
-								onSelect={spanId => {
-									selectAndReveal(spanId);
-									setDrawerOpen(true);
-								}}
+								onSelect={openFromTranscript}
 								search={search}
+								matchIds={matchIds}
 								traceStart={traceStart}
 							/>
 						</Card>
@@ -386,7 +405,7 @@ export function TraceView({ file, active, onBack }: TraceViewProps) {
 			<SpanDrawer
 				span={drawerOpen ? (selected?.span ?? null) : null}
 				track={selected?.track ?? null}
-				onClose={() => setDrawerOpen(false)}
+				onClose={closeDrawer}
 				onOpenChildTrack={openChildTrack}
 			/>
 		</div>

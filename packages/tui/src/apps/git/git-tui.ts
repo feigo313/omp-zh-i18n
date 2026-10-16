@@ -13,8 +13,9 @@
  * arrows/PgUp/PgDn, vim motions (`j`/`k`/`h`/`l`/`g`/`G`), and mouse
  * clicks/wheel. All toolbar buttons are clickable and mirrored by keys:
  * `v` cycles the view (`1`–`4` pick one), `alt+↓`/`alt+↑` jump hunks and roll
- * into the adjacent file at the edges, `]`/`[` switch files, `s`/`u`
- * stage/unstage (hunk-aware), `x` discards a hunk, `delete` discards the
+ * into the adjacent file at the edges, `space` stages/unstages the focused
+ * diff row (the focused hunk in hunk view), `s`/`u` stage/unstage
+ * (hunk-aware), `x` discards a hunk, `delete` discards the
  * whole file (press twice to confirm), `w` wraps, `b` cycles
  * whitespace handling (exact → ignore whitespace → ignore
  * formatting/import-only changes), `c` jumps to the commit form, `r`
@@ -25,13 +26,13 @@
  */
 
 import type { TspSpan } from "@oh-my-pi/pi-wire";
-import { formatKeyHint, formatKeyHints } from "../../app-keybindings";
+import { formatKeyHint, formatKeyHints, formatTooltipKey } from "../../app-keybindings";
 import { SplitPane } from "../../components/layout/split-pane";
 import { Stack } from "../../components/layout/stack";
 import { matchesKey } from "../../keys";
 import { ProcessTerminal } from "../../terminal";
 import { routeSgrMouseInput } from "../../mouse";
-import { col, compact, keyed, node, row, span, text } from "../../native/describe";
+import { col, compact, keyed, node, row, span, stableKey, text } from "../../native/describe";
 import { Memo } from "../../native/memo";
 import type { DescribeContext, NativeNode, NativeUiEvent } from "../../native/node";
 import { actionButton } from "../../native/overlay";
@@ -41,6 +42,7 @@ import { theme, warmHighlighter } from "../../theme/theme";
 import type { AvatarSource } from "./avatar";
 import { pill, softPill, tintChip } from "./colors";
 import {
+	assetTitle,
 	buildDiffDocument,
 	type DiffDocument,
 	buildLineSelectionPatch,
@@ -52,7 +54,7 @@ import {
 } from "./diff-pane";
 import { GitHelpSheet } from "./help";
 import { Sidebar, type SidebarAction, type GitCommitMessage } from "./sidebar";
-import type { AssetFileContents, ChangedFile, FileContents, GitTuiModel } from "./state";
+import type { AssetFileContents, ChangedFile, FileAssetSide, FileContents, GitTuiModel, MediaRef } from "./state";
 
 /** AI staging counts displayed after filtering the working tree. */
 export interface AiStageOutcome {
@@ -669,14 +671,20 @@ class GitTuiComponent implements Component {
 			else if (matchesKey(data, "up") || data === "k") this.#pane.moveCursor(-1, false);
 			else if (matchesKey(data, "down") || data === "j") this.#pane.moveCursor(1, false);
 			else if (matchesKey(data, "pageUp")) this.#pane.moveCursor(-Math.max(1, this.#contentHeight - 2), false);
-			else if (matchesKey(data, "pageDown") || data === " ")
-				this.#pane.moveCursor(Math.max(1, this.#contentHeight - 2), false);
+			else if (matchesKey(data, "pageDown")) this.#pane.moveCursor(Math.max(1, this.#contentHeight - 2), false);
 			else if (matchesKey(data, "left") || data === "h") this.#pane.scrollLeftBy(-8);
 			else if (matchesKey(data, "right") || data === "l") this.#pane.scrollLeftBy(8);
 			else if (matchesKey(data, "home") || data === "g") this.#pane.cursorToEdge("start");
 			else if (matchesKey(data, "end") || data === "G") this.#pane.cursorToEdge("end");
 			else if (matchesKey(data, "enter")) return this.#jumpHunkOrFile(1);
-			else if (data === "s" || data === "u") {
+			else if (matchesKey(data, "space")) {
+				// Hunk-view rows do not map back to document rows, so Space acts on the focused hunk there.
+				const target = this.#pane.patchTarget;
+				const hunk = this.#pane.mode === "hunk" ? this.#pane.currentHunk : null;
+				if (target && hunk) void this.#hunkAction(hunk, target);
+				else if (target && this.#pane.selection) void this.#lineAction(target);
+				return;
+			} else if (data === "s" || data === "u") {
 				if (this.#pane.selection?.explicit && this.#pane.patchTarget) {
 					void this.#lineAction(this.#pane.patchTarget);
 					return;
@@ -922,8 +930,9 @@ class GitTuiComponent implements Component {
 				this.#contents,
 				this.#currentFile,
 				this.#pane.emptyMessage,
+				cx.supports("media"),
 			],
-			() => this.#describeBody(),
+			() => this.#describeBody(cx),
 		);
 		const side = this.#sidebar.describe(cx);
 		return this.#nativeRoot.get([bar, body, side, narrow, status, this.#status, this.#statusTone], () => {
@@ -1023,8 +1032,8 @@ class GitTuiComponent implements Component {
 		const right: NativeNode[] = [
 			row(
 				[
-					iconButton("chev-up", "prev-hunk", `Previous change (${formatKeyHint("alt+up")})`),
-					iconButton("chev", "next-hunk", `Next change (${formatKeyHint("alt+down")})`),
+					iconButton("chev-up", "prev-hunk", `Previous change (${formatTooltipKey("alt+up")})`),
+					iconButton("chev", "next-hunk", `Next change (${formatTooltipKey("alt+down")})`),
 				],
 				{ gap: "none", align: "center" },
 			),
@@ -1045,13 +1054,13 @@ class GitTuiComponent implements Component {
 					"type",
 					"whitespace",
 					this.#whitespace === "off"
-						? `Ignore whitespace (${formatKeyHint("b")})`
+						? `Ignore whitespace (${formatTooltipKey("b")})`
 						: this.#whitespace === "whitespace"
-							? `Ignoring whitespace; also ignore formatting (${formatKeyHint("b")})`
-							: `Ignoring formatting and imports; show all (${formatKeyHint("b")})`,
+							? `Ignoring whitespace; also ignore formatting (${formatTooltipKey("b")})`
+							: `Ignoring formatting and imports; show all (${formatTooltipKey("b")})`,
 					this.#whitespace !== "off",
 				),
-				iconButton("corner-down-right", "wrap", `Wrap lines (${formatKeyHint("w")})`, this.#pane.wrap),
+				iconButton("corner-down-right", "wrap", `Wrap lines (${formatTooltipKey("w")})`, this.#pane.wrap),
 			);
 		}
 		if (file?.area === "unstaged" || file?.area === "staged") {
@@ -1063,8 +1072,8 @@ class GitTuiComponent implements Component {
 			);
 		}
 		right.push(
-			iconButton("keyboard", "help", `Keyboard shortcuts (${formatKeyHint("?")})`),
-			iconButton("x", "close", `Close (${formatKeyHint("q")})`),
+			iconButton("keyboard", "help", `Keyboard shortcuts (${formatTooltipKey("?")})`),
+			iconButton("x", "close", `Close (${formatTooltipKey("q")})`),
 		);
 		return keyed(
 			row(
@@ -1079,7 +1088,7 @@ class GitTuiComponent implements Component {
 	}
 
 	/** The diff for the view mode, or the loading, empty and media states. */
-	#describeBody(): NativeNode {
+	#describeBody(cx: DescribeContext): NativeNode {
 		const doc = this.#pane.doc;
 		const file = this.#currentFile;
 		if (doc && this.#pane.state === "ready") {
@@ -1097,6 +1106,18 @@ class GitTuiComponent implements Component {
 		}
 		const contents = this.#contents;
 		if (this.#pane.state === "asset" && file && contents?.kind === "asset") {
+			if (cx.supports("media")) {
+				return keyed(
+					row(
+						[
+							mediaColumn("before", contents.old, contents.oldRef),
+							mediaColumn("after", contents.new, contents.newRef),
+						],
+						{ gap: "sm", align: "stretch", grow: 1, role: "omp.app.git.compare" },
+					),
+					"compare",
+				);
+			}
 			return keyed(
 				col(
 					[
@@ -1181,6 +1202,41 @@ function unifiedDiff(doc: DiffDocument, whole: boolean): string {
 		}
 	}
 	return out.join("\n");
+}
+
+/** `media` nodes of the before/after compare share this link, so they pan and zoom together. */
+const MEDIA_COMPARE_LINK = "git-compare";
+
+/**
+ * One column of the native media compare: its heading (`Before · PNG`) over a
+ * `media` node Tern loads from `ref`, keyed by path so another file remounts,
+ * or a muted line when the side has no file.
+ */
+function mediaColumn(side: "before" | "after", asset: FileAssetSide, ref: MediaRef | undefined): NativeNode {
+	const head = keyed(
+		text([span(assetTitle(side === "before" ? "Before" : "After", asset), "strong")], {
+			truncate: "end",
+			role: "omp.app.git.media-head",
+		}),
+		"head",
+	);
+	const body = ref
+		? node(
+				"media",
+				{ ...ref, link: MEDIA_COMPARE_LINK, grow: 1, role: "omp.app.git.media" },
+				undefined,
+				`media-${stableKey(ref.path)}`,
+			)
+		: keyed(
+				text(
+					asset.kind === "empty"
+						? [span(side === "before" ? "Did not exist" : "Deleted", "muted")]
+						: assetText(asset).map(fact => span(fact.t, "muted")),
+					{ role: "omp.app.git.media-none" },
+				),
+				"none",
+			);
+	return keyed(col([head, body], { gap: "xs", grow: 1, basis: 0, role: "omp.app.git.media-side" }), side);
 }
 
 /** One side of a media/binary change as a short fact line. */

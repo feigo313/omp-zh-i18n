@@ -107,9 +107,39 @@ export class SessionProviderBoundary {
 		return [];
 	}
 
-	/** Builds the current deobfuscated context for agent display and replay. */
-	buildDisplaySessionContext(): SessionContext {
-		return deobfuscateSessionContext(this.#host.sessionManager.buildSessionContext(), this.#host.obfuscator());
+	/**
+	 * Builds the current deobfuscated context for agent display and replay, sized for `model`'s frame budget
+	 * (the active model unless a caller is about to adopt another).
+	 */
+	buildDisplaySessionContext(model = this.#host.model()): SessionContext {
+		return deobfuscateSessionContext(
+			this.#host.sessionManager.buildSessionContext({
+				inFlightToolCallIds: this.#inFlightToolCallIds(),
+				maxFrameDataBytes: snapcompact.frameDataBytesBudget(model),
+			}),
+			this.#host.obfuscator(),
+		);
+	}
+
+	/**
+	 * Tool call ids of the assistant turn the running agent loop is still executing.
+	 * Only tool results can follow that turn; a later user message means the last
+	 * assistant belongs to an earlier, finished turn and its unpaired calls are dead.
+	 */
+	#inFlightToolCallIds(): Set<string> | undefined {
+		const { isStreaming, messages } = this.#host.agent.state;
+		if (!isStreaming) return undefined;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i];
+			if (message.role === "user") return undefined;
+			if (message.role !== "assistant") continue;
+			const ids = new Set<string>();
+			for (const block of message.content) {
+				if (block.type === "toolCall") ids.add(block.id);
+			}
+			return ids.size > 0 ? ids : undefined;
+		}
+		return undefined;
 	}
 
 	/** Builds the full display-only transcript context. */
@@ -331,16 +361,26 @@ export class SessionProviderBoundary {
 		) {
 			return preserveData;
 		}
-		const obfuscated: Record<string, unknown> = { ...slot };
-		let changed = false;
-		for (const key of ["text", "textHead", "textTail"] as const) {
-			const value = slot[key];
-			if (typeof value !== "string" || value.length === 0) continue;
-			const next = obfuscator.obfuscate(value);
-			if (next === value) continue;
-			obfuscated[key] = next;
-			changed = true;
+		const obfuscateText = (archive: Record<string, unknown>): Record<string, unknown> => {
+			let obfuscated = archive;
+			for (const key of ["text", "textHead", "textTail"] as const) {
+				const value = archive[key];
+				if (typeof value !== "string" || value.length === 0) continue;
+				const next = obfuscator.obfuscate(value);
+				if (next !== value) obfuscated = { ...obfuscated, [key]: next };
+			}
+			return obfuscated;
+		};
+		let obfuscated = obfuscateText(slot);
+		// The no-reasoning variant carries its own copy of the text and summary.
+		const variant = slot.withoutThinking;
+		if (isRecord(variant) && isRecord(variant.archive) && typeof variant.summary === "string") {
+			const archive = obfuscateText(variant.archive);
+			const summary = obfuscator.obfuscate(variant.summary);
+			if (archive !== variant.archive || summary !== variant.summary) {
+				obfuscated = { ...obfuscated, withoutThinking: { ...variant, summary, archive } };
+			}
 		}
-		return changed ? { ...preserveData, [snapcompact.PRESERVE_KEY]: obfuscated } : preserveData;
+		return obfuscated === slot ? preserveData : { ...preserveData, [snapcompact.PRESERVE_KEY]: obfuscated };
 	}
 }

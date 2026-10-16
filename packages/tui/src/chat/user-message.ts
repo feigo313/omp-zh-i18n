@@ -1,5 +1,6 @@
 import { tuiT } from "../i18n-host";
-import { applyBackgroundToLine, padding, visibleWidth } from "../utils";
+import { applyBackgroundToLine, padding, stripTerminalSequences, visibleWidth } from "../utils";
+import type { AnimationFrame, TranscriptPresentationTarget } from "../chrome/transcript-container";
 import { type Component, Container } from "../tui";
 import { Disclosure } from "../components/disclosure";
 import { Markdown } from "../components/markdown";
@@ -25,7 +26,13 @@ import type { ReactionTarget } from "./reaction";
 import { card, md, node, row, span, text } from "../native/describe";
 import { base64ImageNode } from "../native/blobs";
 import { hasTranscriptActions, runTranscriptAction } from "./transcript-actions";
-import { type NativeChild, type NativeNode, type NativeUiEvent, rootToggleExpanded } from "../native/node";
+import {
+	type DescribeContext,
+	type NativeChild,
+	type NativeNode,
+	type NativeUiEvent,
+	rootToggleExpanded,
+} from "../native/node";
 import { Memo } from "../native/memo";
 
 // OSC 133 shell integration: marks prompt zones for terminal multiplexers.
@@ -52,7 +59,7 @@ const OSC133_ZONE_CLOSE = OSC133_ZONE_END + OSC133_COMMAND_START + OSC133_COMMAN
 
 /** How a user bubble styles its prose and chips (see {@link userBubbleColor}). */
 export interface UserBubbleOptions {
-	/** Materialized `file://` targets per attached image, indexed by chip number. */
+	/** Filesystem paths for attached image chips, indexed by chip number. */
 	imageLinks?: readonly (string | undefined)[];
 	/** The message's attached images in chip order (`#1` first); a native bubble shows them. */
 	images?: readonly ImageContent[];
@@ -119,7 +126,8 @@ export function userBubbleColor(
  * (see {@link ReactionTarget}) drawn right-aligned in the bubble's top padding row;
  * a live-steered message carries a `*` marker left-aligned in the same row.
  */
-export class UserMessageComponent extends Container implements ReactionTarget {
+export class UserMessageComponent extends Container implements ReactionTarget, TranscriptPresentationTarget {
+	#allocation = Number.POSITIVE_INFINITY;
 	// Memoized OSC 133 zone wrapping keyed on the underlying container render
 	// (same source ref ⇒ identical rows ⇒ reuse the wrapped copy). Keeps this
 	// component reference-stable for the transcript's incremental assembly and
@@ -138,6 +146,8 @@ export class UserMessageComponent extends Container implements ReactionTarget {
 	readonly #tokens: RegExp;
 	#reaction: string | undefined;
 	#native: NativeNode | undefined;
+	/** The terminal's clock {@link #native} was described with. */
+	#nativeHour12: boolean | undefined;
 
 	constructor(text: string, options: UserBubbleOptions = {}) {
 		super();
@@ -170,6 +180,12 @@ export class UserMessageComponent extends Container implements ReactionTarget {
 		this.addChild(markdown);
 	}
 
+	override releaseRenderCaches(): void {
+		this.#zoneSource = undefined;
+		this.#zoneLines = undefined;
+		super.releaseRenderCaches();
+	}
+
 	setReaction(emoji: string): void {
 		if (this.#reaction === emoji) return;
 		this.#reaction = emoji;
@@ -180,41 +196,57 @@ export class UserMessageComponent extends Container implements ReactionTarget {
 	/**
 	 * A head-less user-toned frame with the prompt as markdown under its
 	 * attached images (titled `#N` like their chips, opening the materialized
-	 * file on click): the fill says "you". A quiet toolbar (time, Copy, Rewind) fades in on hover when the
-	 * host handles transcript actions. The live-steering marker and the
+	 * file on click): the fill says "you". A quiet footer like a turn's usage line
+	 * (`⧉ ⏪ · 09:45`: Copy, Rewind, the time sent) fades in at its bottom-left on hover when
+	 * the host handles transcript actions. The live-steering marker and the
 	 * agent's reaction are chips at the bottom-right, so a reaction landing
 	 * later updates the frame in place, even deep in scrollback.
 	 */
-	override describe(): NativeNode {
-		if (this.#native) return this.#native;
+	override describe(cx?: DescribeContext): NativeNode {
+		// The terminal's clock: Bun's own default locale ignores the user's.
+		const hour12 = cx?.hour12;
+		if (this.#native && this.#nativeHour12 === hour12) return this.#native;
+		this.#nativeHour12 = hour12;
 		const children: NativeChild[] = [];
 		if (!this.#synthetic && hasTranscriptActions()) {
-			const tools: NativeChild[] = [];
+			const tools: NativeChild[] = [
+				// `copy-message`, not Tern's local `copy` (that would copy the icon's empty label).
+				node(
+					"icon",
+					{
+						name: "copy",
+						role: "omp.user.tool",
+						title: tuiT("ui.userMessage.copyMessage", "Copy message"),
+						aria: "Copy message",
+						actions: { click: "copy-message" },
+					},
+					undefined,
+					"copy",
+				),
+				node(
+					"icon",
+					{
+						name: "rewind",
+						role: "omp.user.tool",
+						title: tuiT("ui.userMessage.rewindTitle", "Rewind the conversation to an earlier message"),
+						aria: "Rewind",
+						actions: { click: "rewind" },
+					},
+					undefined,
+					"rewind",
+				),
+			];
 			if (this.#timestamp !== undefined) {
 				const at = new Date(this.#timestamp);
 				tools.push(
-					text([span(at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), "dim mono")], {
+					node("text", { text: "·" }, undefined, "dot"),
+					text([span(at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12 }), "dim mono")], {
 						role: "omp.user.time",
-						title: at.toLocaleString(),
+						title: at.toLocaleString([], { hour12 }),
 					}),
 				);
 			}
-			tools.push(
-				// `copy-message`, not Tern's local `copy` (that would copy the label).
-				text("Copy", {
-					role: "omp.user.tool",
-					actions: { click: "copy-message" },
-					title: tuiT("ui.userMessage.copyMessage", "Copy message"),
-					key: "copy",
-				}),
-				text("Rewind", {
-					role: "omp.user.tool",
-					actions: { click: "rewind" },
-					title: tuiT("ui.userMessage.rewindTitle", "Rewind the conversation to an earlier message"),
-					key: "rewind",
-				}),
-			);
-			children.push(node("row", { gap: "xs", role: "omp.user.tools" }, tools, "tools"));
+			children.push(node("row", { gap: "xs", align: "center", role: "omp.user.tools" }, tools, "tools"));
 		}
 		// Videos keep their chip only: the native image node decodes stills.
 		const thumbs: NativeNode[] = [];
@@ -271,10 +303,46 @@ export class UserMessageComponent extends Container implements ReactionTarget {
 		return applyBackgroundToLine(` ${marker}${padding(gap)}${emoji}`, width, this.#bgColor);
 	}
 
+	/** Apply the transcript allocator's current viewport reservation. */
+	setTranscriptAllocation(rows: number, _frame?: AnimationFrame): void {
+		this.#allocation = Math.max(0, Math.trunc(rows));
+	}
+
+	isTranscriptBlockFinalized(): boolean {
+		return true;
+	}
+
+	/**
+	 * Single-row emergency representation for the overflow transcript layout:
+	 * renders the first content line instead of the blank top padding row, and
+	 * omits OSC 133 shell integration markers so moving live blocks across the
+	 * viewport does not leave stale prompt marks on lines it no longer occupies.
+	 */
+	renderTranscriptBlockEmergencyRow(width: number): string | undefined {
+		return this.#selectEmergencyRow(super.render(width));
+	}
+
+	#selectEmergencyRow(lines: readonly string[]): string | undefined {
+		if (lines.length === 0) return undefined;
+		if (lines.length >= 3) {
+			for (let i = 1; i < lines.length - 1; i++) {
+				if (stripTerminalSequences(lines[i]!).trim().length > 0) {
+					return lines[i];
+				}
+			}
+			return lines[1];
+		}
+		return lines[0];
+	}
+
 	override render(width: number): readonly string[] {
 		const lines = super.render(width);
 		if (lines.length === 0) {
 			return lines;
+		}
+		if (this.#allocation === 1) {
+			const emergency = this.#selectEmergencyRow(lines);
+			if (emergency !== undefined) return [emergency];
 		}
 		if (this.#zoneSource === lines && this.#zoneLines !== undefined) {
 			return this.#zoneLines;
@@ -325,6 +393,10 @@ class SyntheticSummary implements Component {
 
 	constructor(summary: string) {
 		this.#summary = summary;
+	}
+
+	releaseRenderCaches(): void {
+		this.#cache = undefined;
 	}
 
 	invalidate(): void {
@@ -417,6 +489,10 @@ export class CollapsedSyntheticMessageComponent implements Component {
 
 	invalidate(): void {
 		this.#disclosure.invalidate();
+	}
+
+	releaseRenderCaches(): void {
+		this.#disclosure.releaseRenderCaches();
 	}
 
 	dispose(): void {

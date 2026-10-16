@@ -3,7 +3,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { type AgentTelemetry, instrumentedCompleteSimple } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
-import { getAgentDir, isBunTestRuntime, logger, postmortem, prompt } from "@oh-my-pi/pi-utils";
+import {
+	getAgentDir,
+	getSkillDescriptionsDbPath,
+	isBunTestRuntime,
+	isEexist,
+	logger,
+	postmortem,
+	prompt,
+} from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import { getModelMatchPreferences, parseModelPattern, resolveRoleSelection } from "../config/model-resolver";
 import type { Settings } from "../config/settings";
@@ -15,10 +23,21 @@ import type { Skill } from "./skills";
 const MAX_PREVIEW_CHARS = 100;
 const MAX_COMPRESSED_CHARS = 160;
 const MAX_COMPRESSED_WORDS = 12;
+// Leave ample room for other cleanup under postmortem's 10-second deadline.
+const STORE_CLOSE_GRACE_MS = 4_000;
 const inFlight = new Map<string, Promise<void>>();
 const compressionSlots = new Semaphore(4);
 
-export type SkillDescriptionCompressor = (name: string, description: string, request: string) => Promise<string>;
+/** Background compression through a fast model; the model key scopes cached unusable answers. */
+export interface SkillDescriptionCompressor {
+	/** `provider/id` of the model the next request would use; `undefined` when none is available. */
+	modelKey(): string | undefined;
+	/** @throws on transport failures, missing models or credentials, and non-`stop` completions. */
+	compress(name: string, description: string, request: string): Promise<string>;
+}
+
+/** A completed request exhausted its output budget, rather than failing in transit. */
+class SkillDescriptionLengthError extends Error {}
 
 /**
  * Resolve the configured fast role for each background request, without using the foreground model.
@@ -30,47 +49,53 @@ export function createSkillDescriptionCompressor(
 	sessionId?: string,
 	getTelemetry?: () => AgentTelemetry | undefined,
 ): SkillDescriptionCompressor {
-	return async (_name, _description, request) => {
+	const select = (): Model<Api> | undefined => {
 		const available = registry.getAvailable();
 		const configured = resolveRoleSelection(["smol"], settings, available);
-		let preferred: Model<Api> | undefined;
-		if (!configured) {
-			const preferences = getModelMatchPreferences(settings);
-			for (const pattern of MODEL_PRIO.smol) {
-				preferred = parseModelPattern(pattern, available, preferences).model;
-				if (preferred) break;
+		if (configured) return configured.model;
+		const preferences = getModelMatchPreferences(settings);
+		for (const pattern of MODEL_PRIO.smol) {
+			const preferred = parseModelPattern(pattern, available, preferences).model;
+			if (preferred) return preferred;
+		}
+		return resolveRoleSelection(["tiny"], settings, available)?.model;
+	};
+	return {
+		modelKey() {
+			const model = select();
+			return model ? `${model.provider}/${model.id}` : undefined;
+		},
+		async compress(_name, _description, request) {
+			const model = select();
+			if (!model) throw new Error("No smol or tiny model available");
+			const apiKey = await registry.getApiKey(model, sessionId);
+			if (!apiKey) throw new Error(`No credential for ${model.provider}/${model.id}`);
+			const response = await instrumentedCompleteSimple(
+				model,
+				{
+					messages: [{ role: "user", content: request, timestamp: Date.now() }],
+				},
+				{
+					apiKey: registry.resolver(model, sessionId),
+					sessionId,
+					maxTokens: 1024,
+					disableReasoning: true,
+					temperature: 0,
+					signal: AbortSignal.timeout(30_000),
+				},
+				{ telemetry: getTelemetry?.(), oneshotKind: "skill_description" },
+			);
+			if (response.stopReason === "length") {
+				throw new SkillDescriptionLengthError("Model stopped: length");
 			}
-		}
-		const selected =
-			configured ??
-			(preferred ? { model: preferred, thinkingLevel: undefined } : undefined) ??
-			resolveRoleSelection(["tiny"], settings, available);
-		if (!selected) throw new Error("No smol or tiny model available");
-		const { model } = selected;
-		const apiKey = await registry.getApiKey(model, sessionId);
-		if (!apiKey) throw new Error(`No credential for ${model.provider}/${model.id}`);
-		const response = await instrumentedCompleteSimple(
-			model,
-			{
-				messages: [{ role: "user", content: request, timestamp: Date.now() }],
-			},
-			{
-				apiKey: registry.resolver(model, sessionId),
-				sessionId,
-				maxTokens: 1024,
-				disableReasoning: true,
-				temperature: 0,
-				signal: AbortSignal.timeout(30_000),
-			},
-			{ telemetry: getTelemetry?.(), oneshotKind: "skill_description" },
-		);
-		if (response.stopReason !== "stop") {
-			throw new Error(`Model stopped: ${response.stopReason} ${response.errorMessage ?? ""}`);
-		}
-		return response.content
-			.filter(block => block.type === "text")
-			.map(block => block.text)
-			.join("");
+			if (response.stopReason !== "stop") {
+				throw new Error(`Model stopped: ${response.stopReason} ${response.errorMessage ?? ""}`);
+			}
+			return response.content
+				.filter(block => block.type === "text")
+				.map(block => block.text)
+				.join("");
+		},
 	};
 }
 
@@ -102,10 +127,15 @@ function validCompression(text: string): string | null {
 	return line;
 }
 
+function pendingForStore(store: SkillDescriptionStore): Promise<void>[] {
+	const prefix = `${store.path}:`;
+	return [...inFlight].filter(([key]) => key.startsWith(prefix)).map(([, pending]) => pending);
+}
+
 let shared: SkillDescriptionStore | null | undefined;
 
 /**
- * Process-wide store at `<agentDir>/skill-descriptions.db`, opened on first use
+ * Process-wide store at {@link getSkillDescriptionsDbPath}, opened on first use
  * and closed at exit. Opening per render and per compression write created and
  * deleted the `-wal`/`-shm` sidecars and re-ran PRAGMA/CREATE/chmod every time.
  * `undefined` when it cannot be opened (logged once; prompts keep the bounded
@@ -136,20 +166,71 @@ export function sharedSkillDescriptionStore(): SkillDescriptionStore | undefined
 export function openSessionSkillDescriptionStore(agentDir: string): SkillDescriptionStore | undefined {
 	if (isBunTestRuntime()) return undefined;
 	try {
-		return SkillDescriptionStore.open(path.join(agentDir, "skill-descriptions.db"));
+		return SkillDescriptionStore.open(resolveSkillDescriptionsDbPath(agentDir));
 	} catch (error) {
 		logger.warn("Skill description cache unavailable", { agentDir, error: String(error) });
 		return undefined;
 	}
 }
 
-/** SQLite store of model-compressed skill descriptions, keyed by prompt + skill content hash. */
+/**
+ * Skill-description database for `agentDir` (default: the process agent dir).
+ * When XDG relocates it away from `<agentDir>/skill-descriptions.db`, a legacy
+ * database is adopted once so enabling XDG does not discard every cached
+ * compression and re-bill the model for it.
+ */
+function resolveSkillDescriptionsDbPath(agentDir?: string): string {
+	const dbPath = getSkillDescriptionsDbPath(agentDir);
+	adoptLegacyDatabase(path.join(agentDir ?? getAgentDir(), "skill-descriptions.db"), dbPath);
+	return dbPath;
+}
+
+/**
+ * Best-effort one-time copy of a legacy SQLite database. `VACUUM INTO` takes a
+ * consistent snapshot including uncheckpointed WAL frames, which a plain file
+ * copy would drop; hard-linking the staged file into place publishes it
+ * atomically and never clobbers a database another process adopted or created
+ * first. Where hard links are unsupported (some FUSE, exFAT, or network
+ * mounts) an exclusive copy keeps the no-clobber guarantee. The legacy file
+ * stays for older omp versions sharing the profile.
+ */
+function adoptLegacyDatabase(legacyPath: string, dbPath: string): void {
+	if (legacyPath === dbPath || fs.existsSync(dbPath) || !fs.existsSync(legacyPath)) return;
+	const staging = `${dbPath}.adopt-${process.pid}`;
+	try {
+		fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+		fs.rmSync(staging, { force: true });
+		const legacy = new Database(legacyPath, { readonly: true });
+		try {
+			legacy.run("VACUUM INTO ?", [staging]);
+		} finally {
+			legacy.close();
+		}
+		try {
+			fs.linkSync(staging, dbPath);
+		} catch (error) {
+			if (isEexist(error)) return;
+			fs.copyFileSync(staging, dbPath, fs.constants.COPYFILE_EXCL);
+		}
+	} catch (error) {
+		logger.debug("Skill description cache not adopted", { legacyPath, dbPath, error: String(error) });
+	} finally {
+		fs.rmSync(staging, { force: true });
+	}
+}
+
+/**
+ * SQLite store of compressed descriptions, keyed by prompt + skill content hash. A `<key>:<provider/id>` row
+ * records that model's unusable answer, so it is not asked again while new models still are.
+ */
 export class SkillDescriptionStore {
 	/** Database file; scopes in-flight compression jobs shared by catalogs on this store. */
 	readonly path: string;
 	readonly #db: Database;
 	readonly #select: Statement<{ description: string }, [string]>;
 	readonly #upsert: Statement<unknown, [string, string]>;
+	#closeCall?: Promise<void>;
+	#closed = false;
 
 	private constructor(dbPath: string, db: Database) {
 		this.path = dbPath;
@@ -162,7 +243,7 @@ export class SkillDescriptionStore {
 	 * Open (creating if needed) the store at `dbPath`.
 	 * @throws when the directory or database cannot be created.
 	 */
-	static open(dbPath: string = path.join(getAgentDir(), "skill-descriptions.db")): SkillDescriptionStore {
+	static open(dbPath: string = resolveSkillDescriptionsDbPath()): SkillDescriptionStore {
 		fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
 		const db = new Database(dbPath, { create: true });
 		try {
@@ -189,15 +270,52 @@ export class SkillDescriptionStore {
 		this.#upsert.run(key, description);
 	}
 
-	close(): void {
+	/** Whether closing has begun and no new compression work is admitted. */
+	get isClosing(): boolean {
+		return this.#closeCall !== undefined;
+	}
+
+	/** Whether the database is closed and late replies are discarded; false while draining. */
+	get isClosed(): boolean {
+		return this.#closed;
+	}
+
+	/** Stop admitting requests and give already-running compressions a bounded chance to persist. */
+	close(): Promise<void> {
+		if (!this.#closeCall) {
+			const pending = pendingForStore(this);
+			if (pending.length === 0) {
+				this.#closeDatabase();
+				this.#closeCall = Promise.resolve();
+			} else {
+				this.#closeCall = this.#closeAfterPending(pending);
+			}
+		}
+		return this.#closeCall;
+	}
+
+	async #closeAfterPending(pending: Promise<void>[]): Promise<void> {
+		const deadline = Promise.withResolvers<void>();
+		const timer = setTimeout(deadline.resolve, STORE_CLOSE_GRACE_MS);
+		try {
+			await Promise.race([Promise.all(pending), deadline.promise]);
+		} finally {
+			clearTimeout(timer);
+			this.#closeDatabase();
+		}
+	}
+
+	#closeDatabase(): void {
+		this.#closed = true;
 		// Unfinalized statements keep the file handle open on Windows.
 		this.#select.finalize();
 		this.#upsert.finalize();
 		this.#db.close();
 	}
 
+	/** Start bounded closure on disposal; await close() to wait for pending writes. */
 	[Symbol.dispose](): void {
-		this.close();
+		void this.close();
 	}
 }
 
@@ -246,12 +364,12 @@ export class SkillDescriptionCatalog {
 	/** Await background writes already scheduled by this catalog (for shutdown or tests). */
 	async waitForPending(): Promise<void> {
 		if (!this.#store) return;
-		const prefix = `${this.#store.path}:`;
-		await Promise.all([...inFlight].filter(([key]) => key.startsWith(prefix)).map(([, pending]) => pending));
+		await Promise.all(pendingForStore(this.#store));
 	}
 
 	#schedule(store: SkillDescriptionStore, key: string, skill: Skill): void {
-		if (!this.#compress) return;
+		const compressor = this.#compress;
+		if (!compressor || store.isClosing) return;
 		const job = `${store.path}:${key}`;
 		if (inFlight.has(job)) return;
 		// Defer model work until the current synchronous prompt rendering has finished.
@@ -259,13 +377,31 @@ export class SkillDescriptionCatalog {
 			try {
 				await compressionSlots.acquire();
 				try {
+					if (store.isClosing) return;
+					// Unusable answers are remembered per model: that model is not asked again, a newly selected one is.
+					const model = compressor.modelKey();
+					const unusableKey = model === undefined ? undefined : `${key}:${model}`;
+					if (unusableKey !== undefined && store.get(unusableKey) !== undefined) return;
 					const request = prompt.render(compressDescriptionPrompt, {
 						name: skill.name,
 						description: skill.description,
 					});
-					const result = validCompression(await this.#compress!(skill.name, skill.description, request));
-					if (!result) throw new Error("Invalid single-line skill description (max 12 words, 160 chars)");
-					store.put(key, result);
+					let result: string | null = null;
+					try {
+						result = validCompression(await compressor.compress(skill.name, skill.description, request));
+					} catch (error) {
+						if (!(error instanceof SkillDescriptionLengthError)) throw error;
+					}
+					if (store.isClosed) return;
+					if (result !== null) {
+						store.put(key, result);
+					} else if (unusableKey !== undefined) {
+						logger.warn("Skill description compression unusable; keeping the preview for this model", {
+							skill: skill.name,
+							model,
+						});
+						store.put(unusableKey, previewSkillDescription(skill.description));
+					}
 				} finally {
 					compressionSlots.release();
 				}

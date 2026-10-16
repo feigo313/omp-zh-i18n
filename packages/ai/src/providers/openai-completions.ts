@@ -15,7 +15,7 @@ import { renderDemotedThinking } from "../dialect/demotion";
 import * as AIError from "../error";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import { getKimiCommonHeaders } from "../registry/oauth/kimi";
-import { getEnvApiKey } from "../stream";
+import { getEnvApiKey } from "../env-api-key";
 import type {
 	AssistantMessage,
 	Context,
@@ -1082,7 +1082,9 @@ const streamOpenAICompletionsOnce = (
 					typeof block.partialArgs === "string" ? parseToolCallArguments(block.partialArgs) : block.partialArgs;
 				delete block.partialArgs;
 				if (block.streamIndex !== undefined) {
-					toolCallBlockByIndex.delete(block.streamIndex);
+					if (toolCallBlockByIndex.get(block.streamIndex) === block) {
+						toolCallBlockByIndex.delete(block.streamIndex);
+					}
 					delete block.streamIndex;
 				}
 				const pendingIndex = pendingToolCallBlocks.indexOf(block);
@@ -1136,7 +1138,14 @@ const streamOpenAICompletionsOnce = (
 				// Same as appendText: leave toolCall blocks pending so index-only
 				// continuation deltas can still find them.
 				if (currentBlock?.type !== "toolCall") finishCurrentBlock(currentBlock);
-				const block: ThinkingContent = { type: "thinking", thinking: "", thinkingSignature: signature };
+				// The wire marks no summaries here; `portable-reasoning` vouches per
+				// family that this text is the full trace.
+				const block: ThinkingContent = {
+					type: "thinking",
+					thinking: "",
+					thinkingSignature: signature,
+					summary: false,
+				};
 				currentBlock = block;
 				pushContentBlock(block);
 				stream.push({ type: "thinking_start", contentIndex: blockIndex(block), partial: output });
@@ -1336,6 +1345,7 @@ const streamOpenAICompletionsOnce = (
 				// and release the socket immediately (a queued `.return()` alone
 				// would wait on the never-arriving next chunk).
 				onGraceEnd: () => requestAbortController.abort(),
+				awaitDrainOnReturn: options?.waitForTerminalDrain,
 			});
 			for await (const chunk of terminalAwareStream) {
 				if (!chunk || typeof chunk !== "object") continue;
@@ -1380,6 +1390,8 @@ const streamOpenAICompletionsOnce = (
 					// Trailing usage-only chunk (`stream_options.include_usage`) after
 					// `finish_reason`: the response is complete — stop pulling instead
 					// of waiting for `[DONE]`/close from hosts that never send either.
+					// `iterateWithTerminalGrace` drains the tail in the background so
+					// compliant hosts still get to relay `[DONE]` before the socket closes.
 					if (streamFinishedAt !== undefined && sawUsagePayload) break;
 					continue;
 				}
@@ -1509,9 +1521,17 @@ const streamOpenAICompletionsOnce = (
 							// entries are argument-only. Either way, route by array offset so
 							// sibling calls stay isolated.
 							const unkeyedBatchedArrayEntry = toolCalls.length > 1 && streamIndex === undefined && !toolCall.id;
-							let block = streamIndex !== undefined ? toolCallBlockByIndex.get(streamIndex) : undefined;
-							if (!block && toolCall.id) {
-								block = pendingToolCallBlocks.find(candidate => candidate.id === toolCall.id);
+							// A known id always wins: interleaved continuations resume their own call.
+							// Otherwise reuse the block at this `index` unless the entry opens a new call —
+							// a different id *and* a `function.name`. Some gateways (Gemini) stream every
+							// parallel call at `index: 0` with distinct ids; others mint a fresh id per
+							// argument fragment of one call, but only the opening fragment carries a name.
+							let block = toolCall.id
+								? pendingToolCallBlocks.find(candidate => candidate.id === toolCall.id)
+								: undefined;
+							const indexedBlock = streamIndex !== undefined ? toolCallBlockByIndex.get(streamIndex) : undefined;
+							if (!block && indexedBlock && (!toolCall.id || !indexedBlock.id || !incomingName)) {
+								block = indexedBlock;
 							}
 							if (!block && unkeyedBatchedArrayEntry) {
 								const offsetBlock = unkeyedBatchBlocks[toolCallOffset];
@@ -1555,7 +1575,8 @@ const streamOpenAICompletionsOnce = (
 									finishCurrentBlock(currentBlock);
 								}
 								currentBlock = block;
-								if (streamIndex !== undefined && block.streamIndex === undefined) {
+								// Rebind the index so id-less continuations follow the call that last spoke on it.
+								if (streamIndex !== undefined && toolCallBlockByIndex.get(streamIndex) !== block) {
 									block.streamIndex = streamIndex;
 									toolCallBlockByIndex.set(streamIndex, block);
 								}

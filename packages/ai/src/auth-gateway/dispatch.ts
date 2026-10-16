@@ -20,8 +20,9 @@ import type { AuthGatewayServerOptions } from "./types";
 
 export type ModelResolver = (modelId: string) => Model<Api> | undefined;
 
-export interface AuthGatewayBootOptions extends AuthGatewayServerOptions {
-	/** Source of credentials. Caller wires this to a broker-backed AuthStorage. */
+/** What the gateway's routes need, whatever transport carries the requests. */
+export interface AuthGatewayRouteOptions {
+	/** Source of credentials: broker-backed for `serve`, the CLI's own for `stdio`. */
 	storage: AuthStorage;
 	/**
 	 * Resolve a client-requested model id to a pi-ai Model. Caller supplies
@@ -31,9 +32,14 @@ export interface AuthGatewayBootOptions extends AuthGatewayServerOptions {
 	resolveModel: ModelResolver;
 	/** Optional supplier for `/v1/models` listing. Returns the full model array. */
 	listModels?: () => Iterable<Model<Api>>;
+	/** Providers the host does not serve; `/v1/usage` and `/v1/credentials/check` leave their accounts out. */
+	excludeProviders?: ReadonlySet<string>;
 	/** Upstream transport for every provider call; defaults to global `fetch`. Test seam. */
 	fetch?: FetchImpl;
 }
+
+/** The HTTP server's options: the routes' plus its listener and inbound auth. */
+export interface AuthGatewayBootOptions extends AuthGatewayServerOptions, AuthGatewayRouteOptions {}
 
 /**
  * The client's own session key, or `undefined` when it sent none. A blank key
@@ -189,9 +195,11 @@ function modelKeyOptions(model: Model<Api>, signal: AbortSignal): AuthApiKeyOpti
  *   to a sibling (usage-limit block vs credential invalidation by error class).
  *
  * `lastKey` tracks the most recent bearer so the switch step invalidates the
- * credential that actually failed. `onResolvedKey` observes every rotation;
- * routes that retain provider session state use it to re-key the account
- * lease, one-shot routes pass `undefined`.
+ * credential that actually failed; a retry context's `previousKey` wins, since
+ * concurrent operations sharing one resolver (split judgment chunks) each know
+ * the bearer they sent. `onResolvedKey` observes every rotation; routes that
+ * retain provider session state use it to re-key the account lease, one-shot
+ * routes pass `undefined`.
  */
 export function buildGatewayApiKeyResolver(
 	storage: AuthStorage,
@@ -204,7 +212,7 @@ export function buildGatewayApiKeyResolver(
 	onResolvedKey?: (apiKey: string) => void,
 ): ApiKeyResolver {
 	let lastKey = initialKey.apiKey;
-	return async ({ lastChance, error, signal }) => {
+	return async ({ lastChance, error, signal, previousKey }) => {
 		const sig = signal ?? requestSignal;
 		if (error === undefined) {
 			lastKey = initialKey.apiKey;
@@ -225,7 +233,7 @@ export function buildGatewayApiKeyResolver(
 			model,
 			sessionId,
 			model.provider,
-			lastKey,
+			previousKey ?? lastKey,
 			error,
 			sig,
 			format,

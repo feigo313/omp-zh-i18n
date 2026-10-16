@@ -55,7 +55,7 @@ const ALL_CLASSES = "*";
 export function FrustrationRoute({ active, range }: FrustrationRouteProps) {
 	const { t } = useTranslation();
 	const [running, setRunning] = useState(false);
-	const stats = useQuery(["frustration", range], () => getFrustrationDashboardStats(range), {
+	const stats = useQuery(["frustration", range], ({ signal }) => getFrustrationDashboardStats(range, signal), {
 		enabled: active,
 		pollMs: running ? RUNNING_POLL_MS : undefined,
 	});

@@ -5,6 +5,7 @@ import { Legend, Sparkline, TimeChart, useHiddenSeries } from "../charts";
 import { buildColorLookup, OTHER_COLOR } from "../data/colors";
 import {
 	formatCompact,
+	formatErrorRate,
 	formatEstimatedCost,
 	formatInteger,
 	formatPercent,
@@ -58,7 +59,7 @@ function bucketWord(bucketMs: number): string {
 
 export function ToolsRoute({ active, range }: ToolsRouteProps) {
 	const { t, locale } = useTranslation();
-	const tools = useQuery(["tools", range], () => getToolDashboardStats(range), { enabled: active });
+	const tools = useQuery(["tools", range], ({ signal }) => getToolDashboardStats(range, signal), { enabled: active });
 	const [metric, setMetric] = useState<CallMetric>("calls");
 	const [hidden, toggleHidden] = useHiddenSeries();
 	const [pickedTool, setToolFilter] = useState<string | null>(null);
@@ -107,7 +108,7 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
 								<Stat
 									label={t("tools.metric.errorRate")}
 									title={t("tools.tooltip.errors")}
-									value={formatPercent(totals.calls > 0 ? totals.errors / totals.calls : 0)}
+									value={formatErrorRate(totals.calls > 0 ? totals.errors / totals.calls : 0)}
 									hint={t("common.succeededCount", {
 										count: formatInteger(totals.calls - totals.errors),
 									})}
@@ -415,7 +416,7 @@ function buildToolColumns(
 				<span className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
 					<span className="num dim">{formatInteger(row.errors)}</span>
 					<Badge tone={row.errors > 0 ? errorRateTone(row.errorRate) : "neutral"} mono>
-						{formatPercent(row.errorRate)}
+						{formatErrorRate(row.errorRate)}
 					</Badge>
 				</span>
 			),
@@ -549,7 +550,7 @@ function ToolModelTable({
 					<span className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
 						<span className="num dim">{formatInteger(row.errors)}</span>
 						<Badge tone={row.errors > 0 ? errorRateTone(row.errorRate) : "neutral"} mono>
-							{formatPercent(row.errorRate)}
+							{formatErrorRate(row.errorRate)}
 						</Badge>
 					</span>
 				),

@@ -69,6 +69,7 @@ function hotkeyGroups(bindings: HotkeysMarkdownBindings): HotkeyGroup[] {
 			action,
 		};
 	};
+	const pushToTalkKeys = bindings.keybindings.getKeys("app.stt.pushToTalk");
 	// CustomEditor tests the chord that was actually pressed, so exit keys split by role: a key
 	// that also carries tui.editor.deleteCharForward (the readline `^D` overlap) forward-deletes
 	// while the prompt holds a draft, any other exit key quits immediately. Mixed bindings such as
@@ -176,6 +177,14 @@ function hotkeyGroups(bindings: HotkeysMarkdownBindings): HotkeyGroup[] {
 					action: tuiT("hotkeys.toggleToolActivity", "Toggle tool activity visibility"),
 				},
 				{
+					keys: [act("app.ask.hide")],
+					action: tuiT("hotkeys.other.askHide", "Hide/show a pending ask question"),
+				},
+				{
+					keys: [act("app.approval.approve")],
+					action: tuiT("hotkeys.other.approvalApprove", "Approve a pending tool call"),
+				},
+				{
 					keys: [act("app.thinking.toggle")],
 					action: tuiT("hotkeys.other.toggleThinking", "Toggle thinking block visibility"),
 				},
@@ -189,11 +198,17 @@ function hotkeyGroups(bindings: HotkeysMarkdownBindings): HotkeyGroup[] {
 					action: tuiT("hotkeys.other.pasteImage", "Paste image or text from clipboard"),
 				},
 				{
-					keys: [{ text: `${tuiT("hotkeys.hold_space", "Hold")} ` }, hints(["space"])],
-					action: tuiT(
-						"hotkeys.other.stt",
-						"Speech-to-text (push-to-talk): hold to record, release to transcribe",
-					),
+					keys:
+						pushToTalkKeys.length > 0
+							? [{ text: `${tuiT("hotkeys.hold_space", "Hold")} ` }, act("app.stt.pushToTalk")]
+							: [act("app.stt.pushToTalk")],
+					action:
+						pushToTalkKeys.length > 0
+							? tuiT(
+									"hotkeys.other.stt",
+									"Speech-to-text (push-to-talk): hold to record, release to transcribe",
+								)
+							: tuiT("hotkeys.other.sttDisabled", "Speech-to-text (push-to-talk) (disabled)"),
 				},
 				{
 					keys: [act("app.live.toggle")],

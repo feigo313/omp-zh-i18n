@@ -68,11 +68,13 @@ const UTC_DAY_LONG = new Intl.DateTimeFormat(undefined, {
 
 export function CostsRoute({ active, range }: CostsRouteProps) {
 	const { t, locale } = useTranslation();
-	const query = useQuery(["costs", range], () => getCostDashboardStats(range), { enabled: active });
+	const query = useQuery(["costs", range], ({ signal }) => getCostDashboardStats(range, signal), { enabled: active });
 	const meta = rangeMeta(range);
 	const [split, setSplit] = useState<SplitMode>("model");
 	const [hidden, toggleSeries] = useHiddenSeries();
 	const view = useMemo(() => (query.data ? buildCostsView(query.data, range, t) : null), [query.data, range, t]);
+	// Stable columns: a fresh array would make Table re-sort on every render.
+	const columns = useMemo(() => (view ? buildCostColumns(view, t, locale) : []), [view, t, locale]);
 	const isEmpty = (data: CostDashboardStats) => data.costSeries.length === 0;
 	const empty = <EmptyState title={t("costs.noData")} hint={t("common.hint.widerRange")} />;
 	const splitOptions = useMemo(
@@ -183,7 +185,7 @@ export function CostsRoute({ active, range }: CostsRouteProps) {
 							<Table
 								rows={view.summary.models}
 								rowKey={row => row.key}
-								columns={buildCostColumns(view, t, locale)}
+								columns={columns}
 								initialSort={{ key: "cost", dir: "desc" }}
 								limit={20}
 							/>

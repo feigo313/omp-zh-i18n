@@ -120,6 +120,8 @@
   "settings.compaction.thresholdTokens.options.default.label": "默认",
   "settings.compaction.v2RetainedMessageBudget.description": "V2 压缩策略保留的消息预算上限。",
   "settings.compaction.v2RetainedMessageBudget.label": "V2 保留消息预算",
+  "settings.contextFiles.extra.description": "与 AGENTS.md 一起加载的额外指令文件名。使用名称的 JSON 列表而非路径，例如 [\"AGENTS.local.md\"]；[] 禁用额外文件。启动新会话以加载。",
+  "settings.contextFiles.extra.label": "额外上下文文件",
   "settings.contextPromotion.enabled.description": "上下文溢出时升级到更大上下文模型，而非压缩",
   "settings.contextPromotion.enabled.label": "自动提升上下文",
   "settings.extendedContext.description": "在受支持时使用更大的上下文窗口,可能产生高级定价费用;关闭则保持默认或标准定价的窗口",

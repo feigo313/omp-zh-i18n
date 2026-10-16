@@ -291,7 +291,10 @@ export abstract class Command {
 // ---------------------------------------------------------------------------
 
 function translateDescription(translate: CliTextTranslator, keys: string[], fallback: string): string {
-	return keys.reduce((text, key) => translate(key, text), fallback);
+	// `keys` is ordered [specific, generic]; apply generic first so the specific
+	// key wins (later applications override earlier ones). A shared generic key
+	// (`flags.json.description`) must never override a per-command description.
+	return [...keys].reverse().reduce((text, key) => translate(key, text), fallback);
 }
 
 function translateCommandMetadata(id: string, command: CommandMetadata, translate: CliTextTranslator): CommandMetadata {

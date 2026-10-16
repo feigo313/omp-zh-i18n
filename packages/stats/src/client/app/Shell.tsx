@@ -1,7 +1,7 @@
 import { Menu } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { rangeMeta, TIME_RANGES } from "../data/range";
-import { useLive } from "../data/live";
+import { useLiveStatus } from "../data/live";
 import { t } from "../i18n";
 import type { TimeRange } from "../types";
 import { Segmented } from "../ui";
@@ -31,7 +31,7 @@ const RANGE_OPTIONS = TIME_RANGES.map((range, i) => ({
 export function Shell({ section, onSectionChange, range, onRangeChange, children }: ShellProps) {
 	const [menuOpen, setMenuOpen] = useState(false);
 	const scrolled = useScrolled();
-	const { sync } = useLive();
+	const { sync } = useLiveStatus();
 	useShortcuts(onSectionChange, onRangeChange);
 
 	const go = (next: DashboardSection) => {

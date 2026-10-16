@@ -11,6 +11,8 @@
   "settings.bash.direnvLoadTimeoutMs.label": "direnv 加载超时（毫秒）",
   "settings.bash.enabled.description": "启用 bash 工具以执行 shell 命令",
   "settings.bash.enabled.label": "Bash",
+  "settings.bash.gitGuard.description": "在 bash 工具中拒绝会丢弃或移动共享工作的 git 命令：stash、reset --hard 或 reset 到其他提交，以及在合并或变基冲突之外的 checkout/switch/restore",
+  "settings.bash.gitGuard.label": "Git 守卫",
   "settings.bash.patterns.description": "有序的 bash 命令审批规则。每项包含 match 与 approval 字段;仅支持 '*' 通配符。",
   "settings.bash.patterns.label": "Bash 审批模式",
   "settings.bash.stripTrailingHeadTail.description": "静默丢弃单行 bash 命令末尾的 | head/| tail 管道",

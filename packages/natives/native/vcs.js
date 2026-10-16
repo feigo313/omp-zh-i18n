@@ -1,4 +1,6 @@
+import { $ } from "bun";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { loadNative } from "./loader-state.js";
 
 let native;
@@ -123,6 +125,44 @@ export function clone(url, target, options = {}, signal) {
 /** Sever a copied working tree from shared git metadata. */
 export function detachGitDir(worktreeRoot, sourceCommonDir, signal) {
 	return requireNativeFn("vcsDetachGitDir")(worktreeRoot, sourceCommonDir, signal);
+}
+
+/**
+ * Keep objects created in an isolated Git repository reachable after its
+ * worktree is removed, without changing the destination's refs or index.
+ */
+export async function copyGitObjects(isolationRoot, sourceRoot) {
+	const from = path.join(requireGit(isolationRoot).info().commonDir, "objects");
+	const to = path.join(requireGit(sourceRoot).info().commonDir, "objects");
+	for (const entry of await fs.promises.readdir(from, { withFileTypes: true })) {
+		if (entry.isDirectory() && /^[0-9a-f]{2}$/.test(entry.name)) {
+			await fs.promises.cp(path.join(from, entry.name), path.join(to, entry.name), {
+				recursive: true,
+				force: false,
+			});
+		}
+	}
+	const packs = await fs.promises.readdir(path.join(from, "pack"));
+	// The index must only become visible after the pack it describes.
+	for (const name of packs.filter(name => name.endsWith(".pack"))) {
+		await fs.promises.cp(path.join(from, "pack", name), path.join(to, "pack", name), { force: false });
+	}
+	for (const name of packs.filter(name => /\.(?:idx|rev|keep|promisor|mtimes)$/.test(name))) {
+		await fs.promises.cp(path.join(from, "pack", name), path.join(to, "pack", name), { force: false });
+	}
+}
+
+/**
+ * Run Git's checkout hook in a newly created linked worktree, using the same
+ * null old HEAD and branch-switch flag as `git worktree add`.
+ */
+export async function runPostCheckoutHook(worktreeRoot, head) {
+	const nullOid = "0".repeat(head.length);
+	const result = await $`git hook run --ignore-missing post-checkout -- ${nullOid} ${head} 1`
+		.cwd(worktreeRoot)
+		.quiet()
+		.nothrow();
+	return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }
 
 /** Join patch fragments, preserving each part's trailing newline. */

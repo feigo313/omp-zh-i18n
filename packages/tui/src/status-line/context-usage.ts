@@ -8,11 +8,9 @@ import { formatNumber } from "@oh-my-pi/pi-utils";
 import type { Theme, ThemeColor } from "../theme";
 import { Container } from "../tui";
 import { Text } from "../components/text";
-import { Spacer } from "../components/spacer";
-import { DynamicBorder } from "../chrome/dynamic-border";
 import type { TspSpan, TspText } from "@oh-my-pi/pi-wire";
 import type { DescribeContext, NativeNode } from "../native/node";
-import { card, col, node, row, span, text } from "../native/describe";
+import { col, node, row, span, text } from "../native/describe";
 
 interface ContextSkill {
 	readonly name: string;
@@ -742,86 +740,183 @@ function contextMeterParts(
 }
 
 /**
- * The `/context` frame for terminals that draw `meter`: a blocks meter
- * beside a legend `kv` (swatch · label → tokens · %), then a full-width bar
- * of the same parts marked where auto-compaction fires, then the snapcompact
- * estimate when one is on. The head names the model and window once.
+ * One line of the native `/context` breakdown: a swatch in the part's bar
+ * color, its name, its tokens and its share of the window; the exact count
+ * is its tooltip.
+ */
+function contextShareRow(
+	key: string,
+	role: string,
+	swatch: TspSpan,
+	label: string,
+	tokens: number,
+	window: number,
+): NativeNode {
+	return node(
+		"row",
+		{ role, align: "center", title: `${label} · ${tokens.toLocaleString("en-US")} tokens` },
+		[
+			text([swatch], { role: "omp.context.swatch", wrap: "none" }),
+			text(label, { role: "omp.context.label", grow: 1, wrap: "none", truncate: "end" }),
+			text(formatNumber(tokens), { role: "omp.context.tokens", wrap: "none" }),
+			text(percentString(tokens, window), { role: "omp.context.share", wrap: "none" }),
+		],
+		key,
+	);
+}
+
+/**
+ * The snapcompact estimate as a titled group of lines (what is imaged, how,
+ * and what it saves), or a note saying why it is inactive; `undefined` when
+ * no snapcompact setting is on.
+ */
+function describeSnapcompact(breakdown: ContextBreakdown): NativeNode | undefined {
+	const snap = breakdown.snapcompact;
+	if (!snap) return undefined;
+	const head = text([span("Snapcompact", "strong"), span(" · estimated savings on the wire", "dim")], {
+		role: "omp.context.snap.head",
+	});
+	if (!snap.visionCapable) {
+		const note = text("Inactive: the model has no image input.", { role: "omp.context.snap.note" });
+		return node("col", { role: "omp.context.snap" }, [head, note], "snapcompact");
+	}
+	const lines: { label: string; detail: string; value?: TspSpan }[] = [];
+	const sp = snap.systemPrompt;
+	if (sp) {
+		const label = `System prompt · ${sp.scope === "agents-md" ? "AGENTS.md" : "all"}`;
+		if (sp.applied) {
+			lines.push({
+				label,
+				detail: `${formatNumber(sp.textTokens)} text → ${sp.frames} frame${sp.frames === 1 ? "" : "s"} ≈ ${formatNumber(sp.imageTokens)}`,
+				value: span(`−${formatNumber(sp.savedTokens)}`, "success"),
+			});
+		} else {
+			const reason =
+				sp.reason === "budget"
+					? "image budget exhausted"
+					: sp.reason === "empty"
+						? "nothing to image"
+						: "frames would not save tokens";
+			lines.push({ label, detail: `Stays text: ${reason}` });
+		}
+	}
+	const tr = snap.toolResults;
+	if (tr) {
+		lines.push(
+			tr.swapped > 0
+				? {
+						label: "Tool results",
+						detail: `${tr.swapped} of ${tr.total} imaged · ${formatNumber(tr.textTokens)} text → ${tr.frames} frames ≈ ${formatNumber(tr.imageTokens)}`,
+						value: span(`−${formatNumber(tr.savedTokens)}`, "success"),
+					}
+				: { label: "Tool results", detail: `None imaged · ${tr.total} in history` },
+		);
+	}
+	if (snap.savedTokens > 0) {
+		lines.push({
+			label: "Next request",
+			detail: "tokens on the wire",
+			value: span(`~${formatNumber(Math.max(0, breakdown.usedTokens - snap.savedTokens))}`, "strong"),
+		});
+	}
+	const rows = lines.map((line, index) =>
+		node(
+			"row",
+			{ role: "omp.context.snap.row", align: "baseline" },
+			[
+				text(line.label, { role: "omp.context.label", wrap: "none" }),
+				text(line.detail, { role: "omp.context.detail", grow: 1, wrap: "none", truncate: "end" }),
+				...(line.value ? [text([line.value], { role: "omp.context.tokens", wrap: "none" })] : []),
+			],
+			`snap-${index}`,
+		),
+	);
+	return node("col", { role: "omp.context.snap" }, [head, ...rows], "snapcompact");
+}
+
+/**
+ * The `/context` body for terminals that draw `meter`: the tokens used as
+ * the figure that leads, beside the room left before auto-compaction; one
+ * stacked bar of the parts (categories, free space as the empty track, the
+ * hatched buffer) ticked where compaction fires; the breakdown in the bar's
+ * order with free space and the buffer under it; then the snapcompact
+ * estimate when one is on. {@link contextUsageHead} names the model.
  */
 function describeContextFrame(breakdown: ContextBreakdown): NativeNode {
 	const { contextWindow: window, usedTokens, freeTokens, autoCompactBufferTokens, thresholdTokens } = breakdown;
 	const parts = contextMeterParts(breakdown);
 	const used = Math.min(1, usedTokens / window);
-	const swatch = (token: string, glyph = "■"): TspSpan => span(glyph, token);
-	const figure = (tokens: number): TspText => [
-		span(formatNumber(tokens)),
-		span(`  ${percentString(tokens, window)}`, "dim"),
-	];
-	const items: { k: TspText; v: TspText }[] = [
-		{
-			k: [span("Used", "strong")],
-			v: [
-				span(`${formatNumber(usedTokens)} / ${formatNumber(window).toLowerCase()}`),
-				span(`  ${percentString(usedTokens, window)}`, "dim"),
-			],
-		},
-	];
-	for (const category of breakdown.categories) {
-		items.push({ k: [swatch(category.color), span(` ${category.label}`)], v: figure(category.tokens) });
-	}
-	items.push({ k: [swatch("dim", "□"), span(" Free space")], v: figure(freeTokens) });
-	if (autoCompactBufferTokens > 0) {
-		items.push({ k: [swatch("warning", "▨"), span(" Autocompact buffer")], v: figure(autoCompactBufferTokens) });
-	}
+	const room =
+		thresholdTokens === undefined
+			? `${formatNumber(freeTokens)} free`
+			: usedTokens >= thresholdTokens
+				? `Past auto-compaction at ${percentString(thresholdTokens, window, 0)}`
+				: `${formatNumber(thresholdTokens - usedTokens)} left before auto-compaction at ${percentString(thresholdTokens, window, 0)}`;
+	const summary = node(
+		"row",
+		{ role: "omp.context.summary", align: "baseline", wrap: true },
+		[
+			text(
+				[
+					span(formatNumber(usedTokens), "strong"),
+					span(` of ${formatNumber(window)} tokens · ${percentString(usedTokens, window, 0)}`, "dim"),
+				],
+				{ role: "omp.context.used", grow: 1, wrap: "none" },
+			),
+			text(room, { role: "omp.context.room", wrap: "none" }),
+		],
+		"summary",
+	);
 	const marks =
 		thresholdTokens !== undefined
 			? [
 					{
 						at: thresholdTokens / window,
 						tone: "warning" as const,
-						title: `Auto-compaction at ${percentString(thresholdTokens, window, 0)} (${formatNumber(thresholdTokens)} tokens)`,
+						title: `Auto-compaction at ${percentString(thresholdTokens, window, 0)} · ${formatNumber(thresholdTokens)} tokens`,
 					},
 				]
 			: undefined;
-	const children = [
-		node(
-			"row",
-			{ role: "omp.context.body" },
-			[
-				node("meter", { value: used, style: "blocks", size: "lg", parts, aria: "Context usage by category" }),
-				node("kv", { items, layout: "grid", role: "omp.context.legend" }),
-			],
-			"body",
+	const bar = node(
+		"meter",
+		{ value: used, style: "bar", size: "lg", parts, ...(marks ? { marks } : {}), aria: "Context usage by category" },
+		undefined,
+		"bar",
+	);
+	const shares = breakdown.categories.map(category =>
+		contextShareRow(
+			category.id,
+			"omp.context.cat",
+			span("■", category.color),
+			category.label,
+			category.tokens,
+			window,
 		),
-		node(
-			"meter",
-			{ value: used, style: "bar", size: "lg", parts, ...(marks ? { marks } : {}), grow: 1 },
-			undefined,
-			"bar",
-		),
-	];
-	const snap = buildSnapcompactParts(breakdown);
-	if (snap.length > 0) {
-		children.push(
-			node(
-				"section",
-				{},
-				snap.map((line, index) => node("text", { spans: line, wrap: "word" }, undefined, `snap-${index}`)),
-				"snapcompact",
+	);
+	shares.push(contextShareRow("free", "omp.context.cat.free", span("□", "dim"), "Free space", freeTokens, window));
+	if (autoCompactBufferTokens > 0) {
+		shares.push(
+			contextShareRow(
+				"buffer",
+				"omp.context.cat.buffer",
+				span("▨", "warning"),
+				"Autocompact buffer",
+				autoCompactBufferTokens,
+				window,
 			),
 		);
 	}
+	const children = [summary, bar, node("col", { role: "omp.context.cats" }, shares, "cats")];
+	const snap = describeSnapcompact(breakdown);
+	if (snap) children.push(snap);
+	return col(children, { role: "omp.context" });
+}
+
+/** The `/context` title: the model once one is selected (the body leads with its window). */
+export function contextUsageHead(breakdown: ContextBreakdown): TspText {
+	if (breakdown.contextWindow <= 0) return [span("Context usage", "strong")];
 	const modelName = breakdown.model?.name ?? breakdown.model?.id ?? "no model";
-	return card(
-		{
-			role: "omp.context",
-			head: [
-				span("Context", "strong"),
-				span(` · ${modelName}`, "muted"),
-				span(` · ${formatNumber(window).toLowerCase()}`, "dim"),
-			],
-		},
-		children,
-	);
+	return [span("Context", "strong"), span(` · ${modelName}`, "muted")];
 }
 
 /**
@@ -854,38 +949,19 @@ export function describeContextUsage(breakdown: ContextBreakdown): NativeNode {
 }
 
 /**
- * The `/context` transcript block: ANSI renders the titled cell grid between
- * rules; natively it is one frame, drawn with `meter`s where the terminal
- * has them and as the glyph grid otherwise.
+ * The `/context` report body, without a frame or title of its own (the panel
+ * showing it is titled {@link contextUsageHead}): ANSI renders the cell grid
+ * beside the legend; natively it is drawn with `meter`s where the terminal has
+ * them and as the glyph grid otherwise.
  */
 export class ContextUsageView extends Container {
-	#breakdown: ContextBreakdown;
+	readonly #breakdown: ContextBreakdown;
 	#native: { meter: boolean; node: NativeNode } | undefined;
-	readonly #theme: Theme;
 
 	constructor(breakdown: ContextBreakdown, theme: Theme) {
 		super();
 		this.#breakdown = breakdown;
-		this.#theme = theme;
-		this.#build();
-	}
-
-	/** Replace the shown breakdown in place, refreshing both the ANSI and native views. */
-	setBreakdown(breakdown: ContextBreakdown): void {
-		this.#breakdown = breakdown;
-		this.#native = undefined;
-		this.clear();
-		this.#build();
-		this.invalidate();
-	}
-
-	#build(): void {
-		const theme = this.#theme;
-		this.addChild(new DynamicBorder());
-		this.addChild(new Text(theme.bold(theme.fg("accent", "Context Usage")), 1, 0));
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(renderContextUsage(this.#breakdown, theme), 1, 0));
-		this.addChild(new DynamicBorder());
+		this.addChild(new Text(renderContextUsage(breakdown, theme), 0, 0));
 	}
 
 	override describe(cx: DescribeContext): NativeNode {
@@ -893,13 +969,7 @@ export class ContextUsageView extends Container {
 		if (this.#native?.meter === meter) return this.#native.node;
 		const breakdown = this.#breakdown;
 		const described =
-			breakdown.contextWindow <= 0
-				? describeContextUsage(breakdown)
-				: meter
-					? describeContextFrame(breakdown)
-					: card({ role: "omp.context", head: [span("Context usage", "strong")] }, [
-							describeContextUsage(breakdown),
-						]);
+			meter && breakdown.contextWindow > 0 ? describeContextFrame(breakdown) : describeContextUsage(breakdown);
 		this.#native = { meter, node: described };
 		return described;
 	}

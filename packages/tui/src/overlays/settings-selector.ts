@@ -4,7 +4,7 @@ import {
 	type Component,
 	Container,
 	extractPrintableText,
-	fuzzyRank,
+	FuzzyCorpus,
 	getKeybindings,
 	getSettingItemFilterText,
 	type ImageBudget,
@@ -690,6 +690,12 @@ export class SettingsSelectorComponent implements Component {
 	#searchMatchCount = 0;
 	/** First matching item id per tab id, for Tab-key jumps while searching. */
 	#searchFirstMatch = new Map<string, string>();
+	/**
+	 * Per-tab search candidates prepared once per search session. Dropped on
+	 * search start/end and whenever a value or condition may have changed
+	 * (`#refreshItems`, `#onSearchSettingChange`); rebuilt lazily by `#setSearchQuery`.
+	 */
+	#searchCorpora: { tab: SettingTab; corpus: FuzzyCorpus<SettingItem> }[] | null = null;
 	#textInputActive = false;
 	#hasSectionJump = false;
 	#lastLanguage = "";
@@ -1204,8 +1210,10 @@ export class SettingsSelectorComponent implements Component {
 
 	/** Rebuilds the visible items after a change made outside a list's own `onChange` (changed flags, conditions). */
 	#refreshItems(): void {
-		if (this.#searchList) this.#setSearchQuery(this.#searchQuery);
-		else if (this.#currentTabId !== "plugins")
+		if (this.#searchList) {
+			this.#searchCorpora = null;
+			this.#setSearchQuery(this.#searchQuery);
+		} else if (this.#currentTabId !== "plugins")
 			this.#refreshCurrentTabItems(getSettingsForTab(this.#context.settings.entries, this.#currentTabId));
 	}
 
@@ -1374,6 +1382,7 @@ export class SettingsSelectorComponent implements Component {
 	/** Swap the tab content for the global search result list. */
 	#startSearch(initialQuery: string): void {
 		this.#preSearchTabId = this.#currentTabId;
+		this.#searchCorpora = null;
 		this.#searchInput = new Input();
 		this.#searchInput.prompt = "";
 		this.#searchInput.setValue(initialQuery);
@@ -1417,13 +1426,17 @@ export class SettingsSelectorComponent implements Component {
 		const tabResults: { tab: SettingTab; matched: SettingItem[]; bestScore: number; order: number }[] = [];
 		this.#searchFirstMatch.clear();
 		let total = 0;
-		for (const tab of SETTING_TABS) {
+		this.#searchCorpora ??= SETTING_TABS.map(tab => {
 			const candidates: SettingItem[] = [];
 			for (const def of getSettingsForTab(this.#context.settings.entries, tab)) {
 				const item = this.#defToItem(def);
 				if (item) candidates.push(item);
 			}
-			const ranked = fuzzyRank(candidates, query, getSettingItemFilterText);
+			return { tab, corpus: new FuzzyCorpus(candidates, getSettingItemFilterText) };
+		});
+		for (let order = 0; order < this.#searchCorpora.length; order++) {
+			const { tab, corpus } = this.#searchCorpora[order]!;
+			const ranked = corpus.rank(query);
 			const matched = ranked.map(result => result.item);
 			counts.set(tab, matched.length);
 			if (matched.length === 0) continue;
@@ -1432,7 +1445,7 @@ export class SettingsSelectorComponent implements Component {
 				tab,
 				matched,
 				bestScore: ranked[0]?.score ?? 0,
-				order: SETTING_TABS.indexOf(tab),
+				order,
 			});
 		}
 
@@ -1471,6 +1484,7 @@ export class SettingsSelectorComponent implements Component {
 		const targetTab: SettingTab | "plugins" = selectedDef?.tab ?? this.#preSearchTabId;
 
 		this.#searchQuery = "";
+		this.#searchCorpora = null;
 		this.#searchFirstMatch.clear();
 		this.#searchMatchCount = 0;
 		this.#tabs = getSettingsTabs();
@@ -1538,6 +1552,7 @@ export class SettingsSelectorComponent implements Component {
 		}
 		// Values feed the searchable text and condition gates may have flipped:
 		// recompute results in place (selection is preserved by item id).
+		this.#searchCorpora = null;
 		this.#setSearchQuery(this.#searchQuery);
 	}
 
@@ -1748,7 +1763,7 @@ export class SettingsSelectorComponent implements Component {
 	}
 
 	/**
-	 * Create a text input submenu for a plain string setting.
+	 * Create a text input submenu for a string or structured setting.
 	 */
 	#createTextInput(
 		def: SettingDef & { type: "text" },
@@ -1851,6 +1866,15 @@ export class SettingsSelectorComponent implements Component {
 			this.#context.settings.set(path, -1);
 		} else if (path === "compaction.thresholdTokens" && value === "default") {
 			this.#context.settings.set(path, -1);
+		} else if (schemaType === "array") {
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(value);
+			} catch {
+				throw new Error(`Invalid array JSON for ${path}`);
+			}
+			if (!Array.isArray(parsed)) throw new Error(`Invalid array JSON for ${path}`);
+			this.#context.settings.set(path, parsed);
 		} else if (schemaType === "record") {
 			let parsed: unknown;
 			try {

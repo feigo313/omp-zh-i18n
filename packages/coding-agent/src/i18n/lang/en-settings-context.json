@@ -120,6 +120,8 @@
   "settings.compaction.thresholdTokens.options.default.label": "Default",
   "settings.compaction.v2RetainedMessageBudget.description": "Compact context while idle when token count exceeds threshold",
   "settings.compaction.v2RetainedMessageBudget.label": "Idle Compaction",
+  "settings.contextFiles.extra.description": "Extra instruction filenames loaded beside AGENTS.md. Use a JSON list of names, not paths, e.g. [\"AGENTS.local.md\"]; [] disables extras. Start a new session to load them.",
+  "settings.contextFiles.extra.label": "Extra Context Files",
   "settings.contextPromotion.enabled.description": "Promote to a larger-context model on context overflow instead of compacting",
   "settings.contextPromotion.enabled.label": "Auto-Promote Context",
   "settings.extendedContext.description": "Use larger context windows where supported; may incur premium pricing. Off keeps default or standard-pricing windows",

@@ -11,6 +11,8 @@
   "settings.bash.direnvLoadTimeoutMs.label": "direnv Load Timeout (ms)",
   "settings.bash.enabled.description": "Enable the bash tool for shell command execution",
   "settings.bash.enabled.label": "Bash",
+  "settings.bash.gitGuard.description": "Refuse git commands that discard or move shared work in the bash tool: stash, reset --hard or to another commit, and checkout/switch/restore outside a merge or rebase conflict",
+  "settings.bash.gitGuard.label": "Git Guard",
   "settings.bash.patterns.description": "Ordered bash command approval rules. Each item has match and approval fields; only '*' wildcards are supported.",
   "settings.bash.patterns.label": "Bash Approval Patterns",
   "settings.bash.stripTrailingHeadTail.description": "Silently drop trailing `| head`/`| tail` pipes from single-line bash commands. Output is already truncated automatically.",

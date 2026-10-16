@@ -4,6 +4,7 @@ import { BarList } from "../charts";
 import {
 	formatCompact,
 	formatDurationMs,
+	formatErrorRate,
 	formatEstimatedCost,
 	formatFolder,
 	formatInteger,
@@ -44,7 +45,7 @@ const TOP_LIMIT = 8;
 
 export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
 	const { t, locale } = useTranslation();
-	const folders = useQuery(["projects", range], () => getFolderStats(range), { enabled: active });
+	const folders = useQuery(["projects", range], ({ signal }) => getFolderStats(range, signal), { enabled: active });
 	const [search, setSearch] = useState("");
 	// Benchmarks and scratch sessions can leave tens of thousands of one-off temp folders; hide them by default.
 	const [hideTemporary, setHideTemporary] = useState(true);
@@ -330,7 +331,7 @@ function folderColumns(
 			render: row => (
 				<span title={t("common.failedCount", { count: formatInteger(row.failedRequests) })}>
 					<Badge tone={row.failedRequests > 0 ? errorRateTone(row.errorRate) : "neutral"} mono>
-						{formatPercent(row.errorRate)}
+						{formatErrorRate(row.errorRate)}
 					</Badge>
 				</span>
 			),
