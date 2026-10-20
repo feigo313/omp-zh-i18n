@@ -493,8 +493,17 @@ export class MCPAddWizard extends OverlayPanel {
 			theme: mcpFormTheme,
 			label: options.lead,
 			details: options.placeholder
-					? [new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.examplePrefix", "e.g. {value}", { value: options.placeholder })), 0, 0)]
-					: undefined,
+				? [
+						new Text(
+							theme.fg(
+								"muted",
+								tuiT("ui.mcpAddWizard.examplePrefix", "e.g. {value}", { value: options.placeholder }),
+							),
+							0,
+							0,
+						),
+					]
+				: undefined,
 			summary: options.error
 				? [new Text(theme.fg("error", `✗ ${sanitize(options.error)}`), 0, 0), new Spacer(1)]
 				: undefined,
@@ -676,7 +685,13 @@ export class MCPAddWizard extends OverlayPanel {
 		// The wizard replaces the editor in the dock; its sheet hoists into the terminal's layer.
 		const sheet = node(
 			"overlay",
-			{ role: this.nativeRole, head: tuiT("ui.mcpAddWizard.addServerTitle", "Add MCP server"), anchor: "center", size: "md", modal: true },
+			{
+				role: this.nativeRole,
+				head: tuiT("ui.mcpAddWizard.addServerTitle", "Add MCP server"),
+				anchor: "center",
+				size: "md",
+				modal: true,
+			},
 			[col(children, { gap: "lg" })],
 			"sheet",
 		);
@@ -692,7 +707,11 @@ export class MCPAddWizard extends OverlayPanel {
 			const tone = index === phase ? "accent" : index > phase ? "muted" : skipped ? "neutral" : "success";
 			return node(
 				"col",
-				{ role: "omp.mcpAdd.phase", tone, ...(skipped ? { title: tuiT("ui.mcpAddWizard.authNotNeeded", "Auth · not needed") } : {}) },
+				{
+					role: "omp.mcpAdd.phase",
+					tone,
+					...(skipped ? { title: tuiT("ui.mcpAddWizard.authNotNeeded", "Auth · not needed") } : {}),
+				},
 				[text(label)],
 				label,
 			);
@@ -827,7 +846,10 @@ export class MCPAddWizard extends OverlayPanel {
 	#renderNameStep(): void {
 		this.#inputStep({
 			title: tuiT("ui.mcpAddWizard.serverNameStep", "Name the server"),
-			lead: tuiT("ui.mcpAddWizard.serverNameLead", "A unique name: it labels the server in /mcp and prefixes its tools."),
+			lead: tuiT(
+				"ui.mcpAddWizard.serverNameLead",
+				"A unique name: it labels the server in /mcp and prefixes its tools.",
+			),
 			initial: this.#state.name,
 			placeholder: "github",
 			note: tuiT("ui.mcpAddWizard.noteNameChars", "Letters, numbers, dash, underscore, dot and colon"),
@@ -860,7 +882,11 @@ export class MCPAddWizard extends OverlayPanel {
 	#renderArgsStep(): void {
 		this.#inputStep({
 			title: tuiT("ui.mcpAddWizard.argumentsStep", "Arguments"),
-			lead: tuiT("ui.mcpAddWizard.argumentsLead", "Passed to {command}, separated by spaces. omp tries the connection next.", { command: this.#state.command }),
+			lead: tuiT(
+				"ui.mcpAddWizard.argumentsLead",
+				"Passed to {command}, separated by spaces. omp tries the connection next.",
+				{ command: this.#state.command },
+			),
 			initial: this.#state.args,
 			placeholder: "-y @modelcontextprotocol/server-github",
 			optional: true,
@@ -870,7 +896,9 @@ export class MCPAddWizard extends OverlayPanel {
 	#renderUrlStep(): void {
 		this.#inputStep({
 			title: tuiT("ui.mcpAddWizard.serverUrlStep", "Server URL"),
-			lead: tuiT("ui.mcpAddWizard.serverUrlLead", "Where {name} listens. omp tries the connection next.", { name: this.#state.name }),
+			lead: tuiT("ui.mcpAddWizard.serverUrlLead", "Where {name} listens. omp tries the connection next.", {
+				name: this.#state.name,
+			}),
 			initial: this.#state.url,
 			placeholder: "https://mcp.example.com/mcp",
 			note: tuiT("ui.mcpAddWizard.noteUrlScheme", "Starts with http:// or https://"),
@@ -956,7 +984,11 @@ export class MCPAddWizard extends OverlayPanel {
 		const scopePath = this.#configPathLabel(scope);
 		// `ansi` is the value in the ANSI summary; `v` the native `kv` value (it styles and fits values itself).
 		const entries: { k: string; v: TspText; ansi: string }[] = [
-			{ k: tuiT("ui.mcpAddWizard.summaryName", "Name"), v: [span(state.name, "strong")], ansi: theme.fg("accent", state.name) },
+			{
+				k: tuiT("ui.mcpAddWizard.summaryName", "Name"),
+				v: [span(state.name, "strong")],
+				ansi: theme.fg("accent", state.name),
+			},
 			{
 				k: tuiT("ui.mcpAddWizard.summaryType", "Transport"),
 				v: [span(`${TRANSPORT_CHOICES[transport].label}  `), span(transport, "mono muted")],
@@ -964,25 +996,50 @@ export class MCPAddWizard extends OverlayPanel {
 			},
 		];
 		if (transport === "stdio") {
-			entries.push({ k: tuiT("ui.mcpAddWizard.summaryCommand", "Command"), v: [span(state.command, "mono")], ansi: state.command });
-			if (state.args) entries.push({ k: tuiT("ui.mcpAddWizard.summaryArgs", "Arguments"), v: [span(state.args, "mono")], ansi: state.args });
+			entries.push({
+				k: tuiT("ui.mcpAddWizard.summaryCommand", "Command"),
+				v: [span(state.command, "mono")],
+				ansi: state.command,
+			});
+			if (state.args)
+				entries.push({
+					k: tuiT("ui.mcpAddWizard.summaryArgs", "Arguments"),
+					v: [span(state.args, "mono")],
+					ansi: state.args,
+				});
 		} else {
-			entries.push({ k: tuiT("ui.mcpAddWizard.summaryUrl", "URL"), v: [span(replaceTabs(state.url), "mono")], ansi: sanitize(state.url) });
+			entries.push({
+				k: tuiT("ui.mcpAddWizard.summaryUrl", "URL"),
+				v: [span(replaceTabs(state.url), "mono")],
+				ansi: sanitize(state.url),
+			});
 		}
 		if (state.authMethod === "oauth") {
-			entries.push({ k: tuiT("ui.mcpAddWizard.summaryAuth", "Auth"), v: tuiT("ui.mcpAddWizard.summaryAuthOauth", "OAuth, signed in"), ansi: "OAuth (authenticated)" });
+			entries.push({
+				k: tuiT("ui.mcpAddWizard.summaryAuth", "Auth"),
+				v: tuiT("ui.mcpAddWizard.summaryAuthOauth", "OAuth, signed in"),
+				ansi: "OAuth (authenticated)",
+			});
 		} else if (state.authMethod === "manual") {
 			const [where, name] = state.authLocation === "env" ? ["env", state.envVarName] : ["header", state.headerName];
 			entries.push({
 				k: tuiT("ui.mcpAddWizard.summaryAuth", "Auth"),
 				v: [
-					span(where === "env" ? tuiT("ui.mcpAddWizard.summaryAuthEnvPrefix", "API key in ") : tuiT("ui.mcpAddWizard.summaryAuthHeaderPrefix", "API key in header ")),
+					span(
+						where === "env"
+							? tuiT("ui.mcpAddWizard.summaryAuthEnvPrefix", "API key in ")
+							: tuiT("ui.mcpAddWizard.summaryAuthHeaderPrefix", "API key in header "),
+					),
 					span(name, "mono"),
 				],
 				ansi: `API key via ${where} (${name})`,
 			});
 		} else {
-			entries.push({ k: tuiT("ui.mcpAddWizard.summaryAuth", "Auth"), v: [span(tuiT("ui.mcpAddWizard.summaryAuthNone", "None"), "muted")], ansi: "None" });
+			entries.push({
+				k: tuiT("ui.mcpAddWizard.summaryAuth", "Auth"),
+				v: [span(tuiT("ui.mcpAddWizard.summaryAuthNone", "None"), "muted")],
+				ansi: "None",
+			});
 		}
 		entries.push({
 			k: tuiT("ui.mcpAddWizard.summarySavedIn", "Saved in"),
@@ -1002,9 +1059,12 @@ export class MCPAddWizard extends OverlayPanel {
 				content: summary,
 				footer: new Text(
 					theme.fg(
-					"muted",
-					tuiT("ui.mcpAddWizard.saveFooterHint", "[{enter} to save, {esc} to go back]", { enter: formatKeyHint("enter"), esc: interruptKey() }),
-				),
+						"muted",
+						tuiT("ui.mcpAddWizard.saveFooterHint", "[{enter} to save, {esc} to go back]", {
+							enter: formatKeyHint("enter"),
+							esc: interruptKey(),
+						}),
+					),
 					0,
 					0,
 				),
@@ -1370,7 +1430,9 @@ export class MCPAddWizard extends OverlayPanel {
 	#renderAuthMethodStep(): void {
 		this.#choiceStep({
 			title: tuiT("ui.mcpAddWizard.authenticationMethod", "How does it authenticate?"),
-			lead: tuiT("ui.mcpAddWizard.authMethodLead", "{name} needs credentials before omp can use it.", { name: this.#state.name }),
+			lead: tuiT("ui.mcpAddWizard.authMethodLead", "{name} needs credentials before omp can use it.", {
+				name: this.#state.name,
+			}),
 			choices: [
 				{
 					icon: "log-in",
@@ -1449,7 +1511,9 @@ export class MCPAddWizard extends OverlayPanel {
 			intro.addChild(new Text(failure.ansiMessage, 0, 0));
 			intro.addChild(new Spacer(1));
 			if (failure.tip) {
-				intro.addChild(new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.tipPrefix", "Tip: {tip}", { tip: failure.tip })), 0, 0));
+				intro.addChild(
+					new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.tipPrefix", "Tip: {tip}", { tip: failure.tip })), 0, 0),
+				);
 				intro.addChild(new Spacer(1));
 			}
 		}
@@ -1518,8 +1582,20 @@ export class MCPAddWizard extends OverlayPanel {
 			title: tuiT("ui.mcpAddWizard.tryingConnection", "Trying the connection"),
 			tone: "accent",
 			lead: tuiT("ui.mcpAddWizard.tryingLead", "omp connects once to see whether the server needs credentials."),
-			ansi: new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.connectingTo", "Connecting to {target}…", { target: sanitize(target) })), 0, 0),
-			native: [statusRow("busy", [span(tuiT("ui.mcpAddWizard.connectingToPrefix", "Connecting to ")), span(replaceTabs(target), "mono")])],
+			ansi: new Text(
+				theme.fg(
+					"muted",
+					tuiT("ui.mcpAddWizard.connectingTo", "Connecting to {target}…", { target: sanitize(target) }),
+				),
+				0,
+				0,
+			),
+			native: [
+				statusRow("busy", [
+					span(tuiT("ui.mcpAddWizard.connectingToPrefix", "Connecting to ")),
+					span(replaceTabs(target), "mono"),
+				]),
+			],
 		});
 		this.#requestRender();
 		/** After a delay, on to the scope step unless the user stepped back meanwhile. */
@@ -1544,7 +1620,11 @@ export class MCPAddWizard extends OverlayPanel {
 				title: tuiT("ui.mcpAddWizard.connectedTitle", "Connected"),
 				tone: "success",
 				lead: tuiT("ui.mcpAddWizard.connectedLead", "Next, choose where to save it."),
-				ansi: new Text(theme.fg("success", tuiT("ui.mcpAddWizard.noAuthRequired", "✓ No authentication required")), 0, 0),
+				ansi: new Text(
+					theme.fg("success", tuiT("ui.mcpAddWizard.noAuthRequired", "✓ No authentication required")),
+					0,
+					0,
+				),
 				native: [statusRow("ok", tuiT("ui.mcpAddWizard.noSignInNeeded", "No sign-in needed"))],
 			});
 			this.#requestRender();
@@ -1603,14 +1683,19 @@ export class MCPAddWizard extends OverlayPanel {
 				const failureBody = new Container();
 				failureBody.addChild(new Text(sanitize(error instanceof Error ? error.message : String(error)), 0, 0));
 				failureBody.addChild(new Spacer(1));
-				failureBody.addChild(new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.addingAnyway", "Adding server anyway...")), 0, 0));
+				failureBody.addChild(
+					new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.addingAnyway", "Adding server anyway...")), 0, 0),
+				);
 				this.#asyncStep({
 					phase: PHASE_CONNECTION,
 					title: tuiT("ui.mcpAddWizard.couldntConnect", "Couldn't connect"),
 					tone: "warning",
 					lead: tuiT("ui.mcpAddWizard.couldntConnectLead", "omp saves the server anyway; fix it later with /mcp."),
 					ansi: failureBody,
-					native: [errorBlock(nativeErrorText(error)), statusRow("busy", tuiT("ui.mcpAddWizard.addingAnywayNative", "Adding the server anyway…"))],
+					native: [
+						errorBlock(nativeErrorText(error)),
+						statusRow("busy", tuiT("ui.mcpAddWizard.addingAnywayNative", "Adding the server anyway…")),
+					],
 				});
 				this.#requestRender();
 				continueToScope(2000);
@@ -1703,8 +1788,20 @@ export class MCPAddWizard extends OverlayPanel {
 				phase: PHASE_AUTH,
 				title: tuiT("ui.mcpAddWizard.signInUnavailable", "Sign-in isn't available"),
 				tone: "error",
-				ansi: new Text(tuiT("ui.mcpAddWizard.signInUnavailableMsg", "OAuth login cannot start without a host OAuth handler."), 0, 0),
-				native: [statusRow("error", tuiT("ui.mcpAddWizard.signInUnavailableMsgNative", "OAuth login cannot start without a host OAuth handler."))],
+				ansi: new Text(
+					tuiT("ui.mcpAddWizard.signInUnavailableMsg", "OAuth login cannot start without a host OAuth handler."),
+					0,
+					0,
+				),
+				native: [
+					statusRow(
+						"error",
+						tuiT(
+							"ui.mcpAddWizard.signInUnavailableMsgNative",
+							"OAuth login cannot start without a host OAuth handler.",
+						),
+					),
+				],
 			});
 			this.#requestRender();
 			return;
@@ -1716,9 +1813,25 @@ export class MCPAddWizard extends OverlayPanel {
 				phase: PHASE_AUTH,
 				title: tuiT("ui.mcpAddWizard.oauthIncomplete", "OAuth settings incomplete"),
 				tone: "error",
-				ansi: new Text(tuiT("ui.mcpAddWizard.oauthIncompleteMsg", "Authorization and Token URLs are required."), 0, 0),
-				native: [statusRow("error", tuiT("ui.mcpAddWizard.oauthIncompleteMsgNative", "Authorization and token URLs are required."))],
-				footer: new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.pressToGoBack", "[Press {key} to go back]", { key: interruptKey() })), 0, 0),
+				ansi: new Text(
+					tuiT("ui.mcpAddWizard.oauthIncompleteMsg", "Authorization and Token URLs are required."),
+					0,
+					0,
+				),
+				native: [
+					statusRow(
+						"error",
+						tuiT("ui.mcpAddWizard.oauthIncompleteMsgNative", "Authorization and token URLs are required."),
+					),
+				],
+				footer: new Text(
+					theme.fg(
+						"muted",
+						tuiT("ui.mcpAddWizard.pressToGoBack", "[Press {key} to go back]", { key: interruptKey() }),
+					),
+					0,
+					0,
+				),
 			});
 			this.#requestRender();
 			return;
@@ -1727,25 +1840,46 @@ export class MCPAddWizard extends OverlayPanel {
 		// Show "Authenticating..." message
 		const authBody = new Container();
 		authBody.addChild(new Text(tuiT("ui.mcpAddWizard.launchingOAuth", "Launching OAuth flow..."), 0, 0));
-		authBody.addChild(new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.browserAutoOpen", "Browser will open automatically.")), 0, 0));
+		authBody.addChild(
+			new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.browserAutoOpen", "Browser will open automatically.")), 0, 0),
+		);
 		authBody.addChild(new Spacer(1));
-		authBody.addChild(new Text(theme.fg("warning", tuiT("ui.mcpAddWizard.browserFallback", "If browser doesn't open, copy the URL from chat.")), 0, 0));
+		authBody.addChild(
+			new Text(
+				theme.fg(
+					"warning",
+					tuiT("ui.mcpAddWizard.browserFallback", "If browser doesn't open, copy the URL from chat."),
+				),
+				0,
+				0,
+			),
+		);
 		const authHost = URL.parse(this.#state.oauthAuthUrl)?.host;
 		this.#asyncStep({
 			phase: PHASE_AUTH,
 			title: tuiT("ui.mcpAddWizard.signInToContinue", "Sign in to continue"),
 			tone: "accent",
-			lead: tuiT("ui.mcpAddWizard.signInLead", "Approve access in your browser. If it didn't open, copy the link from the chat."),
+			lead: tuiT(
+				"ui.mcpAddWizard.signInLead",
+				"Approve access in your browser. If it didn't open, copy the link from the chat.",
+			),
 			ansi: authBody,
 			native: [
 				statusRow(
 					"busy",
 					authHost
-					? [span(tuiT("ui.mcpAddWizard.waitingForPrefix", "Waiting for ")), span(authHost, "mono"), span("…")]
-					: tuiT("ui.mcpAddWizard.waitingForBrowser", "Waiting for the browser…"),
+						? [span(tuiT("ui.mcpAddWizard.waitingForPrefix", "Waiting for ")), span(authHost, "mono"), span("…")]
+						: tuiT("ui.mcpAddWizard.waitingForBrowser", "Waiting for the browser…"),
 				),
 			],
-			footer: new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.pressToCancel", "(Press {key} to cancel)", { key: interruptKey() })), 0, 0),
+			footer: new Text(
+				theme.fg(
+					"muted",
+					tuiT("ui.mcpAddWizard.pressToCancel", "(Press {key} to cancel)", { key: interruptKey() }),
+				),
+				0,
+				0,
+			),
 			back: tuiT("ui.mcpAddWizard.stopWaiting", "Stop waiting"),
 		});
 		this.#requestRender();
@@ -1781,10 +1915,25 @@ export class MCPAddWizard extends OverlayPanel {
 
 			// Show success message
 			const healthBody = new Container();
-			healthBody.addChild(new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.runningHealthCheck", "Running connection health check...")), 0, 0));
+			healthBody.addChild(
+				new Text(
+					theme.fg("muted", tuiT("ui.mcpAddWizard.runningHealthCheck", "Running connection health check...")),
+					0,
+					0,
+				),
+			);
 			const spinnerFrames = theme.spinnerFrames;
 			const initialFrame = spinnerFrames[0] ?? "|";
-			const healthText = new Text(theme.fg("muted", tuiT("ui.mcpAddWizard.checkingConnection", "{frame} Checking server connection...", { frame: initialFrame })), 0, 0);
+			const healthText = new Text(
+				theme.fg(
+					"muted",
+					tuiT("ui.mcpAddWizard.checkingConnection", "{frame} Checking server connection...", {
+						frame: initialFrame,
+					}),
+				),
+				0,
+				0,
+			);
 			healthBody.addChild(healthText);
 			const signedIn = statusRow("ok", tuiT("ui.mcpAddWizard.signedIn", "Signed in"), "signed-in");
 			const checks = (health: NativeNode) =>
@@ -1795,7 +1944,15 @@ export class MCPAddWizard extends OverlayPanel {
 				tone: "success",
 				lead: tuiT("ui.mcpAddWizard.checkingServerLead", "omp tries the new credentials before saving."),
 				ansi: healthBody,
-				native: [checks(statusRow("busy", tuiT("ui.mcpAddWizard.waitingForServer", "Waiting for the server to answer…"), "health"))],
+				native: [
+					checks(
+						statusRow(
+							"busy",
+							tuiT("ui.mcpAddWizard.waitingForServer", "Waiting for the server to answer…"),
+							"health",
+						),
+					),
+				],
 			});
 
 			// The frame ticker only repaints; a native terminal animates the described spinner itself.
@@ -1820,7 +1977,10 @@ export class MCPAddWizard extends OverlayPanel {
 				try {
 					const { promise: timeoutPromise, reject: timeoutReject } = Promise.withResolvers<never>();
 					const timer = setTimeout(
-						() => timeoutReject(new Error(tuiT("ui.mcpAddWizard.healthTimeout", "Health check timed out after 10 seconds"))),
+						() =>
+							timeoutReject(
+								new Error(tuiT("ui.mcpAddWizard.healthTimeout", "Health check timed out after 10 seconds")),
+							),
 						10_000,
 					);
 					try {
@@ -1841,13 +2001,21 @@ export class MCPAddWizard extends OverlayPanel {
 			clearInterval(spinner);
 			if (healthPassed) {
 				healthText.setText(theme.fg("success", "✓ Health check passed"));
-				this.#setNativeBody([checks(statusRow("ok", tuiT("ui.mcpAddWizard.serverAnswers", "The server answers"), "health"))]);
+				this.#setNativeBody([
+					checks(statusRow("ok", tuiT("ui.mcpAddWizard.serverAnswers", "The server answers"), "health")),
+				]);
 			} else {
 				healthText.setText(theme.fg("warning", "⚠ Health check failed (will still save config)"));
 				healthBody.addChild(new Spacer(1));
 				healthBody.addChild(new Text(theme.fg("muted", healthError), 0, 0));
 				this.#setNativeBody([
-					checks(statusRow("warn", tuiT("ui.mcpAddWizard.serverNoAnswer", "The server didn't answer; omp saves it anyway"), "health")),
+					checks(
+						statusRow(
+							"warn",
+							tuiT("ui.mcpAddWizard.serverNoAnswer", "The server didn't answer; omp saves it anyway"),
+							"health",
+						),
+					),
 					errorBlock(nativeHealthError),
 				]);
 			}

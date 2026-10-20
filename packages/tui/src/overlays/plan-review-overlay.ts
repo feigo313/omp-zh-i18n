@@ -1849,8 +1849,7 @@ export class PlanReviewOverlay implements Component {
 					key(["left", "right"], tuiT("ui.planReview.hint.select", "select")),
 					key("enter", tuiT("ui.planReview.hint.confirm", "confirm")),
 				);
-				if (this.#slider)
-					hints.push(key(["shift+left", "shift+right"], tuiT("ui.planReview.hint.model", "model")));
+				if (this.#slider) hints.push(key(["shift+left", "shift+right"], tuiT("ui.planReview.hint.model", "model")));
 				break;
 			case "toc":
 				hints.push(

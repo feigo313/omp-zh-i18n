@@ -2164,10 +2164,7 @@ async function updateToStandaloneBinary(
 		if (target.replacesSymlink) {
 			console.log(
 				chalk.dim(
-					t(
-						"cli.update.replacingLauncher",
-						"Replacing the package-manager launcher with the standalone binary.",
-					),
+					t("cli.update.replacingLauncher", "Replacing the package-manager launcher with the standalone binary."),
 				),
 			);
 		}

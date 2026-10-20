@@ -1638,7 +1638,7 @@ export class TreeSelectorComponent extends OverlayPanel {
 									searchPlaceholder: tuiT("ui.treeSelector.searchPlaceholder", "Type to search"),
 								},
 							)
-							: tuiT(
+						: tuiT(
 								"ui.treeSelector.help",
 								"{enter}: switch. {altUpDown}: previous/next turn. {pageUpDown} ({leftRight}): page. {homeEnd}: first/last item. {shiftEnter}: summarize & switch. {shiftL}: label. {ctrlO}: filter. {filters}: filter. {searchPlaceholder}",
 								{

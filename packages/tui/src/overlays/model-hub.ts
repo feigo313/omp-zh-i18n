@@ -4517,7 +4517,10 @@ export class ModelHubComponent implements Component {
 								cancel(tuiT("ui.cancel", "cancel")),
 							]
 						: strip.purpose === "preset"
-							? [keys(tuiT("ui.modelHub.footerSavePresetPlain", "save preset"), "enter"), cancel(tuiT("ui.cancel", "cancel"))]
+							? [
+									keys(tuiT("ui.modelHub.footerSavePresetPlain", "save preset"), "enter"),
+									cancel(tuiT("ui.cancel", "cancel")),
+								]
 							: [
 									keys(tuiT("ui.modelHub.footerCreatePickModel", "create + pick model"), "enter"),
 									cancel(tuiT("ui.cancel", "cancel")),
@@ -4585,7 +4588,7 @@ export class ModelHubComponent implements Component {
 			// A live query takes printable keys and backspace, so the letter commands rest.
 			if (this.#browser.query.length > 0) {
 				return [
-					upDown(tuiT("ui.modelHub.footerRows", "rows")),
+					upDown(tuiT("ui.modelHub.footerRowsPlain", "rows")),
 					keys(tuiT("ui.modelHub.footerPick", "pick"), "enter"),
 					search,
 					keys(tuiT("ui.modelHub.footerProviders", "providers"), "left"),
@@ -4596,13 +4599,13 @@ export class ModelHubComponent implements Component {
 			const row = this.#rolesRows[this.#roleIndex];
 			const compaction =
 				this.#callbacks.onCompactionPointChange && this.#roleRowModel()
-				? keys(tuiT("ui.modelHub.footerCompactionLimitPlain", "compaction limit"), "k")
-				: undefined;
+					? keys(tuiT("ui.modelHub.footerCompactionLimitPlain", "compaction limit"), "k")
+					: undefined;
 			if (row?.kind === "fallback") {
 				// Advertise `t` only where a strip would open, as the ANSI footer does.
 				const editable = this.#resolveFallbackEntry(row.role, row.chainIndex) !== undefined;
 				return [
-					upDown(tuiT("ui.modelHub.footerRows", "rows")),
+					upDown(tuiT("ui.modelHub.footerRowsPlain", "rows")),
 					keys(tuiT("ui.modelHub.footerReplace", "replace"), "enter"),
 					keys(tuiT("ui.modelHub.footerAddAnother", "add another"), "f"),
 					keys(tuiT("ui.modelHub.footerRemove", "remove"), "x"),
@@ -4614,7 +4617,7 @@ export class ModelHubComponent implements Component {
 			}
 			if (row?.kind === "chainKey") {
 				return [
-					upDown(tuiT("ui.modelHub.footerRows", "rows")),
+					upDown(tuiT("ui.modelHub.footerRowsPlain", "rows")),
 					keys(tuiT("ui.modelHub.footerAddFallback", "add fallback"), "enter", "f"),
 					keys(tuiT("ui.modelHub.footerClearChain", "clear chain"), "x"),
 					keys(tuiT("ui.modelHub.footerProviders", "providers"), "left"),
@@ -4622,14 +4625,14 @@ export class ModelHubComponent implements Component {
 			}
 			if (row?.kind === "newFallback") {
 				return [
-					upDown(tuiT("ui.modelHub.footerRows", "rows")),
+					upDown(tuiT("ui.modelHub.footerRowsPlain", "rows")),
 					keys(tuiT("ui.modelHub.footerNewChain", "new model/provider fallback chain"), "enter"),
 					keys(tuiT("ui.modelHub.footerProviders", "providers"), "left"),
 				];
 			}
 			const editable = row?.kind === "role" && this.#roleThinkingTarget(row.role) !== undefined;
 			return [
-				upDown(tuiT("ui.modelHub.footerRows", "rows")),
+				upDown(tuiT("ui.modelHub.footerRowsPlain", "rows")),
 				keys(tuiT("ui.modelHub.footerPick", "pick"), "enter"),
 				keys(tuiT("ui.modelHub.footerFallback", "fallback"), "f"),
 				keys(tuiT("ui.modelHub.footerClear", "clear"), "x"),
@@ -4638,7 +4641,9 @@ export class ModelHubComponent implements Component {
 				keys(tuiT("ui.modelHub.footerCycle", "cycle"), "c"),
 				reorder,
 				keys(tuiT("ui.modelHub.footerNew", "new"), "n"),
-				this.#callbacks.onSavePreset ? keys(tuiT("ui.modelHub.footerSavePresetPlain", "save preset"), "s") : undefined,
+				this.#callbacks.onSavePreset
+					? keys(tuiT("ui.modelHub.footerSavePresetPlain", "save preset"), "s")
+					: undefined,
 				this.#presets().names.length > 0
 					? keys(tuiT("ui.modelHub.footerPresetSwitch", "preset"), "ctrl+left", "ctrl+right", "p", "shift+p")
 					: undefined,
@@ -4656,7 +4661,8 @@ export class ModelHubComponent implements Component {
 						cancel(tuiT("ui.modelHub.footerClose", "close")),
 					];
 		}
-		const refresh = entry.kind === "provider" ? keys(tuiT("ui.modelHub.footerRefresh", "refresh"), "f5") : undefined;
+		const refresh =
+			entry.kind === "provider" ? keys(tuiT("ui.modelHub.footerRefreshPlain", "refresh"), "f5") : undefined;
 		if (this.#focus === "scope") {
 			return [
 				keys(tuiT("ui.modelHub.footerModels", "models"), "enter", "right"),

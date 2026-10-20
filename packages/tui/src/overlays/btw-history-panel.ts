@@ -676,7 +676,14 @@ export class BtwHistoryPanel implements Component, Focusable {
 		const rowSpan = width < 36 && height >= 2 ? 2 : 1;
 		this.#listHeight = Math.max(1, Math.floor(height / rowSpan));
 		if (this.#records.length === 0) {
-			return new Text(theme.fg("muted", tuiT("ui.btwHistory.emptyBodyAnsi", "No side questions yet.\n\nUse /btw QUESTION to start one.")), 0, 0)
+			return new Text(
+				theme.fg(
+					"muted",
+					tuiT("ui.btwHistory.emptyBodyAnsi", "No side questions yet.\n\nUse /btw QUESTION to start one."),
+				),
+				0,
+				0,
+			)
 				.render(width)
 				.slice(0, height);
 		}
@@ -800,7 +807,13 @@ export class BtwHistoryPanel implements Component, Focusable {
 				this.#turns.length = turns.length;
 			} else {
 				lines.push(
-					...wrapTextWithAnsi(theme.fg("muted", tuiT("ui.btwHistory.empty", "No side questions yet. Use /btw QUESTION to start one.")), inner),
+					...wrapTextWithAnsi(
+						theme.fg(
+							"muted",
+							tuiT("ui.btwHistory.empty", "No side questions yet. Use /btw QUESTION to start one."),
+						),
+						inner,
+					),
 				);
 			}
 			this.#detailRecord = record;

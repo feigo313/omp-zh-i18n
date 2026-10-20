@@ -178,7 +178,10 @@ export function createDashboardController(): DashboardController {
 								() => {
 									const children = describeSheet(runtime, chart);
 									children.push(
-										actionBar([null, actionButton(tuiT("ui.autoresearch.close", "Close"), "close", { keys: "escape" })]),
+										actionBar([
+											null,
+											actionButton(tuiT("ui.autoresearch.close", "Close"), "close", { keys: "escape" }),
+										]),
 									);
 									return { ...col(children, { gap: "md", role: "omp.app.autoresearch" }), scroll };
 								},
@@ -663,17 +666,17 @@ function describeNow(runtime: AutoresearchDashboardRuntime): NativeNode | undefi
 		row(
 			[
 				text(result, { truncate: "end" }),
-					text(
-						[
-							span(tuiT("ui.autoresearch.logItWith", "Log it with ")),
-							span("log_experiment", "mono"),
-							span(tuiT("ui.autoresearch.beforeNextRun", " before the next run")),
-						],
-						{
-							truncate: "end",
-							role: "omp.autoresearch.next",
-						},
-					),
+				text(
+					[
+						span(tuiT("ui.autoresearch.logItWith", "Log it with ")),
+						span("log_experiment", "mono"),
+						span(tuiT("ui.autoresearch.beforeNextRun", " before the next run")),
+					],
+					{
+						truncate: "end",
+						role: "omp.autoresearch.next",
+					},
+				),
 			],
 			{ gap: "md", align: "center", role: "omp.autoresearch.pending", tone: "warning" },
 		),
@@ -770,9 +773,12 @@ function describeStats(runtime: AutoresearchDashboardRuntime, current: readonly 
 		);
 	} else {
 		tiles.push(
-			stat("best", tuiT("ui.autoresearch.statBest", "Best"), [span("—", "muted")], [
-				statDetail([span(tuiT("ui.autoresearch.noKeptRunYet", "No kept run yet"))]),
-			]),
+			stat(
+				"best",
+				tuiT("ui.autoresearch.statBest", "Best"),
+				[span("—", "muted")],
+				[statDetail([span(tuiT("ui.autoresearch.noKeptRunYet", "No kept run yet"))])],
+			),
 		);
 	}
 
@@ -786,7 +792,9 @@ function describeStats(runtime: AutoresearchDashboardRuntime, current: readonly 
 			baseline === null ? [span("—", "muted")] : metricSpans(baseline, unit, digits),
 			[
 				statDetail(
-					baselineDetail.length > 0 ? baselineDetail : [span(tuiT("ui.autoresearch.notLoggedYet", "Not logged yet"))],
+					baselineDetail.length > 0
+						? baselineDetail
+						: [span(tuiT("ui.autoresearch.notLoggedYet", "Not logged yet"))],
 				),
 			],
 		),

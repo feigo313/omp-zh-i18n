@@ -52,13 +52,6 @@ const translations: Record<Locale, Record<string, string>> = {
 		"nav.collapseMenu": "Collapse menu",
 		"nav.expandMenu": "Expand menu",
 
-		// Top bar
-		"topBar.observability": "Observability",
-		"topBar.languageToggle": "Switch language",
-		"topBar.openMenu": "Open menu",
-		"topBar.notUpdated": "Not updated",
-		"topBar.updated": "Updated {time}",
-
 		// Time ranges
 		"range.all": "All",
 		"range.allTime": "all time",
@@ -84,7 +77,6 @@ const translations: Record<Locale, Record<string, string>> = {
 		// Sync button
 		"sync.syncing": "Syncing...",
 		"sync.syncDb": "Sync DB",
-		"sync.synced": "Synced {count} requests",
 		"sync.success": "Synced: {count} new request{plural} found.",
 		"sync.failed": "Sync failed: {error}",
 
@@ -108,7 +100,6 @@ const translations: Record<Locale, Record<string, string>> = {
 
 		// Common labels
 		"common.provider": "Provider",
-		"common.time": "Time",
 		"common.cost": "Cost",
 		"common.status": "Status",
 		"common.input": "Input",
@@ -455,7 +446,6 @@ const translations: Record<Locale, Record<string, string>> = {
 		"tools.metric.charsSuffix": "chars",
 		"tools.chart.title": "Calls Over Time",
 		"tools.chart.subtitle": "Tool calls over {window}, stacked by tool",
-		"tools.chart.noData": "No data available",
 		"tools.chart.tooltipCallsSuffix": "calls",
 		"tools.chart.other": "Other",
 		"tools.table.byToolTitle": "By Tool",
@@ -1200,8 +1190,6 @@ const translations: Record<Locale, Record<string, string>> = {
 		"behavior.allCombined": "所有信号合计",
 		"behavior.model": "模型",
 		"behavior.messagesCol": "消息数",
-		"behavior.capsPercent": "大写 %",
-		"behavior.profanityPercent": "脏话 %",
 		"behavior.anguishPercent": "痛苦 %",
 		"behavior.frustrationPercent": "沮丧 %",
 		"behavior.hitsPercent": "命中 %",
@@ -1785,9 +1773,18 @@ const translations: Record<Locale, Record<string, string>> = {
 let currentLocale: Locale;
 const listeners = new Set<() => void>();
 
+// Browser-only globals, accessed structurally so this module also type-checks
+// in the server project, which compiles it without the DOM lib (pulled in via
+// `import type { Locale }` from formatters.ts).
+type DomAccess = {
+	window?: unknown;
+	document?: { documentElement: { lang: string } };
+};
+const dom = globalThis as unknown as DomAccess;
+
 function detectInitialLocale(): Locale {
 	// Check localStorage first
-	if (typeof window !== "undefined") {
+	if (typeof dom.window !== "undefined") {
 		try {
 			const stored = localStorage.getItem(STORAGE_KEY);
 			if (stored === "en" || stored === "zh") {
@@ -1809,8 +1806,8 @@ function detectInitialLocale(): Locale {
 
 currentLocale = detectInitialLocale();
 // 初始化时同步 document lang，避免首次加载中文时 <html lang="en"> 未更新
-if (typeof document !== "undefined") {
-	document.documentElement.lang = currentLocale === "zh" ? "zh-CN" : "en";
+if (dom.document) {
+	dom.document.documentElement.lang = currentLocale === "zh" ? "zh-CN" : "en";
 }
 
 function notifyListeners() {
@@ -1839,14 +1836,16 @@ export function getLocale(): Locale {
 export function setLocale(locale: Locale) {
 	if (currentLocale === locale) return;
 	currentLocale = locale;
-	if (typeof window !== "undefined") {
+	if (typeof dom.window !== "undefined") {
 		try {
 			localStorage.setItem(STORAGE_KEY, locale);
 		} catch {
 			// localStorage unavailable
 		}
 		// Update document lang attribute
-		document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
+		if (dom.document) {
+			dom.document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
+		}
 	}
 	notifyListeners();
 }

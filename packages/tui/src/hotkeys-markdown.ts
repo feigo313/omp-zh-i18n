@@ -204,10 +204,7 @@ function hotkeyGroups(bindings: HotkeysMarkdownBindings): HotkeyGroup[] {
 							: [act("app.stt.pushToTalk")],
 					action:
 						pushToTalkKeys.length > 0
-							? tuiT(
-									"hotkeys.other.stt",
-									"Speech-to-text (push-to-talk): hold to record, release to transcribe",
-								)
+							? tuiT("hotkeys.other.stt", "Speech-to-text (push-to-talk): hold to record, release to transcribe")
 							: tuiT("hotkeys.other.sttDisabled", "Speech-to-text (push-to-talk) (disabled)"),
 				},
 				{

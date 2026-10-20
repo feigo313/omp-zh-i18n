@@ -1114,7 +1114,11 @@ export class UsageDashboardComponent implements Component {
 		}
 		const body = this.#view === "detail" ? this.#describeDetail() : this.#describeOverview(meter, chart);
 		// Esc leaves Details for Overview first, so only Overview's Close wears its keycap.
-		const close = actionButton(tuiT("ui.close", "Close"), "close", this.#view === "overview" ? { keys: "escape" } : {});
+		const close = actionButton(
+			tuiT("ui.close", "Close"),
+			"close",
+			this.#view === "overview" ? { keys: "escape" } : {},
+		);
 		const root = col(
 			[
 				this.#describeHead(),
@@ -1146,7 +1150,12 @@ export class UsageDashboardComponent implements Component {
 		const checked: NativeChild[] = [];
 		const latestFetchedAt = Math.max(0, ...this.#reports.map(report => report.fetchedAt ?? 0));
 		if (this.#refreshing) {
-			checked.push(node("spinner", { style: "dots", label: [span(tuiT("ui.usageDashboard.refreshing", "Refreshing…"), "dim")] }));
+			checked.push(
+				node("spinner", {
+					style: "dots",
+					label: [span(tuiT("ui.usageDashboard.refreshing", "Refreshing…"), "dim")],
+				}),
+			);
 		} else if (this.#refreshError) {
 			checked.push(
 				text(
@@ -1159,9 +1168,10 @@ export class UsageDashboardComponent implements Component {
 						),
 					],
 					{
-					truncate: "end",
-					title: sanitizeDisplayLine(this.#refreshError),
-				}),
+						truncate: "end",
+						title: sanitizeDisplayLine(this.#refreshError),
+					},
+				),
 			);
 		} else if (latestFetchedAt) {
 			checked.push(
@@ -1210,7 +1220,8 @@ export class UsageDashboardComponent implements Component {
 			else framed.push(entry);
 		}
 		const notes: NativeNode[] = [];
-		if (untouched.length > 0) notes.push(footnote("idle", tuiT("ui.usageDashboard.untouchedHeading", "Untouched"), untouched));
+		if (untouched.length > 0)
+			notes.push(footnote("idle", tuiT("ui.usageDashboard.untouchedHeading", "Untouched"), untouched));
 		if (unreported.length > 0) {
 			const accounts = unreported.flatMap(entry =>
 				entry.unavailableAccounts.map(account => `${entry.name} (${account})`),
@@ -1254,9 +1265,9 @@ export class UsageDashboardComponent implements Component {
 					[
 						span(
 							tuiT(
-							"ui.usageDashboard.emptyBody",
-							"Quotas show here once a signed-in provider reports usage, and the calendar fills in as you work.",
-						),
+								"ui.usageDashboard.emptyBody",
+								"Quotas show here once a signed-in provider reports usage, and the calendar fills in as you work.",
+							),
 							"muted",
 						),
 					],
@@ -1270,7 +1281,12 @@ export class UsageDashboardComponent implements Component {
 		const quotas: NativeChild[] = [sectionHead("Quotas", this.#quotaMeta(framed))];
 		for (const entry of framed) quotas.push(this.#describeProvider(entry, meter));
 		if (this.#cards.length === 0) {
-			quotas.push(text([span(tuiT("ui.usageDashboard.noUsageData", "No usage data available."), "muted")], { role: "omp.usage.none", wrap: "word" }));
+			quotas.push(
+				text([span(tuiT("ui.usageDashboard.noUsageData", "No usage data available."), "muted")], {
+					role: "omp.usage.none",
+					wrap: "word",
+				}),
+			);
 		} else if (framed.length === 0) {
 			quotas.push(
 				text([span(tuiT("ui.usageDashboard.nothingUsedYet", "Nothing used on any quota yet."), "muted")], {
@@ -1350,7 +1366,14 @@ export class UsageDashboardComponent implements Component {
 					"quota",
 					tuiT("ui.usageDashboard.tightestQuota", "Tightest quota"),
 					[span("—", "dim")],
-					[span(this.#cards.length > 0 ? tuiT("ui.usageDashboard.everyQuotaUntouched", "Every quota untouched") : tuiT("ui.usageDashboard.noLimits", "No quotas reported"), "dim")],
+					[
+						span(
+							this.#cards.length > 0
+								? tuiT("ui.usageDashboard.everyQuotaUntouched", "Every quota untouched")
+								: tuiT("ui.usageDashboard.noLimits", "No quotas reported"),
+							"dim",
+						),
+					],
 				),
 			);
 		}
@@ -1369,15 +1392,18 @@ export class UsageDashboardComponent implements Component {
 			figures.priced ? [span(formatCost(cost))] : [span(COMPACT_COUNT.format(requests))];
 		const counted = (requests: number): string =>
 			figures.priced
-			? requestsText(requests)
-			: tuiT("ui.usageDashboard.requestsPlain", "{count} request{plural}", {
-					count: requests,
-					plural: requests === 1 ? "" : "s",
-				});
+				? requestsText(requests)
+				: tuiT("ui.usageDashboard.requestsPlain", "{count} request{plural}", {
+						count: requests,
+						plural: requests === 1 ? "" : "s",
+					});
 		tiles.push(
-			statTile("year", tuiT("ui.usageDashboard.pastYear", "Past year"), amount(layout.totalCost, layout.totalRequests), [
-				span(counted(layout.totalRequests), "dim"),
-			]),
+			statTile(
+				"year",
+				tuiT("ui.usageDashboard.pastYear", "Past year"),
+				amount(layout.totalCost, layout.totalRequests),
+				[span(counted(layout.totalRequests), "dim")],
+			),
 		);
 
 		const spark =
@@ -1409,15 +1435,27 @@ export class UsageDashboardComponent implements Component {
 		const busiest = figures.busiest;
 		tiles.push(
 			busiest
-				? statTile("busiest", tuiT("ui.usageDashboard.busiestDay", "Busiest day"), amount(busiest.cost, busiest.requests), [
-						span(
-							figures.priced
-								? `${shortDate(busiest.date)} · ${requestsText(busiest.requests)}`
-								: tuiT("ui.usageDashboard.requestsOnDate", "requests · {date}", { date: shortDate(busiest.date) }),
-							"dim",
-						),
-					])
-				: statTile("busiest", tuiT("ui.usageDashboard.busiestDay", "Busiest day"), [span("—", "dim")], [span(tuiT("ui.usageDashboard.noActivityYet", "No activity yet"), "dim")]),
+				? statTile(
+						"busiest",
+						tuiT("ui.usageDashboard.busiestDay", "Busiest day"),
+						amount(busiest.cost, busiest.requests),
+						[
+							span(
+								figures.priced
+									? `${shortDate(busiest.date)} · ${requestsText(busiest.requests)}`
+									: tuiT("ui.usageDashboard.requestsOnDate", "requests · {date}", {
+											date: shortDate(busiest.date),
+										}),
+								"dim",
+							),
+						],
+					)
+				: statTile(
+						"busiest",
+						tuiT("ui.usageDashboard.busiestDay", "Busiest day"),
+						[span("—", "dim")],
+						[span(tuiT("ui.usageDashboard.noActivityYet", "No activity yet"), "dim")],
+					),
 		);
 		return node("row", { role: "omp.usage.stats", wrap: true }, tiles, "stats");
 	}
@@ -1501,7 +1539,9 @@ export class UsageDashboardComponent implements Component {
 
 		const rows: NativeChild[] = [];
 		if (entry.unlimited) {
-			rows.push(text([span(tuiT("ui.usageDashboard.noLimits", "No quotas reported"), "muted")], { role: "omp.usage.none" }));
+			rows.push(
+				text([span(tuiT("ui.usageDashboard.noLimits", "No quotas reported"), "muted")], { role: "omp.usage.none" }),
+			);
 		} else {
 			for (const [index, window] of entry.windows.slice(0, CARD_MAX_WINDOWS).entries()) {
 				const label: TspSpan[] = [span(sanitizeDisplayLine(window.label))];
@@ -1776,16 +1816,21 @@ export class UsageDashboardComponent implements Component {
 						account: [span(reportAccountLabel(report, limit, index), "muted")],
 						left:
 							fraction === undefined
-								? [span(formatAbsoluteOnlyAmount([limit]) ?? tuiT("ui.usageDashboard.noData", "No data"), "muted")]
+								? [
+										span(
+											formatAbsoluteOnlyAmount([limit]) ?? tuiT("ui.usageDashboard.noData", "No data"),
+											"muted",
+										),
+									]
 								: leftSpans(fraction, limit.status),
 						reset:
 							resetsAt !== undefined && resetsAt > nowMs
 								? [
 										span(
 											tuiT("ui.usageDashboard.resetsIn", "{label} in {duration}", {
-													label: limit.window?.resetLabel ?? tuiT("ui.usageDashboard.resetsWord", "resets"),
-													duration: formatDuration(resetsAt - nowMs),
-												}),
+												label: limit.window?.resetLabel ?? tuiT("ui.usageDashboard.resetsWord", "resets"),
+												duration: formatDuration(resetsAt - nowMs),
+											}),
 											"dim",
 										),
 									]
@@ -1807,7 +1852,12 @@ export class UsageDashboardComponent implements Component {
 				}
 				const cols: TspTableColumn[] = [
 					{ id: "limit", head: tuiT("ui.usageDashboard.colLimit", "Limit"), grow: 1, priority: 4 },
-					{ id: "account", head: tuiT("ui.usageDashboard.colAccount", "Account"), truncate: "middle", priority: 1 },
+					{
+						id: "account",
+						head: tuiT("ui.usageDashboard.colAccount", "Account"),
+						truncate: "middle",
+						priority: 1,
+					},
 					{ id: "left", head: tuiT("ui.usageDashboard.colLeft", "Left"), align: "end", priority: 3 },
 					{ id: "reset", head: tuiT("ui.usageDashboard.colResets", "Resets"), align: "end", priority: 2 },
 				];
@@ -1819,7 +1869,11 @@ export class UsageDashboardComponent implements Component {
 			sections.push(node("col", { role: "omp.usage.report", gap: "sm" }, children, entry.provider));
 		}
 		if (sections.length === 0) {
-			sections.push(text([span(tuiT("ui.usageDashboard.noUsageData", "No usage data available."), "muted")], { role: "omp.usage.none" }));
+			sections.push(
+				text([span(tuiT("ui.usageDashboard.noUsageData", "No usage data available."), "muted")], {
+					role: "omp.usage.none",
+				}),
+			);
 		}
 		return sections;
 	}

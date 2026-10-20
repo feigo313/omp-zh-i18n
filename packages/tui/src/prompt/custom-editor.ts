@@ -1330,7 +1330,13 @@ export class CustomEditor extends Editor {
 							? [node("spinner", { label: starting ? "Starting…" : "Transcribing…" }, undefined, "pending")]
 							: compact([
 									node("icon", { name: recording ? "stop" : "mic" }, undefined, "icon"),
-									recording && node("text", { text: tuiT("ui.editor.recordingStop", "Recording · Stop"), wrap: "none" }, undefined, "label"),
+									recording &&
+										node(
+											"text",
+											{ text: tuiT("ui.editor.recordingStop", "Recording · Stop"), wrap: "none" },
+											undefined,
+											"label",
+										),
 								]),
 						"dictation",
 					);

@@ -102,6 +102,14 @@ const hintEditNote = () => tuiT("ui.annotation.hintEditNote", "edit note");
 const hintLineNote = () => tuiT("ui.annotation.hintLineNote", "line note");
 const hintTextNote = () => tuiT("ui.annotation.textNote", "text note");
 const hintFileNote = () => tuiT("ui.annotation.fileNote", "file note");
+const hintActions = () => tuiT("ui.annotation.hintActions", "actions");
+const hintBack = () => tuiT("ui.annotation.hintBack", "back");
+const hintDiscard = () => tuiT("ui.annotation.hintDiscard", "discard");
+const hintNote = () => tuiT("ui.annotation.note", "note");
+const hintNoteOnAll = () => tuiT("ui.annotation.hintNoteOnAll", "note on all");
+const hintOpen = () => tuiT("ui.annotation.hintOpen", "open");
+const hintPane = () => tuiT("ui.annotation.hintPane", "pane");
+const hintRun = () => tuiT("ui.annotation.hintRun", "run");
 
 export interface AnnotationOverlayCallbacks {
 	onComplete(result: CodeReviewOverlayResult | TextReviewOverlayResult | undefined): void;
@@ -1125,7 +1133,9 @@ export class AnnotationOverlay implements Focusable {
 			selectedSourceLines.push(undefined);
 		};
 		if (file.isBinary) {
-			pushStaticLine(this.#theme.fg("dim", tuiT("ui.annotation.binaryDiff", "Binary diff; no annotatable source rows")));
+			pushStaticLine(
+				this.#theme.fg("dim", tuiT("ui.annotation.binaryDiff", "Binary diff; no annotatable source rows")),
+			);
 		} else if (file.rows.length === 0) {
 			pushStaticLine(
 				this.#theme.fg("dim", tuiT("ui.annotation.noDiffHunks", "No diff hunks; this may be a rename-only change")),
@@ -1346,10 +1356,12 @@ export class AnnotationOverlay implements Focusable {
 			this.#focus === "files"
 				? `${upDown} ${hintFile()} · ${confirm} ${hintDiff()} · ${formatKeyHints(["a", "shift+a"])} ${hintFileNote()} · ${editNote}`
 				: this.#focus === "diff"
-					? `${upDown} line · ${formatKeyHint("shift")} faster · ${this.#key("tui.select.pageUp")}/${this.#key("tui.select.pageDown")} · ${formatKeyHints(["g", "shift+g"])} ends · ${formatKeyHint("a")} line note · ${formatKeyHint("shift+a")} ${this.#textSource ? "text" : "file"} note · ${editNote}`
-					: `${upDown} select · ${confirm} confirm`;
-		const editorHint = this.#callbacks.onExternalEditor ? ` · ${formatKeyHint(appExternalEditorKey())} editor` : "";
-		return `${focusHelp} · ${formatKeyHint("u")} undo · ${formatKeyHint("tab")} regions${editorHint} · ${this.#key("tui.select.cancel")} cancel`;
+					? `${upDown} ${hintLine()} · ${formatKeyHint("shift")} ${hintFaster()} · ${this.#key("tui.select.pageUp")}/${this.#key("tui.select.pageDown")} ${hintPage()} · ${formatKeyHints(["g", "shift+g"])} ${hintEnds()} · ${formatKeyHint("a")} ${hintLineNote()} · ${formatKeyHint("shift+a")} ${this.#textSource ? hintTextNote() : hintFileNote()} · ${editNote}`
+					: `${upDown} ${hintSelect()} · ${confirm} ${hintConfirm()}`;
+		const editorHint = this.#callbacks.onExternalEditor
+			? ` · ${formatKeyHint(appExternalEditorKey())} ${hintEditor()}`
+			: "";
+		return `${focusHelp} · ${formatKeyHint("u")} ${hintUndo()} · ${formatKeyHint("tab")} ${hintRegions()}${editorHint} · ${this.#key("tui.select.cancel")} ${hintCancel()}`;
 	}
 
 	#ensureCursorVisible(renderedRowBySource: readonly number[]): boolean {
@@ -1925,37 +1937,41 @@ export class AnnotationOverlay implements Focusable {
 		});
 		const upDown = (label: string) => this.#hint(["tui.select.up", "tui.select.down"], label);
 		if (this.#annotationChooser) {
-			return [upDown("choose"), this.#hint("tui.select.confirm", "edit"), this.#hint("tui.select.cancel", "back")];
+			return [
+				upDown(hintChoose()),
+				this.#hint("tui.select.confirm", hintEdit()),
+				this.#hint("tui.select.cancel", hintBack()),
+			];
 		}
 		if (this.#annotating) {
 			return [
-				this.#hint("tui.input.submit", "save"),
-				this.#hint("tui.input.newLine", "new line"),
-				this.#hint("tui.select.cancel", "discard"),
-				this.#callbacks.onAnnotationExternalEditor ? key(appExternalEditorKey(), "editor") : undefined,
+				this.#hint("tui.input.submit", hintSave()),
+				this.#hint("tui.input.newLine", hintNewline()),
+				this.#hint("tui.select.cancel", hintDiscard()),
+				this.#callbacks.onAnnotationExternalEditor ? key(appExternalEditorKey(), hintEditor()) : undefined,
 			];
 		}
-		const undo = this.#undoStack.length > 0 ? key("u", "undo") : undefined;
+		const undo = this.#undoStack.length > 0 ? key("u", hintUndo()) : undefined;
 		if (this.#focus === "files") {
 			return [
-				upDown("file"),
-				this.#hint("tui.select.confirm", "open"),
-				key("a", "file note"),
+				upDown(hintFile()),
+				this.#hint("tui.select.confirm", hintOpen()),
+				key("a", hintFileNote()),
 				undo,
-				key("tab", "pane"),
+				key("tab", hintPane()),
 			];
 		}
 		if (this.#focus === "diff") {
 			return [
-				upDown("line"),
-				key("a", "note"),
-				key("shift+a", this.#textSource ? "note on all" : "file note"),
-				this.#annotationCandidates().length > 0 ? key("e", "edit note") : undefined,
+				upDown(hintLine()),
+				key("a", hintNote()),
+				key("shift+a", this.#textSource ? hintNoteOnAll() : hintFileNote()),
+				this.#annotationCandidates().length > 0 ? key("e", hintEditNote()) : undefined,
 				undo,
-				key("tab", this.#textSource ? "actions" : "pane"),
+				key("tab", this.#textSource ? hintActions() : hintPane()),
 			];
 		}
-		return [upDown("choose"), this.#hint("tui.select.confirm", "run"), key("tab", "pane")];
+		return [upDown(hintChoose()), this.#hint("tui.select.confirm", hintRun()), key("tab", hintPane())];
 	}
 
 	/** Keycap hint for the primary keys this overlay's keybindings bind to `actions`. */

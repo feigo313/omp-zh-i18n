@@ -241,7 +241,7 @@ async function buildPluginConfigItems(
 				submenu: (cv, done) =>
 					createConfigEnumPanel(
 						key,
-						schema.description || `${tuiT("ui.plugins.selectValueFor", "Select value for")} ${key}`,
+						schema.description || `${tuiT("ui.plugins.selectValueFor", "Select value for {key}", { key })}`,
 						schema.values,
 						cv,
 						value => {
