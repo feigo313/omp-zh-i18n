@@ -7,7 +7,7 @@
 | What | Chinese localization fork of Oh My Pi — not upstream `can1357/oh-my-pi` |
 | Public | https://github.com/feigo313/omp-zh-i18n · branch `master` · also `gitee.com/atrix313/omp-zh-i18n` |
 | Upstream remote | `upstream` → `https://github.com/can1357/oh-my-pi.git` |
-| Current baseline | coding-agent **18.3.1-zh** (official tag `v18.3.1` = `6204b750`; X/Y upstream change triggers a new zh release) |
+| Current baseline | coding-agent **18.11.0-zh** (official tag `v18.11.0` = `c2cb79e4`; X/Y upstream change triggers a new zh release) |
 | Primary work | `packages/coding-agent/src/i18n/lang/zh-*.json` + required en SoT / wiring (`interceptor.ts`, settings UI) and the tui translation seam (`packages/tui/src/i18n-host.ts`) |
 
 **Defaults for agents**
@@ -22,15 +22,17 @@
 
 These exist on this machine, are **not tracked**, and must not be force-added for release:
 
-- `docs/local/` — worklogs, STATUS, audits
+- `docs/local/` — worklogs, STATUS, audits, handoffs
 - `i18n.release.json` — overlay roots / release metadata
 - `scripts/i18n/`, `.agents/`, `.reasonix/`, `.tools/`
+- `.github/workflows/i18n-upstream-check.yml`, `.omp/` — also excluded; the workflow is not on GitHub
 
 **Where to read next**
 
 | Need | File |
 |---|---|
-| Session entry / Chinese collab norms | `CLAUDE.md` (tracked) |
+| Session entry / Chinese collab norms | `CLAUDE.md` (tracked; its version/status lines are stale — trust git log) |
+| zh release log | `CHANGELOG.zh.md` (root, tracked) |
 | **Canonical** zh release process | `docs/local/I18N-RELEASE-WORKFLOW.md` (local-only SoT) |
 | Historical status / worklogs | `docs/local/*` (archives; workflow file wins on conflict) |
 
@@ -55,16 +57,25 @@ This repo contains multiple packages, but **`packages/coding-agent/`** is the pr
 | `packages/stats`        | Local observability dashboard (`omp stats`)                                             |
 | `packages/omptype`      | ArkType-compatible schema validation with a lazy JIT runtime                            |
 | `packages/utils`        | Shared utilities (logger, streams, temp files)                                          |
+| `packages/wire`         | Shared wire protocol types for omp packages                                             |
+| `packages/mnemopi`      | Local SQLite memory engine for omp agents                                               |
+| `packages/snapcompact`  | Bitmap-frame context compression for vision-capable LLMs                                |
+| `packages/collab-web`   | Collab guest client + local relay tools (private)                                       |
+| `packages/browser-relay`| Chrome extension: browser tool drives your real tabs (`omp browser-relay`)              |
+| `packages/metaharness`  | Benchmark runners + run storage + live web dashboard (private)                          |
+| `packages/typescript-edit-benchmark` | Edit benchmark suite using TS source mutations (private)                  |
 | `crates/pi-natives`     | Rust crate for performance-critical text/grep ops                                       |
 
 **Catalog import convention**: code in this repo imports catalog _values_ (bundled models, model-thinking helpers, identity, descriptors, model manager/cache) from `@oh-my-pi/pi-catalog/<module>` — never via `@oh-my-pi/pi-ai`. The pi-ai barrel re-exports only the model/effort _types_ its own signatures use (`Model`, `Api`, `ThinkingConfig`, `Effort`, …); type-only imports of those from `@oh-my-pi/pi-ai` are fine.
 
 ### i18n wiring (fork-critical)
 
-- Bundled files: `packages/coding-agent/src/i18n/lang/{en,zh}-*.json`.
-- They are **statically imported** in `src/i18n/index.ts` and registered in `EMBEDDED_TRANSLATIONS` — a new lang JSON that is not imported there will not ship in the binary.
-- Load order: bundled `lang/` first, then optional user overrides under `~/.omp/lang/`.
-- UI boundary: `src/i18n/interceptor.ts` (slash commands, CLI help) plus the tui seam `packages/tui/src/i18n-host.ts` (`setTuiTranslator`/`tuiT`) — since v18 the settings/welcome/plugin overlays live in `packages/tui` and resolve strings through the injected translator. Keep source English; do not sprinkle Chinese literals in components.
+- Bundled files: `packages/coding-agent/src/i18n/lang/{en,zh}-*.json`, all **statically imported** in `src/i18n/index.ts` and registered in `EMBEDDED_TRANSLATIONS` — a new lang JSON that is not imported there will not ship in the binary.
+- Asymmetry is intentional: `zh-{tips,hotkeys,runtime,ui}.json` have no `en-*` counterpart (plus tiny `en.json` meta stub). For those key groups the English source of truth is the **inline English fallback string at the callsite** (`tuiT(key, "English")`) — keep fallbacks faithful, never "fix" them by adding en files.
+- Language selection: `OMP_LANG` env wins, else `config.yml` `i18n.language`, else en.
+- Load order: bundled `lang/` first (embedded copy is the fallback for compiled binaries), then optional user overrides under `~/.omp/lang/`.
+- UI boundary: `src/i18n/interceptor.ts` (slash commands, in-TUI help) plus the tui seam `packages/tui/src/i18n-host.ts` (`setTuiTranslator`/`tuiT`) — since v18 the settings/welcome/plugin overlays live in `packages/tui` and resolve strings through the injected translator. Keep source English; do not sprinkle Chinese literals in components.
+- Top-level `omp --help` / launch-flag output stays English **by design** (see 汉化范围说明 in `CHANGELOG.zh.md`); do not localize it.
 - Do **not** bulk-run extract/generate/translate scripts unless the user asks; edit keys by hand and keep en/zh key symmetry (no empty strings).
 
 ## GitHub
@@ -94,7 +105,7 @@ When authorized to create or edit a contributor-submitted PR, follow the checkli
 - **Promises**: use `Promise.withResolvers()` instead of `new Promise((resolve, reject) => ...)`.
 - **Prompts**: never build prompts in code (no inline strings, template literals, or concatenation). Prompts live in static `.md` files; use Handlebars for dynamic content. Import them via `import content from "./prompt.md" with { type: "text" }` — not `readFile`.
 - **Judge questions**: one JSON file per feature (`src/prompts/judge/<feature>.json`) maps question ids to `{ instructions, criteria? }`. Load it with `judgeQuestions(file)` from `@oh-my-pi/pi-ai`; fill Handlebars instructions with `renderQuestion(question, context)`. `criteria` sets the kind: a list of levels → score, omitted or `true`/`false` keys only → yes/no, any other labels → choice (`{}` when the caller supplies the labels). Choice labels and answer types come from the JSON keys.
-- **Worker scripts**: workers re-enter the CLI entrypoint; never spawn separate worker entry modules. `cli.ts` declares itself as the worker host at startup (`declareWorkerHostEntry()` from `@oh-my-pi/pi-utils/env`) and dispatches hidden argv selectors (`__omp_worker_stats_sync`, `__omp_worker_tab`, `__omp_worker_js_eval`, `__omp_worker_tiny_inference`) before loading the command registry. Spawn sites use:
+- **Worker scripts**: workers re-enter the CLI entrypoint; never spawn separate worker entry modules. `cli.ts` declares itself as the worker host at startup (`declareWorkerHostEntry()` from `@oh-my-pi/pi-utils/env`) and dispatches hidden argv selectors (constants near the top of `cli.ts`) before loading the command registry. Spawn sites use:
   ```ts
   import { workerHostEntry } from "@oh-my-pi/pi-utils";
   const hostEntry = workerHostEntry();
@@ -327,6 +338,8 @@ For the bash tool specifically:
 
 Tests are **bucketed** via `scripts/ci-test-ts.ts` — do not assume a single `bun test` covers coding-agent; UI/native/heavy suites are split on purpose (OOM/GC).
 
+**Windows caveat (known pre-existing failures):** on this machine ~300 coding-agent + ~11 tui tests fail from environment causes (path separators, missing POSIX shell, file locks, symlink permissions, browser/network needs) — all in files byte-identical to upstream, unrelated to zh changes. Compare against the baseline documented in `CHANGELOG.zh.md` 质量校验 tables before attributing failures to your change.
+
 ## Rust Build Profiles
 
 Profiles live in the root `Cargo.toml`; `.cargo/config.toml` carries the settings Cargo.toml cannot express. Both are committed, so no local `~/.cargo/config.toml` is required.
@@ -405,7 +418,7 @@ Location: `packages/*/CHANGELOG.md` (per package).
 
 ## Releasing
 
-**Fork note:** Chinese releases (`vX.Y.Z-zh`) follow `docs/local/I18N-RELEASE-WORKFLOW.md` (local-only). That file is the sole process SoT: master-only, no feature branches/PRs for release, one tag + one GitHub Release per version, no force-push. Do not invent a parallel flow.
+**Fork note:** Chinese releases (`vX.Y.Z-zh`) follow `docs/local/I18N-RELEASE-WORKFLOW.md` (local-only). That file is the sole process SoT: master-only, no feature branches/PRs for release, one tag + one GitHub Release per version, no force-push. Do not invent a parallel flow. User-facing release notes live in `CHANGELOG.zh.md` (root, tracked); package `CHANGELOG.md` files remain upstream-style.
 
 Upstream-style package release (only when explicitly aligning with official npm publish):
 
