@@ -147,7 +147,7 @@ For multi-section calls, every section is parsed and prepared before writes begi
 ## Limits and validation
 
 - Snapshot tags are four uppercase hexadecimal characters derived from normalized file content and recorded in the session snapshot store.
-- `read`/`grep` exposure matters: with `edit.enforceSeenLines=true` (default), edits targeting lines outside recorded visible ranges are rejected. Re-read elided or undisplayed ranges before editing them.
+- `read`/`grep` exposure matters: with `edit.enforceSeenLines=true` (default), edits targeting lines outside recorded visible ranges are rejected. Re-read elided or undisplayed ranges before editing them. When the store holds no read of the tagged content (new process, evicted snapshot), only anchors on lines longer than the narrowest display column cap (grep's 512 bytes, or a lower `tools.outputMaxColumns`) are rejected, since only those can have been shown cut.
 - Ranges are inclusive, must be ordered, and are bounded by a parser amplification limit of 100,000 expanded lines before the target file's actual bounds are checked.
 - Conflicting overlapping ranges are rejected. Exact repeated replacement ranges can coalesce to the later body with a warning; author one final-content hunk per range.
 - Same-path sections are merged so their original line anchors apply together. Clipboard operations are rejected if interleaved same-path sections would make authored register order ambiguous.

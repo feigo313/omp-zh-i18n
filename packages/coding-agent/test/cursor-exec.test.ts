@@ -803,14 +803,15 @@ describe("legacy shell timeout unit (issue #13082)", () => {
 		await removeWithRetries(cwd);
 	});
 
-	it("converts a millisecond ShellArgs budget into bash seconds", async () => {
-		// Legacy `ShellArgs.timeout` is milliseconds (`ShellTimeout` echoes it as
-		// `timeout_ms`), so a model asking for 15s sends 15000. Forwarded as
+	it("converts a millisecond hard_timeout into the bash deadline", async () => {
+		// Cursor states shell budgets in milliseconds (`ShellTimeout` echoes them
+		// as `timeout_ms`), so a 15s hard timeout arrives as 15000. Forwarded as
 		// seconds it exceeded the bash ceiling and ran clamped to 3600s.
 		const result = await handlers.shell({
 			command: "echo hi",
 			workingDirectory: "",
-			timeout: 15_000,
+			timeout: 5_000,
+			hardTimeout: 15_000,
 			toolCallId: "s1",
 		} as never);
 		// BashTool records its resolved deadline here; shape known from `bash.ts`.
@@ -818,13 +819,39 @@ describe("legacy shell timeout unit (issue #13082)", () => {
 		expect(details.timeoutSeconds).toBe(15);
 	});
 
-	it("rounds a sub-second budget up and leaves an unset budget on the default", async () => {
+	it("does not kill a command at a short block_until_ms wait", async () => {
+		// `ShellArgs.timeout` is the model's `block_until_ms`: how long to wait
+		// before backgrounding. As the deadline it killed `make bootstrap-local`
+		// at 5s; it now leaves the bash default in place.
+		const result = await handlers.shell({
+			command: "echo hi",
+			workingDirectory: "",
+			timeout: 5_000,
+			toolCallId: "s1b",
+		} as never);
+		const details = result.details as { timeoutSeconds?: number };
+		expect(details.timeoutSeconds).toBe(300);
+	});
+
+	it("keeps a block_until_ms wait longer than the default as the deadline", async () => {
+		const result = await handlers.shell({
+			command: "echo hi",
+			workingDirectory: "",
+			timeout: 1_200_000,
+			toolCallId: "s1c",
+		} as never);
+		const details = result.details as { timeoutSeconds?: number };
+		expect(details.timeoutSeconds).toBe(1200);
+	});
+
+	it("rounds a sub-second hard timeout up and leaves an unset budget on the default", async () => {
 		// Truncating 400ms to 0 would read as `bash`'s "no deadline" instead of
 		// the shortest deadline it can honor.
 		const subSecond = await handlers.shell({
 			command: "echo hi",
 			workingDirectory: "",
-			timeout: 400,
+			timeout: 0,
+			hardTimeout: 400,
 			toolCallId: "s2",
 		} as never);
 		const subSecondDetails = subSecond.details as { timeoutDisabled?: boolean; timeoutSeconds?: number };
@@ -946,7 +973,8 @@ describe("CursorExecHandlers error results", () => {
 				command: "pwd",
 				workingDirectory: "/tmp",
 				// Milliseconds on the wire; the bridge forwards bash seconds.
-				timeout: 12_000,
+				timeout: 5_000,
+				hardTimeout: 12_000,
 			}),
 			{ onStdout: () => {}, onStderr: () => {} },
 		);
@@ -2248,6 +2276,12 @@ describe("CursorExecHandlers Pi frame translation", () => {
 			toolCallId: "pi-image-range",
 			args: { path: "shot.png", offset: 1, limit: 20 },
 		} as never);
+		// A `;` list splits into nested reads; the image part must keep the flag.
+		await Bun.write(path.join(cwd, "notes.txt"), "notes\n");
+		const split = await handlers.piRead({
+			toolCallId: "pi-image-split",
+			args: { path: "notes.txt;shot.png" },
+		} as never);
 		const piFrame = buildPiReadResult(modern);
 		if (piFrame.result.case !== "success") throw new Error("expected pi_read success");
 
@@ -2255,10 +2289,12 @@ describe("CursorExecHandlers Pi frame translation", () => {
 			expect(output).not.toContain("IHDR");
 			expect(output).toMatch(/\[image\/\w+ image\]/);
 		}
-		for (const result of [results[0], modern, ranged]) {
+		for (const result of [results[0], modern, ranged, split]) {
 			expect(result?.isError).toBe(false);
 			expect(result?.content.some(part => part.type === "image")).toBe(true);
 		}
+		const splitText = split.content.flatMap(part => (part.type === "text" ? [part.text] : [])).join("\n");
+		expect(splitText).not.toContain("IHDR");
 	});
 
 	it("routes internal artifact reads through both Cursor frames", async () => {

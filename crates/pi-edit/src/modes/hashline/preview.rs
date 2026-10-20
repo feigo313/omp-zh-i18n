@@ -186,7 +186,7 @@ fn preview_section(
 			parsed.edits.as_slice()
 		};
 		let applied =
-			apply_with_recovery(target, &read.canonical, &read.text, edits, clipboard, store, false)?;
+			apply_with_recovery(target, &read.canonical, &read.text, edits, clipboard, store, None)?;
 		result.op = Some(if matches!(parsed.file_op, Some(FileOp::Rem)) {
 			EngineFileOp::Delete
 		} else {

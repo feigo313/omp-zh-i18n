@@ -762,6 +762,7 @@
   "flags.cache-prefix-file.description": "--cache 使用的稳定提示词前缀文件",
   "flags.cache.description": "运行相互独立的冷/热提示词缓存对（openai-codex-responses 不支持）",
   "flags.canary.description": "切换到 canary 通道并更新",
+  "flags.clients.description": "作用域客户端令牌的 JSON 文件(serve),每个令牌只限自己的模型与经纪账户;服务期间会重新读取",
   "flags.cold-archive-after-days.description": "归档前的最小会话保留天数",
   "flags.composer.description": "按名称只渲染某一个编辑器形态",
   "flags.description.description": "播放器下方显示的短片描述",

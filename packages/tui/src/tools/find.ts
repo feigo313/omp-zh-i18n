@@ -27,11 +27,16 @@ import type { Theme, ThemeColor } from "../theme/theme";
 import type { Component } from "../tui";
 import { tuiT } from "../i18n-host";
 import type { OutputMeta } from "./output-meta";
-import type { NativeToolHead, NativeToolView, RenderResultOptions, ToolRenderer } from "./renderer";
+import type {
+	NativeToolHead,
+	NativeToolView,
+	RenderResultContextOptions,
+	RenderResultOptions,
+	ToolRenderer,
+} from "./renderer";
 import type { TspTone } from "@oh-my-pi/pi-wire";
 import { code, col, compact, keyed, node, span, text } from "../native/describe";
 import type { NativeChild, NativeNode } from "../native/node";
-import { getLanguageFromPath } from "../lang-from-path";
 import { fileHref, fileRow, inlineErrorView } from "./native-view";
 import { splitUrlScheme } from "./url-scheme-host";
 
@@ -57,12 +62,22 @@ export interface FindHit {
 	truncated: boolean;
 }
 
+/**
+ * How much of a search the judge actually covered. `unavailable`: every judge
+ * request failed, so an empty result is not evidence of absence. `partial`:
+ * some requests failed. `complete`: none failed (or none were needed).
+ */
+export type FindCoverage = "complete" | "partial" | "unavailable";
+
 /** Search accounting reported alongside the hits. */
 export interface FindStats {
 	/** Eligible files under the root. */
 	listed: number;
 	requests: number;
-	errors: number;
+	/** Judge requests that failed outright; decides {@link FindCoverage}. */
+	failed: number;
+	/** Questions a successful response left without a usable answer. */
+	unanswered: number;
 	/** Entries judged by name. */
 	judged: number;
 	/** Files whose content was read and sent. */
@@ -87,6 +102,7 @@ export interface FindToolDetails {
 	/** Verified-passage probability at or above which a file is a hit. */
 	threshold: number;
 	hits: FindHit[];
+	coverage: FindCoverage;
 	stats: FindStats;
 	elapsedMs: number;
 	/** Session cwd; hit paths are relative to it. */
@@ -129,13 +145,32 @@ function gauge(p: number, theme: Theme): string {
 	});
 }
 
-function renderHit(hit: FindHit, rangeLimit: number, cwd: string | undefined, theme: Theme): string[] {
+/** Raw metadata is used only for file link targets, never for displayed text. */
+function findLinkTargets(details: FindToolDetails, rawDetails: unknown) {
+	const raw = rawDetails !== null && typeof rawDetails === "object" ? rawDetails : undefined;
+	const cwd = raw && "cwd" in raw && typeof raw.cwd === "string" ? raw.cwd : details.cwd;
+	const rawHits: unknown[] = raw && "hits" in raw && Array.isArray(raw.hits) ? raw.hits : [];
+	return {
+		cwd,
+		rel(hit: FindHit, index: number): string {
+			const candidate = rawHits[index];
+			return candidate !== null &&
+				typeof candidate === "object" &&
+				"rel" in candidate &&
+				typeof candidate.rel === "string"
+				? candidate.rel
+				: hit.rel;
+		},
+	};
+}
+
+function renderHit(hit: FindHit, rangeLimit: number, cwd: string | undefined, rawRel: string, theme: Theme): string[] {
 	// `scheme://` hits (e.g. virtual docs) are not files under `cwd`: link the
 	// URL itself instead of joining it onto a filesystem base.
 	const isUrlHit = splitUrlScheme(hit.rel) !== undefined;
 	const link = (text: string, line?: number): string => {
 		if (isUrlHit) return uriHyperlink(line === undefined ? hit.rel : `${hit.rel}:${line}`, text);
-		const absPath = cwd === undefined ? undefined : path.join(cwd, hit.rel);
+		const absPath = cwd === undefined ? undefined : path.join(cwd, rawRel);
 		return absPath === undefined ? text : fileHyperlink(absPath, text, { line });
 	};
 	const coverage = coverageLabel(hit.linesSeen, hit.truncated);
@@ -230,7 +265,7 @@ function findNativeHead(
  * One hit (§7.3 find): a 22px row of the score bar, the path and `12 lines
  * judged`, then its strongest ranges as numbered `code` (no path header).
  */
-function describeHit(hit: FindHit, rangeLimit: number, cwd: string | undefined): NativeNode {
+function describeHit(hit: FindHit, rangeLimit: number, cwd: string | undefined, rawRel: string): NativeNode {
 	const ranges = [...hit.ranges].sort((a, b) => b.p - a.p || a.start - b.start).slice(0, rangeLimit);
 	const tone = scoreTone(hit.contentScore);
 	const score = hit.contentScore.toFixed(2);
@@ -243,13 +278,17 @@ function describeHit(hit: FindHit, rangeLimit: number, cwd: string | undefined):
 			max: { w: 40 },
 		}),
 		detail: [span(score, tone), span(` · ${coverageLabel(hit.linesSeen, hit.truncated)}`, "muted")],
-		href: isUrlHit || cwd === undefined ? undefined : fileHref(path.join(cwd, hit.rel)),
+		href: isUrlHit || cwd === undefined ? undefined : fileHref(path.join(cwd, rawRel)),
 		key: "hit",
 	});
-	const lang = getLanguageFromPath(hit.rel);
 	const snippets = ranges.map(range =>
 		keyed(
-			code(range.snippet.trimEnd(), { lang, start: range.start, numbers: true, title: range.p.toFixed(2) }),
+			code(range.snippet.trimEnd(), {
+				path: hit.rel,
+				start: range.start,
+				numbers: true,
+				title: range.p.toFixed(2),
+			}),
 			`${range.start}-${range.end}`,
 		),
 	);
@@ -282,7 +321,7 @@ export const findToolRenderer = {
 
 	renderResult(
 		result: { content: Array<{ type: string; text?: string }>; details?: FindToolDetails; isError?: boolean },
-		options: RenderResultOptions,
+		options: RenderResultContextOptions,
 		uiTheme: Theme,
 		args?: FindRenderArgs,
 	): Component {
@@ -310,6 +349,7 @@ export const findToolRenderer = {
 		}
 
 		const { hits, stats, threshold } = details;
+		const linkTargets = findLinkTargets(details, options.renderContext?.rawDetails);
 		const description = quoteQuery(details.query);
 		const scope = details.scopePath === undefined ? [] : [inPathLabel(details.scopePath)];
 		const meta = [
@@ -321,7 +361,8 @@ export const findToolRenderer = {
 			`$${stats.cost.toFixed(4)}`,
 			formatDuration(details.elapsedMs),
 		];
-		if (stats.errors > 0) meta.push(uiTheme.fg("warning", failedLabel(stats.errors)));
+		const failed = stats.failed > 0 ? failedLabel(stats.failed) : undefined;
+		if (failed) meta.push(uiTheme.fg("warning", failed));
 
 		if (hits.length === 0) {
 			const emptyMeta = [
@@ -330,7 +371,7 @@ export const findToolRenderer = {
 				`$${stats.cost.toFixed(4)}`,
 				formatDuration(details.elapsedMs),
 			];
-			if (stats.errors > 0) emptyMeta.push(uiTheme.fg("warning", failedLabel(stats.errors)));
+			if (failed) emptyMeta.push(uiTheme.fg("warning", failed));
 			const header = renderStatusLine(
 				{
 					icon: "warning",
@@ -341,7 +382,11 @@ export const findToolRenderer = {
 				},
 				uiTheme,
 			);
-			const lines = [header, formatEmptyMessage(tuiT("ui.find.noPassages", "No relevant passages found"), uiTheme)];
+			const empty =
+				details.coverage === "partial"
+					? tuiT("ui.find.noPassagesJudged", "No relevant passages found in the judged files")
+					: tuiT("ui.find.noPassages", "No relevant passages found");
+			const lines = [header, formatEmptyMessage(empty, uiTheme)];
 			for (const failure of stats.failures) lines.push(uiTheme.fg("warning", failure));
 			return new Text(lines.join("\n"), 1, 0);
 		}
@@ -367,8 +412,14 @@ export const findToolRenderer = {
 						maxCollapsed: COLLAPSED_HITS,
 						maxCollapsedLines: PREVIEW_LIMITS.EXPANDED_LINES,
 						itemType: "hit",
-						renderItem: hit =>
-							renderHit(hit, expanded ? RANGES_EXPANDED : RANGES_COLLAPSED, details.cwd, uiTheme),
+						renderItem: (hit, context) =>
+							renderHit(
+								hit,
+								expanded ? RANGES_EXPANDED : RANGES_COLLAPSED,
+								linkTargets.cwd,
+								linkTargets.rel(hit, context.index),
+								uiTheme,
+							),
 					},
 					uiTheme,
 				);
@@ -400,7 +451,7 @@ export const findToolRenderer = {
 	 */
 	describeResult(
 		result: { content: Array<{ type: string; text?: string }>; details?: FindToolDetails; isError?: boolean },
-		options: RenderResultOptions,
+		options: RenderResultContextOptions,
 		args?: FindRenderArgs,
 	): NativeToolView {
 		const details = result.details;
@@ -415,8 +466,9 @@ export const findToolRenderer = {
 			};
 		}
 		const { hits, stats, threshold } = details;
+		const linkTargets = findLinkTargets(details, options.renderContext?.rawDetails);
 		const scope = details.scopePath === undefined ? undefined : inPathLabel(details.scopePath);
-		const failed = stats.errors > 0 ? [span(failedLabel(stats.errors), "warning")] : undefined;
+		const failed = stats.failed > 0 ? [span(failedLabel(stats.failed), "warning")] : undefined;
 		const accounting = findAccounting(stats, threshold, details.elapsedMs);
 		const failures = stats.failures.map((failure, i) =>
 			keyed(text([span(failure, "warning")], { wrap: "word", role: "omp.tool.notice" }), `fail${i}`),
@@ -448,7 +500,7 @@ export const findToolRenderer = {
 			),
 			inline: true,
 			body: compact<NativeChild>([
-				...shown.map(hit => describeHit(hit, rangeLimit, details.cwd)),
+				...shown.map((hit, index) => describeHit(hit, rangeLimit, linkTargets.cwd, linkTargets.rel(hit, index))),
 				...failures,
 				foot,
 			]),

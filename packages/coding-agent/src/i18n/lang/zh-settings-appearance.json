@@ -129,6 +129,8 @@
   "settings.tui.autoGraph.options.smart.label": "智能",
   "settings.tui.codexResetFireworks.description": "以屏幕上三分之一处的烟花覆盖层庆祝计划外的 Codex 每周用量重置与新存入的已保存重置,按 Escape 前持续显示",
   "settings.tui.codexResetFireworks.label": "Codex 重置烟花",
+  "settings.tui.completeScrollback.description": "把被不断增大的 HUD 或对话框挤出屏幕的对话行直接送入回滚缓冲;当它缩小时,对话与输入框之间会留有空行,直到新输出填满。",
+  "settings.tui.completeScrollback.label": "完整回滚缓冲",
   "settings.tui.hyperlinks.description": "将路径和 URL 包装为 OSC 8 超链接，终端原生点击打开",
   "settings.tui.hyperlinks.label": "终端超链接",
   "settings.tui.hyperlinks.options.always.description": "始终将路径/URL 包装为超链接",

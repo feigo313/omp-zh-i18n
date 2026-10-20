@@ -129,6 +129,8 @@
   "settings.tui.autoGraph.options.smart.label": "Smart",
   "settings.tui.codexResetFireworks.description": "Celebrate unscheduled Codex weekly usage resets and newly banked saved resets with a top-third fireworks overlay that remains until Escape",
   "settings.tui.codexResetFireworks.label": "Codex Reset Fireworks",
+  "settings.tui.completeScrollback.description": "Send transcript rows pushed off screen by a growing HUD or dialog straight to scrollback; when it shrinks, blank rows sit between the transcript and the input until new output fills them",
+  "settings.tui.completeScrollback.label": "Complete Scrollback",
   "settings.tui.hyperlinks.description": "Wrap paths and URLs in OSC 8 hyperlinks for terminal-native click-to-open (auto: detect support; off: never; always: unconditional)",
   "settings.tui.hyperlinks.label": "Terminal Hyperlinks",
   "settings.tui.hyperlinks.options.always.description": "Always wrap paths/URLs in hyperlinks",

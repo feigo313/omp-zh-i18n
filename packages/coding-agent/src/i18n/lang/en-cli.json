@@ -762,6 +762,7 @@
   "flags.cache-prefix-file.description": "Stable prompt prefix file for --cache",
   "flags.cache.description": "Run independent cold/warm prompt-cache pairs (not supported for openai-codex-responses)",
   "flags.canary.description": "Switch to the canary channel and update",
+  "flags.clients.description": "JSON file of scoped client tokens (serve), each limited to its own models and broker accounts; re-read while serving",
   "flags.cold-archive-after-days.description": "Minimum session age before archiving",
   "flags.composer.description": "Render a single composer shape by name",
   "flags.description.description": "Clip description shown under the player",

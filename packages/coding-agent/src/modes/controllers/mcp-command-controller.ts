@@ -18,6 +18,7 @@ import {
 	fetchResourceMetadataScopes,
 	loadAllMCPConfigs,
 	MCPManager,
+	OAuthIssuerMismatchError,
 	type OAuthEndpoints,
 } from "../../mcp";
 import { connectToServer, disconnectServer, listTools } from "../../mcp/client";
@@ -768,8 +769,14 @@ export class MCPCommandController {
 									authResult.resourceMetadataUrl,
 									{ protectedScopes: authResult.scopes },
 								);
-							} catch {
-								// Ignore discovery error and handle below.
+							} catch (discoveryError) {
+								// Name a misconfigured advertised server; other failures fall through below.
+								if (discoveryError instanceof OAuthIssuerMismatchError) {
+									this.ctx.showError(
+										`Authentication required for "${parsed.initialName}": ${discoveryError.message}`,
+									);
+									return;
+								}
 							}
 						}
 						if (oauth && !oauth.scopes && authResult.resourceMetadataUrl) {

@@ -25,10 +25,11 @@ import {
 	type ConfiguredThinkingLevel,
 } from "../render/render-utils";
 import type { StructuredSubagentOutput } from "./task";
+import { describeJobTiles, type JobTile, type JobWidgetView, renderJobTileLines } from "./job-widget";
 import type { RenderResultOptions, ToolRenderer, ToolActivitySummary } from "./renderer";
 import type { IrcDeliveryReceipt, IrcMessage } from "./irc";
 import type { TspSpan } from "@oh-my-pi/pi-wire";
-import { card as cardNode, compact, elapsed, md, node, row, span, text } from "../native/describe";
+import { card as cardNode, compact, elapsed, keyed, md, node, row, span, text } from "../native/describe";
 import type { NativeNode } from "../native/node";
 import { OwnerMemo } from "../native/memo";
 import { plainText } from "../native/spans";
@@ -64,6 +65,10 @@ export interface JobSnapshot {
 	advisor?: boolean;
 	/** The task agent's latest self-estimated completion (0–100); see `AgentProgress.completionPercent`. */
 	completionPercent?: number;
+	/** The task agent's latest stage in its own words; see `AgentProgress.stage`. */
+	stage?: string;
+	/** The job's live widget, while one is being drawn; frozen at its last state once the job settles. */
+	widget?: JobWidgetView;
 	resultText?: string;
 	errorText?: string;
 	/** Source-output metadata retained for per-job warnings and persisted row rendering. */
@@ -135,50 +140,6 @@ export interface CoordinationDetails {
 }
 
 // =============================================================================
-// Localized status/count labels
-//
-// English pluralizes the trailing noun, so every label ships as a singular and
-// a plural key; the Chinese templates are identical on purpose.
-// =============================================================================
-
-/** `N agents` / `N agent` roster count for the wait status line. */
-function agentCountLabel(count: number): string {
-	return count === 1
-		? tuiT("ui.wait.agentCountOne", "{count} agent", { count })
-		: tuiT("ui.wait.agentCount", "{count} agents", { count });
-}
-
-/** `N running agents — no jobs` title for an agents-only roster. */
-function runningAgentsNoJobsLabel(count: number): string {
-	return count === 1
-		? tuiT("ui.wait.runningAgentNoJobs", "{count} running agent — no jobs", { count })
-		: tuiT("ui.wait.runningAgentsNoJobs", "{count} running agents — no jobs", { count });
-}
-
-/** `waiting on N jobs` title when every job is still running. */
-function waitingOnJobsLabel(count: number): string {
-	return count === 1
-		? tuiT("ui.wait.waitingOnJob", "waiting on {count} job", { count })
-		: tuiT("ui.wait.waitingOnJobs", "waiting on {count} jobs", { count });
-}
-
-/**
- * `waiting on R of T jobs` title when only some jobs are still running. Only the
- * plural form is reachable: with a single job, `running > 0` implies
- * `running === total`, so the `waiting on N jobs` branch above takes over.
- */
-function waitingOnOfJobsLabel(running: number, total: number): string {
-	return tuiT("ui.wait.waitingOnOfJobs", "waiting on {running} of {total} jobs", { running, total });
-}
-
-/** `N jobs settled` title once nothing is running any more. */
-function jobsSettledLabel(count: number): string {
-	return count === 1
-		? tuiT("ui.wait.jobSettled", "{count} job settled", { count })
-		: tuiT("ui.wait.jobsSettled", "{count} jobs settled", { count });
-}
-
-// =============================================================================
 // TUI Renderer
 // =============================================================================
 
@@ -239,6 +200,84 @@ function flattenStructuredPreview(text: string): string {
 	return text.slice(0, PREVIEW_LINES_EXPANDED * PREVIEW_LINE_WIDTH * 2).replace(/\s+/g, " ");
 }
 
+/** The row label: a running task's own stage line when it reports one, else the job's label. */
+function jobRowLabel(job: JobSnapshot): string {
+	return job.type === "task" && job.status === "running" && job.stage?.trim() ? job.stage : job.label;
+}
+
+/** A job as its tile; `live` while the card's clocks run. */
+function jobTile(job: JobSnapshot, live: boolean): JobTile {
+	return {
+		id: job.id,
+		type: job.type,
+		status: job.status,
+		label: job.label,
+		durationMs: job.durationMs,
+		live: live && job.status === "running",
+		...(job.widget ? { widget: job.widget } : {}),
+		...(job.status === "running" && job.completionPercent !== undefined
+			? { completionPercent: job.completionPercent }
+			: {}),
+		...(job.stage ? { stage: job.stage } : {}),
+		...(job.exitCode === undefined ? {} : { exitCode: job.exitCode }),
+	};
+}
+
+/** Identity of the widgets a job list draws: changes whenever any widget's data or state does. */
+function widgetStamp(jobs: readonly JobSnapshot[] | undefined): string {
+	if (!jobs) return "";
+	let stamp = "";
+	for (const job of jobs) if (job.widget) stamp += `${job.id}:${job.widget.updatedAt}:${job.widget.state};`;
+	return stamp;
+}
+
+/** Tiles a native wait card shows before it counts the rest. */
+const TILES_SHOWN = 9;
+
+// =============================================================================
+// Localized status/count labels
+//
+// English pluralizes the trailing noun, so every label ships as a singular and
+// a plural key; the Chinese templates are identical on purpose.
+// =============================================================================
+
+/** `N agents` / `N agent` roster count for the wait status line. */
+function agentCountLabel(count: number): string {
+	return count === 1
+		? tuiT("ui.wait.agentCountOne", "{count} agent", { count })
+		: tuiT("ui.wait.agentCount", "{count} agents", { count });
+}
+
+/** `N running agents — no jobs` title for an agents-only roster. */
+function runningAgentsNoJobsLabel(count: number): string {
+	return count === 1
+		? tuiT("ui.wait.runningAgentNoJobs", "{count} running agent — no jobs", { count })
+		: tuiT("ui.wait.runningAgentsNoJobs", "{count} running agents — no jobs", { count });
+}
+
+/** `waiting on N jobs` title when every job is still running. */
+function waitingOnJobsLabel(count: number): string {
+	return count === 1
+		? tuiT("ui.wait.waitingOnJob", "waiting on {count} job", { count })
+		: tuiT("ui.wait.waitingOnJobs", "waiting on {count} jobs", { count });
+}
+
+/**
+ * `waiting on R of T jobs` title when only some jobs are still running. Only the
+ * plural form is reachable: with a single job, `running > 0` implies
+ * `running === total`, so the `waiting on N jobs` branch above takes over.
+ */
+function waitingOnOfJobsLabel(running: number, total: number): string {
+	return tuiT("ui.wait.waitingOnOfJobs", "waiting on {running} of {total} jobs", { running, total });
+}
+
+/** `N jobs settled` title once nothing is running any more. */
+function jobsSettledLabel(count: number): string {
+	return count === 1
+		? tuiT("ui.wait.jobSettled", "{count} job settled", { count })
+		: tuiT("ui.wait.jobsSettled", "{count} jobs settled", { count });
+}
+
 /** Pending wait frame. */
 function waitRenderCall(_args: object, _options: RenderResultOptions, uiTheme: Theme): Component {
 	return new Text(renderStatusLine({ icon: "pending", title: tuiT("ui.wait.title", "Wait") }, uiTheme), 0, 0);
@@ -246,7 +285,11 @@ function waitRenderCall(_args: object, _options: RenderResultOptions, uiTheme: T
 
 /** Result frame for wait snapshots and the agents roster. */
 function jobsRenderResult(
-	result: { content: Array<{ type: string; text?: string }>; details?: CoordinationDetails; isError?: boolean },
+	result: {
+		content: Array<{ type: string; text?: string }>;
+		details?: CoordinationDetails;
+		isError?: boolean;
+	},
 	options: RenderResultOptions,
 	uiTheme: Theme,
 ): Component {
@@ -376,6 +419,7 @@ function jobsRenderResult(
 				.u32(spinnerFrame)
 				.bool(shimmerActive)
 				.bool(showModelBadge)
+				.str(widgetStamp(jobs))
 				.digest();
 			if (!shimmerActive && cached?.key === key) return cached.lines;
 
@@ -404,7 +448,8 @@ function jobsRenderResult(
 							Math.max(0, rowWidth - visibleWidth(`${icon} ${typeBadge} ${durationSuffix}`)),
 							Ellipsis.Unicode,
 						);
-						const rawLabelLines = (job.label || tuiT("ui.wait.noLabel", "(no label)")).split(/\r?\n/);
+						const rowLabel = jobRowLabel(job);
+						const rawLabelLines = (rowLabel || tuiT("ui.wait.noLabel", "(no label)")).split(/\r?\n/);
 						const maxLabelLines = expanded ? LABEL_LINES_EXPANDED : LABEL_LINES_COLLAPSED;
 						const visibleLabelLines = rawLabelLines
 							.slice(0, maxLabelLines)
@@ -414,44 +459,63 @@ function jobsRenderResult(
 							visibleLabelLines[visibleLabelLines.length - 1] = `${last} …`;
 						}
 						const rowPrefix = `${icon} ${typeBadge} `;
-						const modelIdentity = job.resolvedModelIdentity ?? job.resolvedModel;
-						const modelBadge =
-							job.type === "task" && showModelBadge && typeof modelIdentity === "string"
-								? formatFeedModelBadge(
-										modelIdentity,
-										job.resolvedThinkingLevel,
-										job.advisor === true,
-										uiTheme,
-										Math.min(
-											FEED_MODEL_BADGE_WIDTH,
-											Math.max(0, rowWidth - visibleWidth(`${rowPrefix}${displayId}${durationSuffix}`) - 1),
-										),
-									)
-								: "";
-						const modelLead = modelBadge ? `${modelBadge} ` : "";
-						const headRaw = displayId;
-						// Running rows in a live block shimmer their label; once the block
-						// stops animating (sealed, or a settled snapshot — spinnerFrame
-						// cleared) they render static so scrollback never keeps a mid-sweep
-						// shimmer band.
 						const live = job.status === "running" && options.spinnerFrame !== undefined;
-						const headLabel = live
-							? shimmerEnabled()
-								? shimmerText(headRaw, uiTheme)
-								: uiTheme.fg("accent", headRaw)
-							: uiTheme.fg("toolOutput", headRaw);
-						let row = `${rowPrefix}${modelLead}${headLabel}`;
-						const distinctLabel = job.label.trim() !== job.id;
-						const label = visibleLabelLines[0] ?? "";
-						const inlineLabel = distinctLabel && visibleWidth(`${row} ${label}${durationSuffix}`) <= rowWidth;
-						if (inlineLabel) row += ` ${uiTheme.fg("toolOutput", label)}`;
-						row += durationSuffix;
-						lines.push(truncateToWidth(row, rowWidth, ""));
 						const continuationWidth = Math.max(0, rowWidth - visibleWidth("  "));
-						for (let i = distinctLabel && !inlineLabel ? 0 : 1; i < visibleLabelLines.length; i++) {
+						if (job.widget?.state === "live") {
+							const meta = compact([
+								job.status === "running" && job.completionPercent !== undefined
+									? uiTheme.fg("accent", `${job.completionPercent}%`)
+									: undefined,
+								uiTheme.fg("dim", formatDuration(job.durationMs)),
+							]).join(" ");
 							lines.push(
-								`  ${uiTheme.fg("toolOutput", truncateToWidth(visibleLabelLines[i]!, continuationWidth))}`,
+								...renderJobTileLines(jobTile(job, live), rowWidth, uiTheme, {
+									lead: rowPrefix,
+									meta,
+									full: expanded,
+								}),
 							);
+						} else {
+							const modelIdentity = job.resolvedModelIdentity ?? job.resolvedModel;
+							const modelBadge =
+								job.type === "task" && showModelBadge && typeof modelIdentity === "string"
+									? formatFeedModelBadge(
+											modelIdentity,
+											job.resolvedThinkingLevel,
+											job.advisor === true,
+											uiTheme,
+											Math.min(
+												FEED_MODEL_BADGE_WIDTH,
+												Math.max(
+													0,
+													rowWidth - visibleWidth(`${rowPrefix}${displayId}${durationSuffix}`) - 1,
+												),
+											),
+										)
+									: "";
+							const modelLead = modelBadge ? `${modelBadge} ` : "";
+							const headRaw = displayId;
+							// Running rows in a live block shimmer their label; once the block
+							// stops animating (sealed, or a settled snapshot — spinnerFrame
+							// cleared) they render static so scrollback never keeps a mid-sweep
+							// shimmer band.
+							const headLabel = live
+								? shimmerEnabled()
+									? shimmerText(headRaw, uiTheme)
+									: uiTheme.fg("accent", headRaw)
+								: uiTheme.fg("toolOutput", headRaw);
+							let row = `${rowPrefix}${modelLead}${headLabel}`;
+							const distinctLabel = rowLabel.trim() !== job.id;
+							const label = visibleLabelLines[0] ?? "";
+							const inlineLabel = distinctLabel && visibleWidth(`${row} ${label}${durationSuffix}`) <= rowWidth;
+							if (inlineLabel) row += ` ${uiTheme.fg("toolOutput", label)}`;
+							row += durationSuffix;
+							lines.push(truncateToWidth(row, rowWidth, ""));
+							for (let i = distinctLabel && !inlineLabel ? 0 : 1; i < visibleLabelLines.length; i++) {
+								lines.push(
+									`  ${uiTheme.fg("toolOutput", truncateToWidth(visibleLabelLines[i]!, continuationWidth))}`,
+								);
+							}
 						}
 						const artifactError = job.meta?.artifactError ?? job.artifactError;
 						if (artifactError) {
@@ -484,7 +548,7 @@ function jobsRenderResult(
 										? formatStatusIcon("running", uiTheme, options.spinnerFrame)
 										: formatStatusIcon("warning", uiTheme);
 									const badge = agent.live
-										? formatBadge("agent", "accent", uiTheme)
+										? formatBadge(tuiT("ui.wait.agentBadge", "agent"), "accent", uiTheme)
 										: formatBadge(tuiT("ui.wait.agentNoTurn", "agent · no turn"), "warning", uiTheme);
 									const id = truncateToWidth(
 										replaceTabs(agent.id).replace(/\s+/g, " "),
@@ -548,7 +612,11 @@ function bodyLines(
 	body: string,
 	expanded: boolean,
 	theme: Theme,
-	options: { indent?: string; tone?: "dim" | "toolOutput"; collapsedLines?: number } = {},
+	options: {
+		indent?: string;
+		tone?: "dim" | "toolOutput";
+		collapsedLines?: number;
+	} = {},
 ): string[] {
 	const indent = options.indent ?? "";
 	const tone = options.tone ?? "toolOutput";
@@ -605,9 +673,9 @@ export function createIrcMessageCard(
 					: `IRC ${from} ${uiTheme.nav.selected} ${card.to?.trim() || "?"}`;
 	const body = card.body ?? "";
 	const meta: string[] = [];
-	if (card.kind === "autoreply") meta.push(tuiT("ui.auto", "auto"));
+	if (card.kind === "autoreply") meta.push("auto");
 	if (card.kind === "workpool" && card.mode) meta.push(card.mode);
-	if (card.replyTo) meta.push(tuiT("ui.wait.reply", "reply"));
+	if (card.replyTo) meta.push("reply");
 	const age = messageAge(card.timestamp);
 	if (age) meta.push(age);
 	const component = createCachedComponent(
@@ -615,7 +683,12 @@ export function createIrcMessageCard(
 		(width, expanded) => {
 			const lines = [renderStatusLine({ iconOverride: ircGlyph(uiTheme), title, meta }, uiTheme)];
 			if (body.trim()) {
-				lines.push(...bodyLines(body, expanded, uiTheme, { indent: "  ", collapsedLines: 3 }));
+				lines.push(
+					...bodyLines(body, expanded, uiTheme, {
+						indent: "  ",
+						collapsedLines: 3,
+					}),
+				);
 			}
 			return lines.map(line => truncateToWidth(line, width, Ellipsis.Unicode));
 		},
@@ -635,61 +708,12 @@ export function createIrcMessageCard(
 		},
 		compact([
 			card.timestamp
-				? row([elapsed(Date.now() - card.timestamp), text([span(tuiT("ui.wait.ago", "ago"), "dim")])], {
-						gap: "xs",
-					})
+				? row([elapsed(Date.now() - card.timestamp), text([span("ago", "dim")])], { gap: "xs" })
 				: undefined,
 			body.trim() ? md(body) : undefined,
 		]),
 	);
 	return Object.assign(component, { describe: () => described });
-}
-
-/**
- * One job row on one line: type badge, id + label, terminal-clocked duration
- * (live while running). The job's output and errors fill the card of the call
- * that started it (`parksAsBackground`), so the row carries no preview.
- */
-function describeJob(job: JobSnapshot, isPartial: boolean): NativeNode {
-	const running = job.status === "running" && isPartial;
-	const label = job.label.trim() !== job.id ? plainText(job.label.split(/\r?\n/)[0] ?? "") : "";
-	const spans: TspSpan[] = [
-		span(plainText(job.id), running ? "accent" : "toolOutput", running ? { fx: "shimmer" } : undefined),
-	];
-	if (label) spans.push(span(` ${label}`, "toolOutput"));
-	if (job.exitCode !== undefined)
-		spans.push(
-			span(
-				` ${tuiT("ui.wait.exitCode", "exit {code}", { code: job.exitCode })}`,
-				job.exitCode === 0 ? "muted" : "error",
-			),
-		);
-	const tone =
-		job.status === "completed"
-			? "success"
-			: job.status === "failed"
-				? "error"
-				: job.status === "cancelled"
-					? "warning"
-					: "accent";
-	return node(
-		"row",
-		{ role: "omp.wait.job", tone, gap: "sm" },
-		compact([
-			node("badge", { text: job.type, tone }),
-			text(spans, { truncate: "end", grow: 1 }),
-			job.status === "running" && job.completionPercent !== undefined
-				? node("progress", {
-						value: job.completionPercent / 100,
-						label: `${job.completionPercent}%`,
-						tone: "accent",
-						title: "Agent's own completion estimate",
-					})
-				: undefined,
-			elapsed(job.durationMs, !running),
-		]),
-		job.id,
-	);
 }
 
 function describeJobsResult(
@@ -726,9 +750,35 @@ function describeJobsResult(
 		head.push(
 			span(` ${tuiT("ui.wait.countCancelled", "{count} cancelled", { count: counts.cancelled })}`, "warning"),
 		);
-	const order: Record<JobSnapshot["status"], number> = { running: 0, failed: 1, cancelled: 2, completed: 3 };
+	const order: Record<JobSnapshot["status"], number> = {
+		running: 0,
+		failed: 1,
+		cancelled: 2,
+		completed: 3,
+	};
 	const sorted = [...jobs].sort((a, b) => order[a.status] - order[b.status] || b.durationMs - a.durationMs);
-	const body: NativeNode[] = sorted.map(job => describeJob(job, isPartial));
+	// One frame of tiles: each job's status, title, figure and widget together. The job's output
+	// and errors fill the card of the call that started it (`parksAsBackground`), so no previews.
+	const body: NativeNode[] = [];
+	if (sorted.length > 0) {
+		body.push(keyed(describeJobTiles(sorted.slice(0, TILES_SHOWN).map(job => jobTile(job, isPartial))), "tiles"));
+	}
+	if (sorted.length > TILES_SHOWN) {
+		const rest = sorted.length - TILES_SHOWN;
+		body.push(
+			text(
+				[
+					span(
+						rest === 1
+							? tuiT("ui.wait.moreJob", "+{count} more job · /jobs", { count: rest })
+							: tuiT("ui.wait.moreJobs", "+{count} more jobs · /jobs", { count: rest }),
+						"dim",
+					),
+				],
+				{ role: "omp.wait.more" },
+			),
+		);
+	}
 	for (const agent of agents) {
 		const spans: TspSpan[] = [span(plainText(agent.id), "muted")];
 		if (agent.activity) spans.push(span(` ${plainText(agent.activity)}`, "toolOutput"));
@@ -739,7 +789,9 @@ function describeJobsResult(
 				{ gap: "sm", role: "omp.wait.agent" },
 				[
 					node("badge", {
-						text: agent.live ? "agent" : tuiT("ui.wait.agentNoTurn", "agent · no turn"),
+						text: agent.live
+							? tuiT("ui.wait.agentBadge", "agent")
+							: tuiT("ui.wait.agentNoTurn", "agent · no turn"),
 						tone: agent.live ? "accent" : "warning",
 					}),
 					text(spans, { truncate: "end", grow: 1 }),
@@ -752,6 +804,8 @@ function describeJobsResult(
 	return {
 		head,
 		tone: counts.failed > 0 ? "warning" : counts.running > 0 || agents.length > 0 ? "info" : "success",
+		// The tiles are what a wait shows: clamping the body by lines would cut them.
+		preview: "children",
 		body,
 	};
 }
@@ -771,14 +825,9 @@ function describeMessage(
 		preview: { lines: BODY_LINES_COLLAPSED + 1 },
 		body: compact([
 			ts
-				? row(
-						[
-							text([span(tuiT("ui.wait.received", "received"), "dim")]),
-							elapsed(Date.now() - ts),
-							text([span(tuiT("ui.wait.ago", "ago"), "dim")]),
-						],
-						{ gap: "xs" },
-					)
+				? row([text([span("received", "dim")]), elapsed(Date.now() - ts), text([span("ago", "dim")])], {
+						gap: "xs",
+					})
 				: undefined,
 			bodyText.trim() ? md(bodyText) : undefined,
 		]),
@@ -805,7 +854,7 @@ export const waitToolRenderer = {
 		result: ToolRenderResult<CoordinationDetails>,
 		options: RenderResultOptions,
 	): NativeToolView | undefined {
-		return waitResultMemo.get(result, [options.isPartial], () => {
+		return waitResultMemo.get(result, [options.isPartial, widgetStamp(result.details?.jobs)], () => {
 			if (result.isError) return errorView(tuiT("ui.wait.title", "Wait"), resultText(result));
 			const details = result.details;
 			if (details?.interrupted) {
@@ -817,16 +866,15 @@ export const waitToolRenderer = {
 			}
 			const waited = details?.waited;
 			if (!waited) return describeJobsResult(result, options.isPartial);
-			return describeMessage(
-				waited.from,
-				waited.ts,
-				waited.body,
-				waited.replyTo ? [tuiT("ui.wait.reply", "reply")] : [],
-			);
+			return describeMessage(waited.from, waited.ts, waited.body, waited.replyTo ? ["reply"] : []);
 		});
 	},
 	renderResult(
-		result: { content: Array<{ type: string; text?: string }>; details?: CoordinationDetails; isError?: boolean },
+		result: {
+			content: Array<{ type: string; text?: string }>;
+			details?: CoordinationDetails;
+			isError?: boolean;
+		},
 		options: RenderResultOptions,
 		uiTheme: Theme,
 	): Component {
@@ -854,7 +902,7 @@ export const waitToolRenderer = {
 						{
 							iconOverride: ircGlyph(uiTheme),
 							title: `IRC ${uiTheme.nav.back} ${replaceTabs(waited.from)}`,
-							meta: [messageAge(waited.ts), ...(waited.replyTo ? [tuiT("ui.wait.reply", "reply")] : [])],
+							meta: [messageAge(waited.ts), ...(waited.replyTo ? ["reply"] : [])],
 						},
 						uiTheme,
 					),

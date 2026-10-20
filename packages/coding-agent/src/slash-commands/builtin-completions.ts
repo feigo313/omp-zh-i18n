@@ -61,7 +61,8 @@ export function buildArgumentCompletions(
  * offer only what the active model exposes: suggesting a tier the model lacks
  * (e.g. `xhigh` on a model capped at `high`) would make the handler answer the
  * accepted completion with `Unknown thinking level`. Returns null for a model
- * with no reasoning dial — there is nothing to pick.
+ * with no reasoning dial — there is nothing to pick. Reads the viewed session,
+ * which `/effort` targets from a focused subagent.
  */
 export function buildEffortArgumentCompletions(
 	runtime: TuiSlashCommandRuntime,
@@ -69,8 +70,9 @@ export function buildEffortArgumentCompletions(
 	return (argumentPrefix: string) => {
 		if (argumentPrefix.includes(" ")) return null;
 		const lower = argumentPrefix.toLowerCase();
-		const current = runtime.ctx.session.configuredThinkingLevel();
-		const matches = runtime.ctx.session
+		const session = runtime.ctx.viewSession;
+		const current = session.configuredThinkingLevel();
+		const matches = session
 			.getAvailableEffortSelectors()
 			.filter(level => level.startsWith(lower))
 			.map(level => {
@@ -93,7 +95,7 @@ export function buildEffortInlineHint(runtime: TuiSlashCommandRuntime): (argumen
 	return (argumentText: string) => {
 		const prefix = argumentText.trimStart().toLowerCase();
 		if (prefix.length === 0 || prefix.includes(" ")) return null;
-		const match = runtime.ctx.session.getAvailableEffortSelectors().find(level => level.startsWith(prefix));
+		const match = runtime.ctx.viewSession.getAvailableEffortSelectors().find(level => level.startsWith(prefix));
 		return match && match !== prefix ? match.slice(prefix.length) : null;
 	};
 }

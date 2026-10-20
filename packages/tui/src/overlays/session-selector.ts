@@ -1370,6 +1370,8 @@ export interface SessionSelectorOptions<T extends SessionSelectorEntry = Session
 	allSessions?: T[];
 	/** Picker heading; defaults to "Resume Session". */
 	title?: string;
+	/** Primary action label; defaults to "Resume" (ANSI footer defaults to "select"). */
+	actionLabel?: string;
 	/** Fixed scope label, or false to omit the scope suffix. */
 	scopeLabel?: string | false;
 	/**
@@ -1437,6 +1439,7 @@ export class SessionSelectorComponent<T extends SessionSelectorEntry = SessionSe
 	readonly #getTerminalRows: () => number;
 	readonly #fillHeight: boolean;
 	readonly #title: string;
+	readonly #actionLabel: string;
 	readonly #scopeLabel: string | false | undefined;
 	/** What `#messageContainer` shows, for the native description. */
 	#message: SessionPickerMessage | undefined;
@@ -1494,6 +1497,7 @@ export class SessionSelectorComponent<T extends SessionSelectorEntry = SessionSe
 		this.#getTerminalRows = options.getTerminalRows ?? (() => 24);
 		this.#fillHeight = options.fillHeight ?? false;
 		this.#title = options.title ?? tuiT("ui.sessionSelector.resumeSession", "Resume Session");
+		this.#actionLabel = options.actionLabel ?? tuiT("ui.sessionSelector.resume", "Resume");
 		this.#pickerTitle = options.title;
 		this.#standalone = options.standalone ?? false;
 		this.#scopeLabel = options.scopeLabel;
@@ -1528,9 +1532,11 @@ export class SessionSelectorComponent<T extends SessionSelectorEntry = SessionSe
 			onExit();
 		};
 		this.#sessionList.onRequestRender = () => this.#onRequestRender?.();
-		this.#sessionList.onDeleteRequest = (session: T) => {
-			this.#showDeleteConfirmation(session);
-		};
+		if (this.#onDelete) {
+			this.#sessionList.onDeleteRequest = (session: T) => {
+				this.#showDeleteConfirmation(session);
+			};
+		}
 		if (this.#loadAllSessions || this.#globalSessions) {
 			this.#sessionList.onToggleScope = () => {
 				void this.#toggleScope();
@@ -1778,10 +1784,9 @@ export class SessionSelectorComponent<T extends SessionSelectorEntry = SessionSe
 		} else {
 			children.push(this.#sessionList.searchInput, list);
 		}
-		const hints: (NativeHint | undefined)[] = [
-			{ keys: ["delete", "backspace"], label: "delete" },
-			{ keys: ["enter"], label: "select" },
-		];
+		const hints: (NativeHint | undefined)[] = [];
+		if (this.#onDelete) hints.push({ keys: ["delete", "backspace"], label: "delete" });
+		hints.push({ keys: ["enter"], label: "select" });
 		if (this.#sessionList.onToggleScope) {
 			hints.push({ keys: ["tab"], label: this.#scope === "all" ? "current folder" : "all projects" });
 		}
@@ -1828,7 +1833,7 @@ export class SessionSelectorComponent<T extends SessionSelectorEntry = SessionSe
 		}
 		const loading = message?.kind === "loading";
 		const toggle = list.onToggleScope !== undefined;
-		const actions = [pickerAction("resume", tuiT("ui.sessionSelector.resume", "Resume"), "enter", { primary: true })];
+		const actions = [pickerAction("resume", this.#actionLabel, "enter", { primary: true })];
 		if (this.#onDelete) actions.push(pickerAction("delete", tuiT("ui.delete", "Delete"), "backspace"));
 		if (toggle) {
 			actions.push(

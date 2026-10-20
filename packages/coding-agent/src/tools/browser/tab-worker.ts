@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { postmortem, Snowflake, untilAborted, withTimeout } from "@oh-my-pi/pi-utils";
+import { formatBytes, isRecord, postmortem, Snowflake, untilAborted, withTimeout } from "@oh-my-pi/pi-utils";
 import type { HTMLElement } from "@oh-my-pi/pi-utils/dom";
 import type {
 	Accessibility,
@@ -59,9 +59,11 @@ import {
 	applyStealthPatches,
 	applyViewport,
 	BROWSER_PROTOCOL_TIMEOUT_MS,
+	browserConnection,
 	connectPuppeteer,
 	DEFAULT_VIEWPORT,
 	isPuppeteerHandle,
+	isPuppeteerTimeout,
 	loadPuppeteerInWorker,
 	loadedKnownDevices,
 	loadedNetworkConditions,
@@ -183,8 +185,9 @@ import {
 	pressKey,
 	selectElementOptions,
 	setElementChecked,
+	type PreparedUpload,
+	prepareElementUpload,
 	type ScrollOptions,
-	uploadFilesToElement,
 	wheel,
 } from "./interactions";
 import {
@@ -204,6 +207,7 @@ import {
 	screenshotQuality,
 	screenshotScope,
 	screenshotThreshold,
+	whileDrawing,
 } from "./screenshot";
 import { RuntimeDialogController, type DialogPolicy, type DialogState } from "./dialogs";
 import {
@@ -217,17 +221,19 @@ import {
 import { navigateMainFrame, pushState, reloadPage, traverseHistory, type NavigationWaitUntil } from "./navigation";
 
 import { cloneSafe, RunOutput } from "./run-output";
-import type {
-	Observation,
-	ObservationEntry,
-	ReadyInfo,
-	RunErrorPayload,
-	ScreenshotResult,
-	SessionSnapshot,
-	ToolReply,
-	Transport,
-	WorkerInbound,
-	WorkerInitPayload,
+import { type UploadRoute, UploadStaging } from "./upload-files";
+import {
+	type Observation,
+	type ObservationEntry,
+	ownsPage,
+	type ReadyInfo,
+	type RunErrorPayload,
+	type ScreenshotResult,
+	type SessionSnapshot,
+	type ToolReply,
+	type Transport,
+	type WorkerInbound,
+	type WorkerInitPayload,
 } from "./tab-protocol";
 
 declare module "puppeteer-core" {
@@ -622,6 +628,47 @@ async function runGuardedHandleAction<T>(
 }
 
 /**
+ * How an actionable handle uploads files: the route check and `prepare` each run under their own action deadline,
+ * delivery under `deliverGuard`.
+ */
+export interface HandleUploads {
+	/** How the browser takes files; see {@link UploadStaging.route}. */
+	route(signal: AbortSignal): Promise<UploadRoute>;
+	/** Find what takes the files through the handle: its file input, the chooser its click opens, or a drop zone. */
+	prepare(filePaths: string[], label: string, route: UploadRoute, signal: AbortSignal): Promise<PreparedUpload>;
+	/** A guard with a deadline long enough to stream a large file. */
+	deliverGuard: HandleOpGuard;
+}
+
+async function uploadThroughHandle(
+	handle: ElementHandle,
+	state: RawHandleMethods,
+	filePaths: string[],
+	guard: HandleOpGuard,
+	uploads: HandleUploads,
+	invalidate?: () => Promise<void>,
+): Promise<void> {
+	const label = "handle.uploadFile()";
+	// Its own deadline, as for `tab.uploadFile`: the first upload's check must not eat into the action's.
+	const route = await guard(`${label} checking how the browser takes files`, signal => uploads.route(signal));
+	const prepared = await guard(label, signal =>
+		runGuardedHandleAction(
+			handle,
+			state,
+			label,
+			signal,
+			() => uploads.prepare(filePaths, label, route, signal),
+			invalidate,
+		),
+	);
+	try {
+		await uploads.deliverGuard(`${label} sending ${formatBytes(prepared.bytes)}`, signal => prepared.deliver(signal));
+	} finally {
+		await prepared.dispose();
+	}
+}
+
+/**
  * Re-home element handles in `args` into `realm` so they can be passed to an
  * evaluation there. The stealth patch resolves selectors (`tab.waitForSelector`,
  * `tab.$`, …) in Puppeteer's isolated world while `tab.evaluate` runs in the main
@@ -680,12 +727,14 @@ async function adoptElementArgs(
  * and disposes its handle before surfacing the named error, so catching it cannot
  * dispatch a duplicate retry through the stale handle. Puppeteer handles expose
  * `type()` but no `fill()`; the `fill()` semantics mirror the selector-based
- * `tab.fill()`: focus, clear any existing value, then type.
+ * `tab.fill()`: focus, clear any existing value, then type, or set the value of a
+ * colour, date, time or range input directly.
  */
 export function toActionableHandle(
 	handle: ElementHandle,
 	guard?: HandleOpGuard,
 	invalidate?: () => Promise<void>,
+	uploads?: HandleUploads,
 ): ActionableHandle {
 	const enriched = handle as HandleWithRawMethods;
 	const methods = enriched as unknown as Partial<Record<GuardedHandleMethod, RawHandleMethod>>;
@@ -841,6 +890,17 @@ export function toActionableHandle(
 				invalidate,
 			),
 		);
+	const clearFiles = methods.uploadFile;
+	if (uploads) {
+		enriched.uploadFile = async (...filePaths: string[]) => {
+			// With no paths Puppeteer's own method clears the input; there is nothing to route.
+			if (!filePaths.length && clearFiles) {
+				await clearFiles();
+				return;
+			}
+			await uploadThroughHandle(enriched, originals, filePaths, guard, uploads, invalidate);
+		};
+	}
 	return enrichElementQueries(enriched, guard);
 }
 
@@ -884,6 +944,19 @@ class NavigationTimeoutError extends ToolError {}
 
 /** The page's renderer crashed; every later call on the page stalls until its timeout. */
 class RendererCrashedError extends ToolError {}
+
+/** Chrome ended the debugger attachment the page is driven through (omp browser relay); the page itself lives on. */
+class DebuggerDetachedError extends ToolError {
+	constructor(
+		readonly reason: string,
+		/** `during`: the run's code had started, so its input may already have landed. */
+		readonly when: "during" | "before",
+	) {
+		super(
+			`Chrome detached omp from this tab (${reason}) ${when === "during" ? "during this call" : "before this call, so its code did not run"}`,
+		);
+	}
+}
 
 interface RunPageScope {
 	page: Page;
@@ -1092,6 +1165,8 @@ function errorPayload(error: unknown): RunErrorPayload {
 	const recoverTab = error instanceof RequestInterceptionCleanupError || undefined;
 	const navigationTimeout = error instanceof NavigationTimeoutError || undefined;
 	const rendererCrashed = error instanceof RendererCrashedError || undefined;
+	const debuggerDetached =
+		error instanceof DebuggerDetachedError ? { when: error.when, reason: error.reason } : undefined;
 	if (error instanceof ToolAbortError) {
 		return { name: error.name, message: error.message, stack: error.stack, isToolError: false, isAbort: true };
 	}
@@ -1105,6 +1180,7 @@ function errorPayload(error: unknown): RunErrorPayload {
 			recoverTab,
 			navigationTimeout,
 			rendererCrashed,
+			debuggerDetached,
 		};
 	}
 	if (error instanceof Error) {
@@ -1148,14 +1224,30 @@ async function targetIdForPage(page: Page): Promise<string> {
 	return await targetIdForTarget(page.target());
 }
 
-async function createTrackedHeadlessPage(browser: Browser, reportTarget: (targetId: string) => void): Promise<Page> {
-	const session = await browser.target().createCDPSession();
+async function createTrackedPage(
+	browser: Browser,
+	relay: { nearTargetId?: string } | undefined,
+	reportTarget: (targetId: string) => void,
+): Promise<Page> {
 	let targetId: string;
-	try {
-		({ targetId } = await session.send("Target.createTarget", { url: "about:blank" }));
+	if (relay) {
+		// The omp relay has no attachable browser target, so its tab is created over the root connection:
+		// unselected, in the browser of `nearTargetId` (the relay's own parameter) when given.
+		const params: Protocol.Target.CreateTargetRequest & { nearTargetId?: string } = {
+			url: "about:blank",
+			background: true,
+			nearTargetId: relay.nearTargetId,
+		};
+		({ targetId } = await browserConnection(browser).send("Target.createTarget", params));
 		reportTarget(targetId);
-	} finally {
-		await session.detach().catch(() => undefined);
+	} else {
+		const session = await browser.target().createCDPSession();
+		try {
+			({ targetId } = await session.send("Target.createTarget", { url: "about:blank" }));
+			reportTarget(targetId);
+		} finally {
+			await session.detach().catch(() => undefined);
+		}
 	}
 	const existing = browser.targets().find(target => privateTargetId(target) === targetId);
 	const target =
@@ -1164,7 +1256,7 @@ async function createTrackedHeadlessPage(browser: Browser, reportTarget: (target
 			timeout: BROWSER_PROTOCOL_TIMEOUT_MS,
 		}));
 	const page = await target.page();
-	if (!page) throw new ToolError(`Created headless target ${targetId} did not expose a page`);
+	if (!page) throw new ToolError(`Created target ${targetId} did not expose a page`);
 	return page;
 }
 
@@ -1385,6 +1477,8 @@ interface ActiveRun {
 	/** Helper invocations currently awaiting the page/network, keyed by op id. */
 	inflight: Map<number, InflightOp>;
 	opCounter: number;
+	/** The run's code started, so input it sent may have reached the page. */
+	codeStarted: boolean;
 }
 
 /** Human-readable label for a screenshot op, used in op tracking + timeout errors. */
@@ -1392,22 +1486,6 @@ export function describeScreenshot(opts?: ScreenshotOptions): string {
 	if (opts?.selector) return `tab.screenshot({ selector: ${JSON.stringify(opts.selector)} })`;
 	if (opts?.fullPage) return "tab.screenshot({ fullPage: true })";
 	return "tab.screenshot()";
-}
-export async function preparePageForScreenshot(
-	page: Pick<Page, "bringToFront" | "evaluate">,
-	signal: AbortSignal | undefined,
-	activate: boolean,
-): Promise<void> {
-	if (activate) {
-		await untilAborted(signal, () => page.bringToFront()).catch(() => undefined);
-		return;
-	}
-	const visible = await untilAborted(signal, () => page.evaluate(() => document.visibilityState === "visible")).catch(
-		() => false,
-	);
-	if (!visible) {
-		throw new ToolError("The attached browser tab is not visible; switch to it before taking a screenshot");
-	}
 }
 
 /** Summarize still-running helpers (oldest first) so a cell timeout names what stalled. */
@@ -1435,7 +1513,9 @@ export class WorkerCore {
 	#isolated: boolean;
 	#uninstallRejectionGuard: () => void;
 	#mode?: WorkerInitPayload["mode"];
-	#activateForScreenshot = true;
+	#ownsPage = false;
+	/** The upload route this worker's browser connection takes, and the tab's staging folder. */
+	#uploads?: UploadStaging;
 	#dialogs?: RuntimeDialogController;
 	#network?: BrowserNetworkManager;
 	#initScripts?: InitScriptManager;
@@ -1479,6 +1559,25 @@ export class WorkerCore {
 		this.#unanswered = null;
 		run.ac.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Browser tab's renderer crashed")));
 		const error = new RendererCrashedError("Browser tab's renderer crashed during this run");
+		this.#transport.send({ type: "result", id: run.id, ok: false, error: errorPayload(error) });
+	};
+
+	/**
+	 * The reason Chrome gave for ending the relay's debugger attachment on this tab (another extension's frame
+	 * loaded in it, or the user cancelled the debugging bar); `undefined` while attached. Every later page call
+	 * fails or stalls, so this worker runs nothing more and the supervisor re-adopts the tab on a new one.
+	 */
+	#debuggerDetached: string | undefined;
+	/** The omp browser relay's `OMP.debuggerDetached` event, sent to the page's sessions ahead of their detach. */
+	readonly #onDebuggerDetached = (params: unknown): void => {
+		if (this.#debuggerDetached !== undefined) return;
+		const reason = isRecord(params) && typeof params.reason === "string" ? params.reason : "no reason given";
+		this.#debuggerDetached = reason;
+		const run = this.#started ? this.#unanswered : null;
+		if (!run) return;
+		this.#unanswered = null;
+		run.ac.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Chrome detached omp from this tab")));
+		const error = new DebuggerDetachedError(reason, run.codeStarted ? "during" : "before");
 		this.#transport.send({ type: "result", id: run.id, ok: false, error: errorPayload(error) });
 	};
 
@@ -1581,7 +1680,8 @@ export class WorkerCore {
 	async #init(payload: WorkerInitPayload): Promise<void> {
 		try {
 			this.#mode = payload.mode;
-			this.#activateForScreenshot = payload.mode === "headless" || payload.activateForScreenshot !== false;
+			this.#ownsPage = ownsPage(payload);
+			this.#uploads = new UploadStaging(payload.uploadDir);
 			const puppeteer = await loadPuppeteerInWorker(payload.safeDir);
 			registerSemanticQueryHandlers(puppeteer);
 			this.#browser = await connectPuppeteer(puppeteer, {
@@ -1594,33 +1694,41 @@ export class WorkerCore {
 			// page acquisition so the supervisor's cold-start budget bounds only the
 			// realm setup; page creation runs under the ready wait.
 			this.#transport.send({ type: "setup" });
-			if (payload.mode === "headless") {
+			if (payload.mode === "headless" || payload.page.kind === "create") {
 				// Create the target directly so its id is reportable before
 				// Puppeteer waits for target/page initialization. If that wait
 				// wedges, the supervisor can still close the created target.
-				this.#page = await createTrackedHeadlessPage(this.#browser, targetId => {
+				const relay =
+					payload.mode === "attach" && payload.page.kind === "create"
+						? { nearTargetId: payload.page.nearTargetId }
+						: undefined;
+				this.#page = await createTrackedPage(this.#browser, relay, targetId => {
 					this.#transport.send({ type: "page-created", targetId });
 				});
 				this.#observeDialogs();
-				await applyStealthPatches(this.#browser, this.#page, { browserSession: null, override: null });
-				if (payload.emulateViewport !== false) await applyViewport(this.#page, payload.viewport);
+				if (payload.mode === "headless") {
+					await applyStealthPatches(this.#browser, this.#page, { browserSession: null, override: null });
+					if (payload.emulateViewport !== false) await applyViewport(this.#page, payload.viewport);
+				}
 				if (payload.dialogs) this.#applyDialogPolicy(payload.dialogs);
 			} else {
-				const target = await this.#findAttachedTarget(payload.targetId);
+				const target = await this.#findAttachedTarget(payload.page.targetId);
 				// Post-timeout recycle: unblock the target BEFORE adopting the page — an open
 				// modal dialog or hung navigation can stall `target.page()` / ready info, and a
 				// stalled init used to time out and force-kill the tab.
 				if (payload.recover) await this.#recoverAttachedTarget(target);
 				const page = await target.page();
-				if (!page) throw new ToolError(`Target ${payload.targetId} is no longer available on the attached browser`);
+				if (!page)
+					throw new ToolError(`Target ${payload.page.targetId} is no longer available on the attached browser`);
 				this.#page = page;
 				await this.#claimRelayTarget(page);
 				this.#observeDialogs();
 				if (payload.dialogs) this.#applyDialogPolicy(payload.dialogs);
 			}
 			this.#page.mainFrame().client.on("Page.frameNavigated", this.#onFrameNavigated);
+			this.#page.mainFrame().client.on("OMP.debuggerDetached", this.#onDebuggerDetached);
 			this.#page.on("error", this.#onPageCrashed);
-			if (payload.mode === "headless" || payload.emulateFocus) {
+			if (this.#ownsPage) {
 				// Background Chromium tabs stop producing frames, stalling rAF,
 				// IntersectionObserver, and input acknowledgements. Keep owned tabs
 				// interactive without raising a window; explicit settle-freeze still applies.
@@ -1652,13 +1760,17 @@ export class WorkerCore {
 			this.#started = true;
 			this.#transport.send({ type: "ready", info });
 		} catch (error) {
-			// A failed headless init leaves the worker's page orphaned in the shared
-			// browser (the supervisor retries with a fresh worker), so close it before
-			// reporting. Attach mode adopts an existing target — never close it.
+			// A page this attempt created would be orphaned (the supervisor retries
+			// with a fresh worker), so close it before reporting. An adopted target —
+			// a borrowed page, or an owned one a recycle retries — is never closed here.
 			const page = this.#page;
 			await this.#webmcp?.dispose().catch(() => undefined);
 			this.#webmcp = undefined;
 			if (payload.mode === "headless" && page && !page.isClosed()) {
+				await page.close().catch(() => undefined);
+			}
+			// So would a relay tab it opened in the background.
+			if (payload.mode === "attach" && payload.page.kind === "create" && page && !page.isClosed()) {
 				await page.close().catch(() => undefined);
 			}
 			this.#transport.send({ type: "init-failed", error: errorPayload(error) });
@@ -1802,6 +1914,11 @@ export class WorkerCore {
 			this.#transport.send({ type: "result", id: msg.id, ok: false, error: errorPayload(error) });
 			return;
 		}
+		if (this.#debuggerDetached !== undefined) {
+			const error = new DebuggerDetachedError(this.#debuggerDetached, "before");
+			this.#transport.send({ type: "result", id: msg.id, ok: false, error: errorPayload(error) });
+			return;
+		}
 		if (this.#active) {
 			this.#transport.send({
 				type: "result",
@@ -1831,6 +1948,7 @@ export class WorkerCore {
 			floatingFailure,
 			inflight: new Map(),
 			opCounter: 0,
+			codeStarted: false,
 		};
 		this.#active = active;
 		this.#unanswered = active;
@@ -1955,7 +2073,7 @@ export class WorkerCore {
 			failure = this.#foldFloatingRejections(active, failure);
 			if (this.#active?.id === msg.id) this.#active = null;
 		}
-		// A renderer crash answers the run itself.
+		// A renderer crash or a debugger detach answers the run itself.
 		if (this.#unanswered !== active) return;
 		if (failure) {
 			this.#unanswered = null;
@@ -2005,6 +2123,12 @@ export class WorkerCore {
 			callTool: (name, args) => {
 				throwIfAborted(active.signal);
 				return this.#callTool(active, name, args);
+			},
+			// Compiling the cell can wait (the first run loads Babel); a detach (or any abort) then still ran nothing,
+			// and the cell must not run late either.
+			onEvaluate: () => {
+				throwIfAborted(active.signal);
+				active.codeStarted = true;
 			},
 		};
 	}
@@ -2080,11 +2204,7 @@ export class WorkerCore {
 			// our per-op deadline fired, or puppeteer's own (equal) timeout fired first — having
 			// already torn down the CDP action via the op signal, so no work is left dangling.
 			// Cell-budget aborts and uncapped helpers (goto/evaluate) keep their native errors.
-			if (
-				capped &&
-				!cellSignal.aborted &&
-				(opTimeout?.aborted || (err instanceof Error && err.name === "TimeoutError"))
-			) {
+			if (capped && !cellSignal.aborted && (opTimeout?.aborted || isPuppeteerTimeout(err))) {
 				const refusal = err instanceof ClickRefusedError ? err.refusal : undefined;
 				const count = selector ? await this.#selectorMatchCount(selector) : undefined;
 				const hint = refusal
@@ -2190,6 +2310,20 @@ export class WorkerCore {
 					this.#clearElementCache();
 					await this.#stopLoading();
 				},
+				{
+					route: sig => this.#requireUploads().route(page, sig),
+					prepare: (filePaths, label, route, sig) =>
+						prepareElementUpload(
+							page,
+							handle,
+							filePaths.map(filePath => resolveToCwd(filePath, session.cwd)),
+							label,
+							route,
+							this.#requireUploads(),
+							sig,
+						),
+					deliverGuard: (label, fn) => op(label, budgetBound, fn),
+				},
 			);
 		return {
 			name,
@@ -2208,7 +2342,7 @@ export class WorkerCore {
 							page.goto(url, options),
 						);
 					} catch (err) {
-						if (err instanceof Error && err.name === "TimeoutError") {
+						if (isPuppeteerTimeout(err)) {
 							// Abandon the hung navigation NOW — a still-pending load stalls every
 							// later op on this page and cascades into more opaque timeouts.
 							await this.#stopLoading();
@@ -2441,13 +2575,31 @@ export class WorkerCore {
 					sig => this.#select(selector, values, actionOpMs, sig),
 					{ selector, zeroMatchAfterMs: ZERO_MATCH_FAIL_FAST_MS },
 				),
-			uploadFile: (selector, ...filePaths) =>
-				op(
-					`tab.uploadFile(${JSON.stringify(selector)})`,
-					actionOpMs,
-					sig => this.#uploadFile(selector, filePaths, actionOpMs, sig, session),
-					{ selector, zeroMatchAfterMs: ZERO_MATCH_FAIL_FAST_MS },
-				),
+			uploadFile: (selector, ...filePaths) => {
+				const label = `tab.uploadFile(${JSON.stringify(selector)})`;
+				return markHandled(
+					(async () => {
+						if (!filePaths.length) throw new ToolError("tab.uploadFile() requires at least one file path");
+						// Its own deadline: the first upload's check must not eat into the wait for the selector.
+						const route = await op(`${label} checking how the browser takes files`, actionOpMs, sig =>
+							this.#requireUploads().route(page, sig),
+						);
+						const prepared = await op(
+							label,
+							actionOpMs,
+							sig => this.#prepareTabUpload(selector, filePaths, label, route, actionOpMs, sig, session),
+							{ selector, zeroMatchAfterMs: ZERO_MATCH_FAIL_FAST_MS },
+						);
+						try {
+							await op(`${label} sending ${formatBytes(prepared.bytes)}`, budgetBound, sig =>
+								prepared.deliver(sig),
+							);
+						} finally {
+							await prepared.dispose();
+						}
+					})(),
+				);
+			},
 			waitForUrl: (pattern, opts) => {
 				const w = waitMs(opts?.timeout);
 				return op("tab.waitForUrl()", w, sig => this.#waitForUrl(pattern, w, sig));
@@ -2914,7 +3066,6 @@ export class WorkerCore {
 		opts: ScreenshotOptions = {},
 	): Promise<string | ScreenshotChangeResult> {
 		const page = this.#requirePage();
-		await preparePageForScreenshot(page, signal, this.#activateForScreenshot);
 		screenshotQuality(opts);
 		const threshold = screenshotThreshold(opts.threshold);
 		const changeDetection = opts.ifChanged === true || opts.threshold !== undefined;
@@ -2946,17 +3097,20 @@ export class WorkerCore {
 			parseAriaRefSelector(selector) !== null
 				? await this.#resolveAriaRef(selector)
 				: asElementHandle(await untilAborted(signal, () => page.$(normalizeSelector(selector))));
-		let comparisonBuffer: Uint8Array;
-		let buffer: Uint8Array;
+		let captured: { comparison: Uint8Array; image: Uint8Array };
 		try {
-			comparisonBuffer = await captureScreenshotBuffer(page, opts, signal, resolveSelector, "png");
-			buffer =
-				captureFormat === "png"
-					? comparisonBuffer
-					: await captureScreenshotBuffer(page, opts, signal, resolveSelector, captureFormat);
+			captured = await whileDrawing(page, signal, async () => {
+				const comparison = await captureScreenshotBuffer(page, opts, signal, resolveSelector, "png");
+				const image =
+					captureFormat === "png"
+						? comparison
+						: await captureScreenshotBuffer(page, opts, signal, resolveSelector, captureFormat);
+				return { comparison, image };
+			});
 		} finally {
 			await cleanupAnnotations();
 		}
+		const { comparison: comparisonBuffer, image: buffer } = captured;
 		let changeResult: ScreenshotChangeResult | undefined;
 		if (changeDetection) {
 			const scope = screenshotScope(opts);
@@ -3018,10 +3172,11 @@ export class WorkerCore {
 		opts: DiffScreenshotOptions = {},
 	): Promise<DiffScreenshotResult> {
 		const page = this.#requirePage();
-		await preparePageForScreenshot(page, signal, this.#activateForScreenshot);
 		const absoluteBaseline = resolveToCwd(baselinePath, session.cwd);
 		const baseline = await untilAborted(signal, () => fs.promises.readFile(absoluteBaseline));
-		const current = await captureScreenshotBuffer(page, {}, signal, async () => null, "png");
+		const current = await whileDrawing(page, signal, () =>
+			captureScreenshotBuffer(page, {}, signal, async () => null, "png"),
+		);
 		const diff = createPngDiff(baseline, current);
 		const threshold = screenshotThreshold(opts.threshold);
 		const changed = diff.pixelChangeRatio > threshold;
@@ -3127,26 +3282,39 @@ export class WorkerCore {
 		}
 	}
 
-	async #uploadFile(
+	/** Find what takes a `tab.uploadFile` under the action deadline; the result owns the resolved handle. */
+	async #prepareTabUpload(
 		selector: string,
 		filePaths: string[],
+		label: string,
+		route: UploadRoute,
 		timeoutMs: number,
 		signal: AbortSignal,
 		session: SessionSnapshot,
-	): Promise<void> {
-		if (!filePaths.length) throw new ToolError("tab.uploadFile() requires at least one file path");
+	): Promise<PreparedUpload> {
+		const page = this.#requirePage();
 		const handle = await this.#resolveActionHandle(selector, timeoutMs, signal);
 		try {
 			const absolute = filePaths.map(filePath => resolveToCwd(filePath, session.cwd));
-			await uploadFilesToElement(
-				this.#requirePage(),
+			const prepared = await prepareElementUpload(
+				page,
 				handle,
 				absolute,
-				`tab.uploadFile(${JSON.stringify(selector)})`,
+				label,
+				route,
+				this.#requireUploads(),
 				signal,
 			);
-		} finally {
+			return {
+				...prepared,
+				dispose: async () => {
+					await prepared.dispose();
+					await handle.dispose().catch(() => undefined);
+				},
+			};
+		} catch (error) {
 			await handle.dispose().catch(() => undefined);
+			throw error;
 		}
 	}
 
@@ -3291,7 +3459,7 @@ export class WorkerCore {
 		await this.#tracing?.dispose();
 		await this.#consoleCapture.detach();
 		this.#emulation?.dispose();
-		if (this.#mode === "headless" && page && !page.isClosed()) await page.close().catch(() => undefined);
+		if (this.#ownsPage && page && !page.isClosed()) await page.close().catch(() => undefined);
 		if (this.#browser?.connected) this.#browser.disconnect();
 		this.#transport.send({ type: "closed" });
 		this.#transport.close();
@@ -3300,6 +3468,11 @@ export class WorkerCore {
 	#requirePage(): Page {
 		if (!this.#page) throw new ToolError("Tab worker is not initialized");
 		return this.#page;
+	}
+
+	#requireUploads(): UploadStaging {
+		if (!this.#uploads) throw new ToolError("Tab worker is not initialized");
+		return this.#uploads;
 	}
 
 	#requireDialogs(): RuntimeDialogController {

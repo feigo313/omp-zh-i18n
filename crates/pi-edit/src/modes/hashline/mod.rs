@@ -36,6 +36,8 @@ use crate::{
 
 pub struct HashlineEngine {
 	pub enforce_seen_lines: bool,
+	/// See [`crate::session::SessionConfig::max_columns`].
+	pub max_columns:        usize,
 }
 
 impl ModeEngine for HashlineEngine {
@@ -77,7 +79,7 @@ impl ModeEngine for HashlineEngine {
 		if patch.sections.is_empty() {
 			return Err(EditError::apply("No hashline sections found in input."));
 		}
-		patcher::stage_patch(&patch, input, self.enforce_seen_lines, files, store)
+		patcher::stage_patch(&patch, input, self.enforce_seen_lines, self.max_columns, files, store)
 	}
 
 	fn inspect(&self, args: &ArgSnapshot) -> Inspection {
