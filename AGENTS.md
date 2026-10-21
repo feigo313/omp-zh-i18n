@@ -18,6 +18,19 @@
 - Source strings stay English; translate at the UI boundary (`interceptUIString` / `i18n.t` / tui seam `tuiT`).
 - Brand names, model ids, `true`/`false` may remain English.
 
+**Release / localization tasks — read these first**
+
+| File | What it is |
+|---|---|
+| `docs/local/knowledge/PLAYBOOK.md` | **Start here.** The runbook: the standard command chain, the hard rules, the local-environment traps. Local-only, never tracked. |
+| `docs/local/knowledge/LESSONS.md` | Every trap this repo has hit, with the place that now enforces it. `bun scripts/i18n/lessons.ts --grep <keyword>` to search; `--append` to add one. Local-only, never tracked. |
+| `docs/local/I18N-RELEASE-WORKFLOW.md` | The canonical release workflow (local, not tracked). |
+
+Before touching an upstream sync or a release, read the playbook and grep the lessons for
+the area you are about to work in — the traps below are ones that cost hours to rediscover.
+The gate (`bun run i18n:gate`) enforces the lessons' "落点" still exist, so the knowledge
+base cannot rot silently.
+
 **Local-only files (`.git/info/exclude`, not `.gitignore`)**
 
 These exist on this machine, are **not tracked**, and must not be force-added for release:
