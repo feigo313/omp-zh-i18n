@@ -31,6 +31,7 @@ import { prewarmOpenAICodexResponses } from "@oh-my-pi/pi-ai/providers/openai-co
 import { prewarmModelConnection } from "@oh-my-pi/pi-ai/providers/connection-prewarm";
 import { isOpenAICodexWebSocketPreferred } from "@oh-my-pi/pi-ai/providers/openai-codex-transport";
 import { withCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
+import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
 import { resolveCatalogPolicy } from "@oh-my-pi/pi-catalog/compat/catalog-policy";
 import { FALLBACK_DIALECT, preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import type { Component } from "@oh-my-pi/pi-tui";
@@ -2091,9 +2092,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	// Resolves the session/agent thinking level using the same precedence we
 	// apply at startup: explicit option → persisted session entry → restored
 	// model selector suffix → default role's explicit selector → selected
-	// model's defaultLevel → global settings default. Run again after extension
-	// role reclaim so the final model's own defaults aren't masked by an earlier
-	// fallback model's.
+	// model's defaultLevel → global settings default. A global `auto` is always
+	// an explicit user choice (the setting defaults to a concrete level), so it
+	// outranks the model's defaultLevel. Run again after extension role reclaim
+	// so the final model's own defaults aren't masked by an earlier fallback
+	// model's.
 	const pickInitialThinkingLevel = (selectedModel: Model | undefined): ConfiguredThinkingLevel | undefined => {
 		let level = options.thinkingLevel;
 		if (level === undefined && hasExistingSession && hasThinkingEntry) {
@@ -2107,14 +2110,16 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		if (level === undefined && !hasExplicitModel && !hasThinkingEntry && defaultRoleSpec.explicitThinkingLevel) {
 			level = defaultRoleSpec.thinkingLevel;
 		}
-		if (level === undefined && selectedModel?.thinking?.defaultLevel !== undefined) {
+		const configuredDefaultLevel = parseConfiguredThinkingLevel(cfgDefaultThinkingLevel.get(settings));
+		if (
+			level === undefined &&
+			configuredDefaultLevel !== AUTO_THINKING &&
+			selectedModel?.thinking?.defaultLevel !== undefined
+		) {
 			level = selectedModel.thinking.defaultLevel;
 		}
 		if (level === undefined) {
-			level = automaticThinkingLevel(
-				selectedModel,
-				parseConfiguredThinkingLevel(cfgDefaultThinkingLevel.get(settings)),
-			);
+			level = automaticThinkingLevel(selectedModel, configuredDefaultLevel);
 		}
 		return level;
 	};
@@ -4293,18 +4298,20 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const slashCommands = await slashCommandsPromise;
 
 		// Keep image blocks off the wire when they'd be rejected: either the user
-		// disabled images (`images.blockImages`) or the active model has no vision
-		// support. The latter covers switching from a vision model to a text-only
+		// disabled images (`images.blockImages`) or the active model's wire sends
+		// none. The latter covers switching from a vision model to a text-only
 		// one mid-session — historical image blocks would otherwise be replayed to
-		// a provider that 400s on them (#5400). Read both dynamically so a `/model`
-		// switch or setting change takes effect on the next turn.
+		// a provider that 400s on them (#5400) — and routes that strip images,
+		// whose blocks would otherwise be normalized and published for nothing.
+		// Read both dynamically so a `/model` switch or setting change takes
+		// effect on the next turn.
 		const convertToLlmWithBlockImages = (messages: AgentMessage[]): Message[] => {
 			const converted = convertToLlm(messages);
 			if (cfgImagesBlockImages.get(settings)) {
 				return replaceLlmImagesWithText(converted, "Image reading is disabled.");
 			}
 			const activeModel = agent?.state.model ?? model;
-			if (activeModel && !activeModel.input.includes("image")) {
+			if (activeModel && !sendsImageInputOnWire(activeModel)) {
 				return replaceLlmImagesWithText(
 					converted,
 					"[image omitted: the active model does not support image input]",

@@ -7,7 +7,7 @@
 | What | Chinese localization fork of Oh My Pi — not upstream `can1357/oh-my-pi` |
 | Public | https://github.com/feigo313/omp-zh-i18n · branch `master` · also `gitee.com/atrix313/omp-zh-i18n` |
 | Upstream remote | `upstream` → `https://github.com/can1357/oh-my-pi.git` |
-| Current baseline | coding-agent **18.12.3-zh** (official tag `v18.12.3` = `53a0377db`; X/Y upstream change triggers a new zh release) |
+| Current baseline | coding-agent **18.12.5-zh** (official tag `v18.12.5` = `d5cd750e`; X/Y upstream change triggers a new zh release) |
 | Primary work | `packages/coding-agent/src/i18n/lang/zh-*.json` + required en SoT / wiring (`interceptor.ts`, settings UI) and the tui translation seam (`packages/tui/src/i18n-host.ts`) |
 
 **Defaults for agents**
@@ -280,7 +280,7 @@ logger.warn("Theme file invalid, using fallback", { path });
 logger.debug("LSP fallback triggered", { reason });
 ```
 
-Logs go to `~/.omp/logs/omp.YYYY-MM-DD.log` with automatic rotation. Standalone CLI commands that exit without entering the TUI MAY use `console.*` or process streams for intentional user-facing output. Keep structured stdout clean. This exception is semantic, not filename-based; shared code must use `logger` or an explicit output sink.
+Logs go to `~/.omp/logs/omp.YYYY-MM-DD.log` with automatic rotation; `bun test` processes write theirs to a per-user `omp-test-logs-<uid>/` under the OS temp dir instead. Standalone CLI commands that exit without entering the TUI MAY use `console.*` or process streams for intentional user-facing output. Keep structured stdout clean. This exception is semantic, not filename-based; shared code must use `logger` or an explicit output sink.
 
 ## TUI Sanitization
 

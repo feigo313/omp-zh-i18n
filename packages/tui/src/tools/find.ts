@@ -316,7 +316,7 @@ export const findToolRenderer = {
 			},
 			uiTheme,
 		);
-		return new Text(text, 1, 0);
+		return new Text(text, 0, 0);
 	},
 
 	renderResult(
@@ -345,7 +345,7 @@ export const findToolRenderer = {
 				},
 				uiTheme,
 			);
-			return new Text(header, 1, 0);
+			return new Text(header, 0, 0);
 		}
 
 		const { hits, stats, threshold } = details;
@@ -388,7 +388,7 @@ export const findToolRenderer = {
 					: tuiT("ui.find.noPassages", "No relevant passages found");
 			const lines = [header, formatEmptyMessage(empty, uiTheme)];
 			for (const failure of stats.failures) lines.push(uiTheme.fg("warning", failure));
-			return new Text(lines.join("\n"), 1, 0);
+			return new Text(lines.join("\n"), 0, 0);
 		}
 
 		const header = renderStatusLine(
@@ -430,7 +430,6 @@ export const findToolRenderer = {
 				}
 				return [header, ...hitLines, ...extra].map(line => truncateToWidth(line, width, Ellipsis.Omit));
 			},
-			{ paddingX: 1 },
 		);
 	},
 	describeCall(args: FindRenderArgs): NativeToolView {

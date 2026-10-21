@@ -1281,6 +1281,7 @@
   "ui.wait.reply": "回复",
   "ui.wait.runningAgentNoJobs": "{count} 个 agent 运行中 — 无任务",
   "ui.wait.runningAgentsNoJobs": "{count} 个 agent 运行中 — 无任务",
+  "ui.wait.summaryDetail": "后台任务或对等消息",
   "ui.wait.title": "等待",
   "ui.wait.waitingOnJob": "等待 {count} 个任务",
   "ui.wait.waitingOnJobs": "等待 {count} 个任务",

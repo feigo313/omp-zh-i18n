@@ -1,6 +1,8 @@
 {
 	"name": "@oh-my-pi/pi-coding-agent",
-	"version": "18.12.3-zh",
+	"version": "18.12.5-zh",
+
+
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"keywords": [
 		"agent",

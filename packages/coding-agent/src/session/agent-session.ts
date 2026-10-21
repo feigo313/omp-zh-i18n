@@ -2100,6 +2100,14 @@ export class AgentSession implements SettingsScope {
 			injectIdle: async messages => {
 				const first = messages[0];
 				if (!first) return;
+				// A user interrupt is still in effect: background completions (async job
+				// results, launch completions, MCP/LSP/advisor asides) must not restart
+				// the run the user stopped. Fold them into context so the next deliberate
+				// prompt sees them — same policy as #resumeStrandedIrcAsides.
+				if (this.#advisors.autoResumeSuppressed) {
+					this.#foldStrandedIrcAsidesIntoContext(messages);
+					return;
+				}
 				const inFlightEpoch = this.#beginInFlight();
 				try {
 					await this.agent.prompt(messages.length === 1 ? first : messages);
@@ -6569,6 +6577,11 @@ export class AgentSession implements SettingsScope {
 	/** Current effective system prompt blocks (includes any per-turn extension modifications) */
 	get systemPrompt(): string[] {
 		return this.agent.state.systemPrompt;
+	}
+
+	/** Base system prompt blocks the next turn builds on, before any `before_agent_start` override. */
+	get baseSystemPrompt(): string[] {
+		return this.#tools.baseSystemPrompt;
 	}
 
 	/**
@@ -12838,7 +12851,11 @@ export class AgentSession implements SettingsScope {
 				isError: reanswer.isError === true,
 				timestamp: Date.now(),
 			};
-			newLeafId = this.sessionManager.appendMessageToBranch(toolResultMessage, targetEntry.parentId);
+			// The new sibling answer itself becomes the leaf below (`branch(newLeafId)`),
+			// so it must not record the pre-navigation leaf as its own.
+			newLeafId = this.sessionManager.appendMessageToBranch(toolResultMessage, targetEntry.parentId, {
+				preserveActiveLeaf: false,
+			});
 			isAskReanswerCompletion = true;
 		} else {
 			// Non-user message (or an agent/autoload skill-prompt injection): land the
