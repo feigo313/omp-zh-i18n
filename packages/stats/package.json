@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "@oh-my-pi/omp-stats",
-  "version": "18.12.5-zh",
+  "version": "18.12.6-zh",
 
 
   "description": "Local observability dashboard for omp AI usage statistics",

@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "@oh-my-pi/pi-wire",
-  "version": "18.12.5-zh",
+  "version": "18.12.6-zh",
 
 
   "description": "Shared wire protocol types for omp packages",

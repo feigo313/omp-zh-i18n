@@ -3047,16 +3047,16 @@ export class ModelHubComponent implements Component {
 						upDown,
 						cancel,
 					})
-				: tuiT("ui.modelHub.footerClose", "{upDown} providers · {cancel} close", { upDown, cancel });
+				: tuiT("ui.modelHub.footerCloseFull", "{upDown} providers · {cancel} close", { upDown, cancel });
 		}
 		const refresh =
 			entry.kind === "provider"
 				? ` · ${tuiT("ui.modelHub.footerRefresh", "{f5} refresh", { f5: formatKeyHint("f5") })}`
 				: "";
 		if (this.#focus === "scope") {
-			return `${enterRight} models · ${upDown} providers · ${tuiT("ui.modelHub.footerSearch", "type to search")} · ${tuiT("ui.modelHub.footerKind", "{altLeftRight} kind", { altLeftRight })}${refresh} · ${tuiT("ui.modelHub.footerClose", "{cancel} close", { cancel })}`;
+			return `${enterRight} models · ${upDown} providers · ${tuiT("ui.modelHub.footerSearch", "type to search")} · ${tuiT("ui.modelHub.footerKind", "{altLeftRight} kind", { altLeftRight })}${refresh} · ${tuiT("ui.modelHub.footerClosePlain", "{cancel} close", { cancel })}`;
 		}
-		return `${tuiT("ui.modelHub.footerAssignRoles", "{enter} assign roles", { enter })} · ${upDown} models · ${left} providers · ${tuiT("ui.modelHub.footerSearch", "type to search")} · ${tuiT("ui.modelHub.footerKind", "{altLeftRight} kind", { altLeftRight })}${refresh} · ${tuiT("ui.modelHub.footerClose", "{cancel} close", { cancel })}`;
+		return `${tuiT("ui.modelHub.footerAssignRoles", "{enter} assign roles", { enter })} · ${upDown} models · ${left} providers · ${tuiT("ui.modelHub.footerSearch", "type to search")} · ${tuiT("ui.modelHub.footerKind", "{altLeftRight} kind", { altLeftRight })}${refresh} · ${tuiT("ui.modelHub.footerClosePlain", "{cancel} close", { cancel })}`;
 	}
 
 	#renderFooter(width: number): string {
@@ -3259,7 +3259,8 @@ export class ModelHubComponent implements Component {
 				this.#browser,
 			);
 		}
-		return node("col", { gap: "sm", grow: 1 }, children, "body");
+		// Zero basis: the body takes the space left of the sidebar instead of sizing to its widest line.
+		return node("col", { gap: "sm", grow: 1, basis: 0, min: { w: 0 } }, children, "body");
 	}
 
 	#describeStatus(): NativeNode {
@@ -4500,7 +4501,7 @@ export class ModelHubComponent implements Component {
 		const cancel = (label: string) => actionHint("tui.select.cancel", label);
 		const upDown = (label: string) => actionHint(["tui.select.up", "tui.select.down"], label);
 		const search = keys(tuiT("ui.modelHub.footerSearch", "type to search"));
-		const kind = keys(tuiT("ui.modelHub.footerKind", "kind"), "alt+left", "alt+right");
+		const kind = keys(tuiT("ui.modelHub.footerKindPlain", "kind"), "alt+left", "alt+right");
 		const reorder = keys(tuiT("ui.modelHub.footerReorder", "reorder"), "[", "]");
 		const strip = this.#strip;
 		if (strip) {
@@ -4539,7 +4540,7 @@ export class ModelHubComponent implements Component {
 					];
 				case "thinking":
 					return [
-						keys(tuiT("ui.modelHub.footerThinkingLevel", "thinking level"), "left", "right"),
+						keys(tuiT("ui.modelHub.footerThinkingLevelPlain", "thinking level"), "left", "right"),
 						keys(tuiT("ui.modelHub.footerApply", "apply"), "enter"),
 						cancel(tuiT("ui.modelHub.footerKeep", "keep")),
 					];
@@ -4626,7 +4627,7 @@ export class ModelHubComponent implements Component {
 			if (row?.kind === "newFallback") {
 				return [
 					upDown(tuiT("ui.modelHub.footerRowsPlain", "rows")),
-					keys(tuiT("ui.modelHub.footerNewChain", "new model/provider fallback chain"), "enter"),
+					keys(tuiT("ui.modelHub.footerNewChainPlain", "new model/provider fallback chain"), "enter"),
 					keys(tuiT("ui.modelHub.footerProviders", "providers"), "left"),
 				];
 			}
@@ -4674,7 +4675,7 @@ export class ModelHubComponent implements Component {
 			];
 		}
 		return [
-			keys(tuiT("ui.modelHub.footerAssignRoles", "assign roles"), "enter"),
+			keys(tuiT("ui.modelHub.footerAssignRolesPlain", "assign roles"), "enter"),
 			upDown(tuiT("ui.modelHub.footerModels", "models")),
 			keys(tuiT("ui.modelHub.footerProviders", "providers"), "left"),
 			search,
