@@ -10,6 +10,40 @@
 
 **omp 自身的 `--help`、参数说明等命令行帮助输出保持英文**,这是本项目的既定设计。
 
+## [v18.12.6-zh] — 2026-10-24
+
+对齐官方 **v18.12.6**(commit `45c35e40`)。
+上一中文版为 [v18.12.5-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.12.5-zh)。
+
+官方 v18.12.6 的主线是 **MCP OAuth 重授权重构**(`/mcp reauth` 支持 ACP/RPC/print 模式,
+流程抽成共享引擎,并修复第二次 OAuth 登录后 Esc 失效)、**扩展延迟加载**(只注册工具/命令的
+扩展不再阻塞启动)、ACP steering 扩展、Codex 持久提示缓存轴与若干修复。
+界面侧的变化是 **MCP OAuth 向导整文件重写**与**模型中心 footer 重构**(拆成原生提示条的
+"碎片 + 整行"两种形状)。
+
+### 汉化
+
+- **MCP OAuth** 按上游新结构重新接线:8 条既有文案复用原键;5 分钟超时提示随流程迁入
+  `mcp/oauth-reauth.ts`
+- **模型中心 footer** 适配"碎片 + 整行"双形状,按既有 `*Plain` 约定拆分
+  `footerCloseFull` / `footerClosePlain` / `footerKindPlain` / `footerThinkingLevelPlain` /
+  `footerNewChainPlain` / `footerAssignRolesPlain`;回退/分配/受保护三行按新的
+  models-then-providers 浏览顺序更正
+- 其余重译清单条目为上游大小写归一(Back/back、Apply/apply 等),中文不受影响
+
+### 质量校验
+
+| 项目 | 结果 |
+|---|---|
+| 本地化门禁 | 13 项全部 PASS(资源契约 / 运行时键 / scoped 覆盖 / 占位符 / 设置面板渲染 / 知识库 / oxlint+oxfmt / 类型 / frozen lockfile / 版本矩阵 / 密钥 / 内容范围) |
+| 类型检查 | 全部包通过 |
+| 翻译资源契约测试 | 10 通过 / 0 失败 |
+| 占位符泄漏 | 0 |
+| 需要重译的条目 | 0(清单已刷新为 v18.12.6 基线) |
+
+本轮整条对齐流程由 `bun run i18n:align` 一次完成,人工只处理了 1 个上游整文件重写的文件
+(MCP OAuth 向导)与 footer 双形状的键拆分。
+
 ## [v18.12.5-zh] — 2026-10-21
 
 对齐官方 **v18.12.5**(commit `d5cd750e`)。
