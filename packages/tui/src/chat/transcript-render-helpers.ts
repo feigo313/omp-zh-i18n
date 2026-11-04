@@ -5,17 +5,27 @@
  * here keeps the two byte-for-byte identical.
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { TspSpan } from "@oh-my-pi/pi-wire";
 import { type Component } from "../tui";
 import { tuiT } from "../i18n-host";
-import { formatBytes, formatDuration } from "@oh-my-pi/pi-utils";
+import { formatBytes, formatCount, formatDuration } from "@oh-my-pi/pi-utils";
+import { span } from "../native/describe";
 import type { JobSnapshot } from "../tools/wait";
 import type { DaemonSnapshot } from "../tools/daemon";
 import { type CustomMessage, type FileMentionMessage, resolveAbortLabel, shouldRenderAbortReason } from "./messages";
 import { createIrcMessageCard } from "../tools/wait";
-import { formatArtifactErrorNotice, type OutputMeta } from "../tools/output-meta";
-import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../render/render-utils";
+import {
+	formatArtifactErrorNotice,
+	formatMinimizedMeta,
+	type MinimizedMeta,
+	type OutputMeta,
+} from "../tools/output-meta";
+import type { OutputArtifactError } from "../tools/streaming-output";
+import { formatStyledPath, replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../render/render-utils";
 import { canonicalizeMessage } from "./thinking-display";
 import { ToolActivityContainer } from "../chrome/tool-activity";
+import { CustomMessageComponent } from "./custom-message";
+import type { MessageRenderer } from "./extension-types";
 import { type TranscriptBlock } from "../chrome/transcript-container";
 import { TranscriptStatusBlock, type TranscriptStatusRow } from "../chrome/transcript-status";
 import { theme } from "../theme";
@@ -59,27 +69,80 @@ export function buildAsyncResultBlock(message: CustomOrHookMessage): ToolActivit
 	const rows: TranscriptStatusRow[] = [];
 	for (const job of jobs) {
 		const jobId = job.jobId ?? tuiT("ui.unknown", "unknown");
-		const typeLabel = job.type ? `[${job.type}]` : `[${tuiT("ui.job", "job")}]`;
+		const type = job.type ?? tuiT("ui.job", "job");
 		const duration = typeof job.durationMs === "number" ? formatDuration(job.durationMs) : undefined;
 		rows.push({
 			parts: [
 				{
-					text: `${theme.status.done} ${tuiT("ui.backgroundJobCompleted", "Background job completed")}`,
+					text: `${theme.status.success} ${tuiT("ui.backgroundJobCompleted", "Background job completed")}`,
 					color: "success",
 				},
-				{ text: typeLabel, color: "dim" },
+				{ text: `[${type}]`, color: "dim" },
 				{ text: jobId, color: "accent" },
 				duration ? { text: `(${duration})`, color: "dim" } : undefined,
 			],
+			native: {
+				tone: "success",
+				message: [span("Background job completed"), ...facts([type, jobId, duration])],
+			},
 		});
-		if (job.meta?.artifactError) {
-			rows.push({ parts: [{ text: formatArtifactErrorNotice(job.meta.artifactError), color: "warning" }] });
-		}
+		if (job.meta?.artifactError) rows.push(artifactErrorRow(job.meta.artifactError));
+		if (job.meta?.minimized) rows.push(minimizedRow(job.meta.minimized));
 	}
-	if (details?.meta?.artifactError) {
-		rows.push({ parts: [{ text: formatArtifactErrorNotice(details.meta.artifactError), color: "warning" }] });
-	}
+	if (details?.meta?.artifactError) rows.push(artifactErrorRow(details.meta.artifactError));
 	return new ToolActivityContainer(new TranscriptStatusBlock(rows));
+}
+
+/** Hosts an extension renderer; relays `display.hideToolActivity` to the nested built-in fallback block. */
+class AsyncResultCard extends CustomMessageComponent {
+	readonly #block: ToolActivityContainer;
+
+	constructor(message: CustomOrHookMessage, renderer: MessageRenderer, block: ToolActivityContainer) {
+		super(message as CustomMessage<unknown>, (delegate, options, rendererTheme) => {
+			try {
+				return renderer(delegate, options, rendererTheme) ?? block;
+			} catch {
+				return block;
+			}
+		});
+		this.#block = block;
+	}
+
+	setToolActivityVisible(visible: boolean): void {
+		this.#block.setToolActivityVisible(visible);
+	}
+}
+
+/**
+ * The `async-result` card for both transcript surfaces: a registered renderer owns it (#14131);
+ * the built-in block covers no renderer, a declining renderer, and a throwing one.
+ */
+export function buildAsyncResultComponent(
+	message: CustomOrHookMessage,
+	renderer: MessageRenderer | undefined,
+): Component & { setExpanded(expanded: boolean): void } {
+	const block = buildAsyncResultBlock(message);
+	return renderer ? new AsyncResultCard(message, renderer, block) : block;
+}
+
+/** The warning row under a background job whose output artifact could not be saved. */
+function artifactErrorRow(error: OutputArtifactError): TranscriptStatusRow {
+	const notice = formatArtifactErrorNotice(error);
+	return { parts: [{ text: notice, color: "warning" }], native: { tone: "warning", message: [span(notice)] } };
+}
+
+/** The dim row under a background job whose output the minimizer shortened. */
+function minimizedRow(minimized: MinimizedMeta): TranscriptStatusRow {
+	const fact = `Minimized: ${formatMinimizedMeta(minimized)}`;
+	return { parts: [{ text: fact, color: "dim" }], native: { tone: "info", message: [span(fact, "dim")] } };
+}
+
+/**
+ * Native notice spans for a row's trailing facts (kind, id, duration): each
+ * after a dim ` · `, absent ones skipped.
+ */
+function facts(values: readonly (string | undefined)[]): TspSpan[] {
+	return values.flatMap(value => (value ? [span(" · ", "dim"), span(value, "dim")] : []));
 }
 
 /**
@@ -92,10 +155,15 @@ export function buildLaunchCompletionBlock(message: CustomOrHookMessage): ToolAc
 	const rows: TranscriptStatusRow[] = [];
 	const daemons = details?.daemons ?? [];
 	if (daemons.length === 0 && typeof message.content === "string") {
-		rows.push({ parts: [{ text: `${theme.status.done} ${message.content}`, color: "dim" }] });
+		rows.push({
+			parts: [{ text: `${theme.status.success} ${message.content}`, color: "dim" }],
+			native: { tone: "success", message: [span(message.content)] },
+		});
 	}
 	for (const daemon of daemons) {
 		const failed = daemon.state === "failed" || (daemon.exitCode !== undefined && daemon.exitCode !== 0);
+		const label = failed ? "Supervised process failed" : "Supervised process completed";
+		const exit = daemon.exitCode !== undefined ? `exit ${daemon.exitCode}` : undefined;
 		const duration =
 			daemon.exitedAt !== undefined && daemon.startedAt !== undefined
 				? formatDuration(daemon.exitedAt - daemon.startedAt)
@@ -104,26 +172,30 @@ export function buildLaunchCompletionBlock(message: CustomOrHookMessage): ToolAc
 			parts: [
 				failed
 					? {
-							text: `${theme.status.error} ${tuiT("ui.supervisedProcessFailed", "Supervised process failed")}`,
+							text: `${theme.status.error} ${tuiT("ui.supervisedProcessFailed", label)}`,
 							color: "error",
 						}
 					: {
-							text: `${theme.status.done} ${tuiT("ui.supervisedProcessCompleted", "Supervised process completed")}`,
+							text: `${theme.status.success} ${tuiT("ui.supervisedProcessCompleted", label)}`,
 							color: "success",
 						},
 				{ text: daemon.name, color: "accent" },
-				daemon.exitCode !== undefined ? { text: `(exit ${daemon.exitCode})`, color: "dim" } : undefined,
+				exit ? { text: `(${exit})`, color: "dim" } : undefined,
 				duration ? { text: `(${duration})`, color: "dim" } : undefined,
 			],
+			native: {
+				tone: failed ? "error" : "success",
+				message: [span(label), span(" "), span(daemon.name, "mono"), ...facts([exit, duration])],
+			},
 		});
 	}
 	return new ToolActivityContainer(new TranscriptStatusBlock(rows));
 }
 
 /**
- * Render a live IRC traffic custom message (`irc:incoming` / `irc:autoreply` /
- * `irc:relay`) as a transcript card. `getExpanded` supplies the live
- * expanded-state getter for the cached card.
+ * Render an IRC coordination custom message (`irc:incoming` / `irc:autoreply` /
+ * `irc:relay` / `irc:workpool`) as a tool-activity card. `getExpanded` supplies
+ * the live expanded-state getter for the cached card.
  */
 export function buildIrcMessageCard(message: CustomOrHookMessage, getExpanded: () => boolean): Component {
 	const details = (
@@ -145,19 +217,21 @@ export function buildIrcMessageCard(message: CustomOrHookMessage, getExpanded: (
 				: message.customType === "irc:workpool"
 					? ("workpool" as const)
 					: ("relay" as const);
-	return createIrcMessageCard(
-		{
-			kind,
-			from: details?.from,
-			to: details?.to,
-			body: kind === "incoming" ? details?.message : details?.body,
-			replyTo: details?.replyTo,
-			timestamp: message.timestamp,
-			pool: details?.pool,
-			mode: details?.mode,
-		},
-		getExpanded,
-		theme,
+	return new ToolActivityContainer(
+		createIrcMessageCard(
+			{
+				kind,
+				from: details?.from,
+				to: details?.to,
+				body: kind === "incoming" ? details?.message : details?.body,
+				replyTo: details?.replyTo,
+				timestamp: message.timestamp,
+				pool: details?.pool,
+				mode: details?.mode,
+			},
+			getExpanded,
+			theme,
+		),
 	);
 }
 
@@ -170,29 +244,34 @@ export function buildIrcMessageCard(message: CustomOrHookMessage, getExpanded: (
 export function buildFileMentionBlock(files: FileMentionMessage["files"], indent: number): TranscriptBlock {
 	const rows: TranscriptStatusRow[] = [];
 	for (const file of files) {
-		let suffix: string;
+		let detail: string;
 		if (file.skippedReason === "tooLarge" || file.skippedReason === "binary") {
 			const size =
 				typeof file.byteSize === "number" ? formatBytes(file.byteSize) : tuiT("ui.unknownSize", "unknown size");
-			suffix =
+			detail =
 				file.skippedReason === "binary"
 					? tuiT("ui.fileSkippedBinary", "(skipped: binary, {size})", { size })
 					: tuiT("ui.fileSkipped", "(skipped: {size})", { size });
 		} else {
-			suffix = file.image
+			detail = file.image
 				? tuiT("ui.imageFile", "(image)")
 				: file.lineCount === undefined
 					? tuiT("ui.unknownLines", "(unknown lines)")
-					: tuiT("ui.fileLines", "({count} lines)", { count: file.lineCount });
+					: tuiT("ui.fileLines", `(${formatCount("line", file.lineCount)})`, { count: file.lineCount });
 		}
 		rows.push({
 			parts: [
-				{ text: theme.tree.last, color: "dim", rowsOnly: true },
+				{ text: theme.tree.last, color: "dim" },
 				{ text: tuiT("ui.read", "Read"), color: "muted" },
-				{ text: file.path, color: "accent" },
-				{ text: suffix, color: "dim" },
+				{ text: formatStyledPath(file.path, theme) },
+				{ text: detail, color: "dim" },
 			],
 			indent,
+			native: {
+				tone: "info",
+				icon: "read",
+				message: [span("Read"), span(" "), span(file.path, "path"), ...facts([detail])],
+			},
 		});
 	}
 	return new TranscriptStatusBlock(rows);
@@ -221,11 +300,14 @@ export function assistantHasVisibleContent(message: AssistantAgentMessage): bool
 export function splitAssistantMessageToolTimeline(message: AssistantAgentMessage): {
 	beforeTools: AssistantAgentMessage;
 	afterToolCalls: ReadonlyMap<string, AssistantAgentMessage>;
+	/** Index in `message.content` of each after-tool segment's first block, by tool-call id. */
+	contentOffsets: ReadonlyMap<string, number>;
 	hasToolCalls: boolean;
 	lastToolCallId?: string;
 } {
 	const beforeTools: AssistantAgentMessage["content"] = [];
 	const afterToolCalls = new Map<string, AssistantAgentMessage>();
+	const contentOffsets = new Map<string, number>();
 	let pendingAfterTool: AssistantAgentMessage["content"] = [];
 	let lastToolCallId: string | undefined;
 	let sawToolCall = false;
@@ -244,11 +326,13 @@ export function splitAssistantMessageToolTimeline(message: AssistantAgentMessage
 		pendingAfterTool = [];
 	};
 
-	for (const content of message.content) {
+	for (let index = 0; index < message.content.length; index++) {
+		const content = message.content[index]!;
 		if (content.type === "toolCall") {
 			flushPendingAfterTool();
 			sawToolCall = true;
 			lastToolCallId = content.id;
+			contentOffsets.set(content.id, index + 1);
 			continue;
 		}
 		if (sawToolCall) {
@@ -260,12 +344,13 @@ export function splitAssistantMessageToolTimeline(message: AssistantAgentMessage
 	flushPendingAfterTool();
 
 	if (!sawToolCall) {
-		return { beforeTools: message, afterToolCalls, hasToolCalls: false };
+		return { beforeTools: message, afterToolCalls, contentOffsets, hasToolCalls: false };
 	}
 
 	return {
 		beforeTools: displaySegment(beforeTools),
 		afterToolCalls,
+		contentOffsets,
 		hasToolCalls: true,
 		lastToolCallId,
 	};
@@ -309,18 +394,10 @@ export function resolveAssistantErrorPresentation(
 	}
 	if (message.stopReason === "aborted") {
 		if (!shouldRenderAbortReason(message)) return { kind: "none" };
-		return {
-			kind: "full",
-			text: resolveAbortLabel(message, retryAttempt),
-			isError: true,
-		};
+		return { kind: "full", text: resolveAbortLabel(message, retryAttempt), isError: true };
 	}
 	if (message.stopReason === "error") {
-		return {
-			kind: "full",
-			text: message.errorMessage || "Error",
-			isError: true,
-		};
+		return { kind: "full", text: message.errorMessage || "Error", isError: true };
 	}
 	if (message.errorMessage && shouldRenderAbortReason(message)) {
 		return { kind: "full", text: message.errorMessage, isError: true };

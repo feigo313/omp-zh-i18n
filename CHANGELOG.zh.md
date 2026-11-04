@@ -8,7 +8,47 @@
 本项目**只汉化 TUI / GUI 界面**:欢迎页与提示、聊天渲染器、各类覆盖层、设置界面、
 斜杠命令在界面中的反馈文案、以及 `omp stats` 仪表盘的全部页面。
 
-**omp 自身的 `--help`、参数说明等命令行帮助输出保持英文**,这是本项目的既定设计。
+**帮助输出的语言跟随语言开关**:设为中文时 `omp --help`、`omp launch --help`、`omp stats --help`
+等的说明文案为中文;`OMP_LANG=en` 或未开语言开关时全部保持英文。参数名(`--model`)、品牌名、
+模型 id 任何情况下都不翻译。
+
+## [v18.16.0-zh] — 2026-11-04
+
+对齐官方 **v18.16.0**(commit `650f3a10`)。上一中文版为
+[v18.12.6-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.12.6-zh)。
+
+官方 18.13 → 18.16 的主线：`/resume` 直接列出带标题的会话；后台任务新增一行用途说明并把
+模型给的目的带到 `/jobs`/`proc://`/`wait`；`out://` 让 agent 在不结束任务的情况下给出阶段性
+回复；resume 选择器支持 Alt+K 置顶；bash 结果被输出最小化器改写后卡片显示用了哪个过滤器和
+前后字节数；`/review` 可以从一个 checkout 目录直接评审 GitHub PR；浏览器工具(relay 与自建
+Chrome)修掉一批 tab/下载/富文本填字问题；启动时延通过延迟非必需加载明显下降。
+
+### 汉化
+
+- **上游改口的 6 处按新语义重译**：批注编辑器的取消/放弃合并为同一个动作
+  (`annotation.hintCancel`/`hintDiscard` → "关闭并保留批注"，原先的"取消/放弃"与新语义相反)；
+  工具组边框标签 `ui.cancelled`/`ui.exitCode` 去掉自带括号(边框会再包一层，出现 `[已取消]`
+  式的重复括号)；`askDialog.noteTitle` 补上"或刚选中的答案"；`planReview.editExternal` 改成
+  `{editor}` 参数以显示真实编辑器名；`usageDashboard.resetsFull` 同步上游去掉"（还有 …）"尾巴，
+  并撤掉该调用点为中文版多传的参数。
+- **上游重构掉的接线重新接回 4 处**：登录对话框、OAuth 终端输出、MCP 授权卡片(原生行 +
+  文本行)的 "Local shortcut (this machine only):" 重新走 `ui.setupSignIn.localShortcut`。
+- **`/launch` 新增 4 个参数说明按现有风格补译**(`wait-async`、`no-context-files`、
+  `warn-cost`、`max-cost`)，并同步 en 侧，保持 en/zh 键对称。
+- **清掉 9 个上游已删除、无调用点的死键**(setup 登录场景 2 个、usage 仪表 3 个、会话选择器
+  footer 1 个、`cli.ui.error`/`cli.ui.warning`/`cli.extension.finishPrompt`)。
+- **本轮保持英文的 2 条上游新串**：`/review` 丢弃全部批注的确认文案，以及 resume 列表里模型
+  来源的一行说明；它们出现在新覆盖层里，下轮按整屏效果统一定措辞。
+
+### 质量校验
+
+| 项目 | 结果 |
+|---|---|
+| 本地化门禁 | 16 项全部 PASS(资源契约 / 运行时探针 / scoped 覆盖 / 占位符 / 设置面板渲染 / 知识库 / oxlint+oxfmt / 类型 / frozen lockfile / 版本矩阵 / 密钥 / 内容范围 / 二进制版本 / 二进制冒烟 / 二进制密钥 / 源码冒烟) || 合并一致性 | parity-audit(v18.12.6 → v18.16.0)：漏并上游更新 0、未删上游删除 0、未执行 fork 移除 0、冲突标记 0 |
+| 类型检查 | 全部包通过 |
+| 翻译资源契约测试 | 10 通过 / 0 失败 |
+| seam 清单 | 调用点 1686，不同英文串 1242，无中文 0 |
+| 运行环境 | 冒烟与门禁子进程需 bun ≥1.4.4(上游本周期抬高了最低版本)，已装到 `.tools/bun-1.4.4` |
 
 ## [v18.12.6-zh] — 2026-10-24
 

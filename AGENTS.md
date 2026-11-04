@@ -7,7 +7,7 @@
 | What | Chinese localization fork of Oh My Pi — not upstream `can1357/oh-my-pi` |
 | Public | https://github.com/feigo313/omp-zh-i18n · branch `master` · also `gitee.com/atrix313/omp-zh-i18n` |
 | Upstream remote | `upstream` → `https://github.com/can1357/oh-my-pi.git` |
-| Current baseline | coding-agent **18.12.6-zh** (official tag `v18.12.6` = `45c35e40`; X/Y upstream change triggers a new zh release) |
+| Current baseline | coding-agent **18.16.0-zh** (official tag `v18.16.0` = `650f3a10`; X/Y upstream change triggers a new zh release) |
 | Primary work | `packages/coding-agent/src/i18n/lang/zh-*.json` + required en SoT / wiring (`interceptor.ts`, settings UI) and the tui translation seam (`packages/tui/src/i18n-host.ts`) |
 
 **Defaults for agents**
@@ -59,25 +59,18 @@ This repo contains multiple packages, but **`packages/coding-agent/`** is the pr
 
 ### Package Structure
 
-| Package                 | Description                                                                             |
-| ----------------------- | --------------------------------------------------------------------------------------- |
-| `packages/ai`           | Multi-provider LLM client with streaming support                                        |
-| `packages/catalog`      | Model catalog: bundled models.json, provider descriptors, model identity/classification |
-| `packages/agent`        | Agent runtime with tool calling and state management                                    |
-| `packages/coding-agent` | Main CLI application (primary focus)                                                    |
-| `packages/tui`          | Terminal UI library with differential rendering                                         |
-| `packages/natives`      | Bindings for native text/image/grep operations                                          |
-| `packages/stats`        | Local observability dashboard (`omp stats`)                                             |
-| `packages/omptype`      | ArkType-compatible schema validation with a lazy JIT runtime                            |
-| `packages/utils`        | Shared utilities (logger, streams, temp files)                                          |
-| `packages/wire`         | Shared wire protocol types for omp packages                                             |
-| `packages/mnemopi`      | Local SQLite memory engine for omp agents                                               |
-| `packages/snapcompact`  | Bitmap-frame context compression for vision-capable LLMs                                |
-| `packages/collab-web`   | Collab guest client + local relay tools (private)                                       |
-| `packages/browser-relay`| Chrome extension: browser tool drives your real tabs (`omp browser-relay`)              |
-| `packages/metaharness`  | Benchmark runners + run storage + live web dashboard (private)                          |
-| `packages/typescript-edit-benchmark` | Edit benchmark suite using TS source mutations (private)                  |
-| `crates/pi-natives`     | Rust crate for performance-critical text/grep ops                                       |
+|Package|Description|
+|---|---|
+|`packages/ai`|Multi-provider LLM client with streaming support|
+|`packages/catalog`|Model catalog: bundled models.json, provider descriptors, model identity/classification|
+|`packages/agent`|Agent runtime with tool calling and state management|
+|`packages/coding-agent`|Main CLI application (primary focus)|
+|`packages/tui`|Terminal UI library with differential rendering|
+|`packages/natives`|Bindings for native text/image/grep operations|
+|`packages/stats`|Local observability dashboard (`omp stats`)|
+|`packages/omptype`|ArkType-compatible schema validation with a lazy JIT runtime|
+|`packages/utils`|Shared utilities (logger, streams, temp files)|
+|`crates/pi-natives`|Rust crate for performance-critical text/grep ops|
 
 **Catalog import convention**: code in this repo imports catalog _values_ (bundled models, model-thinking helpers, identity, descriptors, model manager/cache) from `@oh-my-pi/pi-catalog/<module>` — never via `@oh-my-pi/pi-ai`. The pi-ai barrel re-exports only the model/effort _types_ its own signatures use (`Model`, `Api`, `ThinkingConfig`, `Effort`, …); type-only imports of those from `@oh-my-pi/pi-ai` are fine.
 
@@ -88,7 +81,11 @@ This repo contains multiple packages, but **`packages/coding-agent/`** is the pr
 - Language selection: `OMP_LANG` env wins, else `config.yml` `i18n.language`, else en.
 - Load order: bundled `lang/` first (embedded copy is the fallback for compiled binaries), then optional user overrides under `~/.omp/lang/`.
 - UI boundary: `src/i18n/interceptor.ts` (slash commands, in-TUI help) plus the tui seam `packages/tui/src/i18n-host.ts` (`setTuiTranslator`/`tuiT`) — since v18 the settings/welcome/plugin overlays live in `packages/tui` and resolve strings through the injected translator. Keep source English; do not sprinkle Chinese literals in components.
-- Top-level `omp --help` / launch-flag output stays English **by design** (see 汉化范围说明 in `CHANGELOG.zh.md`); do not localize it.
+- Help text follows the language switch: with the language set to Chinese, `omp --help`,
+  `omp launch --help` and `omp stats --help` render Chinese descriptions (the `cli.help.*` /
+  `cli.commands.*` keys in `zh-cli.json` + `cli.ts` injecting `translate` into `run()`);
+  with `OMP_LANG=en` or no language set everything stays English, as upstream. Flag names,
+  brand names and model ids are never translated. See 汉化范围说明 in `CHANGELOG.zh.md`.
 - Do **not** bulk-run extract/generate/translate scripts unless the user asks; edit keys by hand and keep en/zh key symmetry (no empty strings).
 
 ## GitHub
@@ -118,7 +115,7 @@ When authorized to create or edit a contributor-submitted PR, follow the checkli
 - **Promises**: use `Promise.withResolvers()` instead of `new Promise((resolve, reject) => ...)`.
 - **Prompts**: never build prompts in code (no inline strings, template literals, or concatenation). Prompts live in static `.md` files; use Handlebars for dynamic content. Import them via `import content from "./prompt.md" with { type: "text" }` — not `readFile`.
 - **Judge questions**: one JSON file per feature (`src/prompts/judge/<feature>.json`) maps question ids to `{ instructions, criteria? }`. Load it with `judgeQuestions(file)` from `@oh-my-pi/pi-ai`; fill Handlebars instructions with `renderQuestion(question, context)`. `criteria` sets the kind: a list of levels → score, omitted or `true`/`false` keys only → yes/no, any other labels → choice (`{}` when the caller supplies the labels). Choice labels and answer types come from the JSON keys.
-- **Worker scripts**: workers re-enter the CLI entrypoint; never spawn separate worker entry modules. `cli.ts` declares itself as the worker host at startup (`declareWorkerHostEntry()` from `@oh-my-pi/pi-utils/env`) and dispatches hidden argv selectors (constants near the top of `cli.ts`) before loading the command registry. Spawn sites use:
+- **Worker scripts**: workers re-enter the CLI entrypoint; never spawn separate worker entry modules. `cli.ts` declares itself as the worker host at startup (`declareWorkerHostEntry()` from `@oh-my-pi/pi-utils/env`) and dispatches hidden argv selectors (`__omp_worker_stats_sync`, `__omp_worker_tab`, `__omp_worker_js_eval`, `__omp_worker_tiny_inference`) before loading the command registry. Spawn sites use:
   ```ts
   import { workerHostEntry } from "@oh-my-pi/pi-utils";
   const hostEntry = workerHostEntry();
@@ -144,20 +141,20 @@ Use Bun APIs where they provide a cleaner alternative; fall back to `node:*` onl
 
 ### Quick reference
 
-| Operation       | Use                                       | Not                                |
-| --------------- | ----------------------------------------- | ---------------------------------- |
-| File read/write | `Bun.file()`, `Bun.write()`               | `readFileSync`, `writeFileSync`    |
-| Spawn process   | `` $`cmd` ``, `Bun.spawn()`               | `child_process`                    |
-| Sleep           | `Bun.sleep(ms)`                           | `setTimeout` promise               |
-| Binary lookup   | `$which("git")` from `@oh-my-pi/pi-utils` | `spawnSync(["which", "git"])`      |
-| HTTP server     | `Bun.serve()`                             | `http.createServer()`              |
-| SQLite          | `bun:sqlite`                              | `better-sqlite3`                   |
-| Hashing         | `Bun.hash()`, `Bun.password.*`, WebCrypto | `node:crypto`                      |
-| Path resolution | `import.meta.dir`, `import.meta.path`     | `fileURLToPath` dance              |
-| JSON5           | `Bun.JSON5.parse()` / `.stringify()`      | `json5` package                    |
-| JSONL           | `Bun.JSONL.parse()` / `.parseChunk()`     | `text.split("\n").map(JSON.parse)` |
-| String width    | `Bun.stringWidth()`                       | `get-east-asian-width`, custom     |
-| Text wrapping   | `Bun.wrapAnsi()`                          | custom ANSI-aware wrappers         |
+|Operation|Use|Not|
+|---|---|---|
+|File read/write|`Bun.file()`, `Bun.write()`|`readFileSync`, `writeFileSync`|
+|Spawn process|`` $`cmd` ``, `Bun.spawn()`|`child_process`|
+|Sleep|`Bun.sleep(ms)`|`setTimeout` promise|
+|Binary lookup|`$which("git")` from `@oh-my-pi/pi-utils`|`spawnSync(["which", "git"])`|
+|HTTP server|`Bun.serve()`|`http.createServer()`|
+|SQLite|`bun:sqlite`|`better-sqlite3`|
+|Hashing|`Bun.hash()`, `Bun.password.*`, WebCrypto|`node:crypto`|
+|Path resolution|`import.meta.dir`, `import.meta.path`|`fileURLToPath` dance|
+|JSON5|`Bun.JSON5.parse()` / `.stringify()`|`json5` package|
+|JSONL|`Bun.JSONL.parse()` / `.parseChunk()`|`text.split("\n").map(JSON.parse)`|
+|String width|`Bun.stringWidth()`|`get-east-asian-width`, custom|
+|Text wrapping|`Bun.wrapAnsi()`|custom ANSI-aware wrappers|
 
 ### Process execution
 
@@ -329,6 +326,7 @@ For the bash tool specifically:
 - NEVER commit unless asked.
 - Never use `tsc`/`npx tsc` — always `bun check`.
 - Never run `cargo test` directly for Rust tests — use `bun run test:rs`. It runs `cargo nextest run` (config: `.config/nextest.toml`) followed by a `cargo test --doc` pass, because nextest does not execute doctests. The doctest pass runs every runnable doctest in the workspace's lib crates; today that is tree-sitter-go's one example (pi-natives is a `cdylib`, which rustdoc skips; pi-builtins' examples are `ignore`d vendored uutils docs).
+- `bun check`'s Rust half runs only when the branch changed a Rust-affecting file (`*.rs`, `crates/`, Cargo/toolchain files) since its merge base with `upstream/main` or `origin/main`, committed or not; it always runs in GitHub Actions, when that cannot be determined (e.g. shallow clone), or with `OMP_FORCE_RUST_TASKS=1`.
 - Merge commits (maintainer merges of PRs) follow: `Merge PR #<number>: <conventional PR subject> (@<author>)` — e.g. `Merge PR #6386: feat(catalog): add native Meta Model API provider (@eggpeat)`.
 - Runtime is **Bun** (`packageManager` in root `package.json`). On Windows use PowerShell; do not assume bash-only paths.
 
@@ -357,13 +355,13 @@ Tests are **bucketed** via `scripts/ci-test-ts.ts` — do not assume a single `b
 
 Profiles live in the root `Cargo.toml`; `.cargo/config.toml` carries the settings Cargo.toml cannot express. Both are committed, so no local `~/.cargo/config.toml` is required.
 
-| Profile | Use |
-| --- | --- |
-| `dev` | Default. Line tables for our crates, no debuginfo for deps, deps at `opt-level = 2`. |
-| `release` | Shipping build: fat LTO, 1 codegen unit, stripped. |
-| `local` | Fast local release iteration: thin LTO, 16 codegen units, incremental. |
-| `profiling` | `release` codegen with symbols kept, for `perf`/`samply`/Instruments. |
-| `ci` | Thin LTO, no debuginfo, stripped. |
+|Profile|Use|
+|---|---|
+|`dev`|Default. Line tables for our crates, no debuginfo for deps, deps at `opt-level = 2`.|
+|`release`|Shipping build: fat LTO, 1 codegen unit, stripped.|
+|`local`|Fast local release iteration: thin LTO, 16 codegen units, incremental.|
+|`profiling`|`release` codegen with symbols kept, for `perf`/`samply`/Instruments.|
+|`ci`|Thin LTO, no debuginfo, stripped.|
 
 **Never set `split-debuginfo = "off"` on a profile that has debuginfo.** On Mach-O the linker never merges DWARF into the executable — it writes a debug map (`N_OSO`) pointing at the `.o` files, and `"unpacked"` is what keeps those files. With `"off"` every backtrace frame in our own crates silently loses `file:line`; the `panicked at foo.rs:3` header still prints (that is `#[track_caller]`, not debuginfo), which makes the loss easy to miss. `ci` may use `"off"` only because it sets `debug = false`.
 

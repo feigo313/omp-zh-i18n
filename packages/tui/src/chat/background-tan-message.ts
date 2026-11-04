@@ -4,6 +4,7 @@ import { replaceTabs } from "../render/render-utils";
 import { theme } from "../theme";
 import type { TranscriptBlock } from "../chrome/transcript-container";
 import { TranscriptStatusBlock } from "../chrome/transcript-status";
+import { span } from "../native/describe";
 
 const TAN_WORK_PREVIEW_LENGTH = 56;
 
@@ -23,6 +24,8 @@ export function createBackgroundTanDispatchBlock(message: CustomMessage<unknown>
 	const details = (message as CustomMessage<Partial<BackgroundTanDispatchDetails>>).details;
 	const jobId = details?.jobId ?? tuiT("ui.unknown", "unknown");
 	const work = details?.work ? previewWork(details.work) : undefined;
+	const spans = [span("Tangent dispatched"), span(" · ", "dim"), span(`task ${jobId}`, "dim")];
+	if (work) spans.push(span(" · ", "dim"), span(work, "dim"));
 	return new TranscriptStatusBlock([
 		{
 			parts: [
@@ -31,6 +34,7 @@ export function createBackgroundTanDispatchBlock(message: CustomMessage<unknown>
 				{ text: jobId, color: "accent" },
 				work ? { text: `${theme.format.dash} ${work}`, color: "dim" } : undefined,
 			],
+			native: { tone: "info", icon: "output", message: spans },
 		},
 	]);
 }

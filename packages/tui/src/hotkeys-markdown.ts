@@ -176,6 +176,7 @@ function hotkeyGroups(bindings: HotkeysMarkdownBindings): HotkeyGroup[] {
 					keys: [act("app.tools.toggleVisibility")],
 					action: tuiT("hotkeys.toggleToolActivity", "Toggle tool activity visibility"),
 				},
+				{ keys: [act("app.links.hint")], action: "Pick an extension link on screen by its tag" },
 				{
 					keys: [act("app.ask.hide")],
 					action: tuiT("hotkeys.other.askHide", "Hide/show a pending ask question"),
@@ -192,6 +193,7 @@ function hotkeyGroups(bindings: HotkeysMarkdownBindings): HotkeyGroup[] {
 					keys: [act("app.editor.external")],
 					action: tuiT("hotkeys.other.externalEditor", "Edit message in external editor"),
 				},
+				{ keys: [act("app.local.open")], action: "Open a local:// file in external editor" },
 				{ keys: [act("app.retry")], action: tuiT("hotkeys.other.retry", "Retry last failed assistant turn") },
 				{
 					keys: [act("app.clipboard.pasteImage")],

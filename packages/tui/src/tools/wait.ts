@@ -44,14 +44,16 @@ export function isWaitingPollDetails(details: unknown): boolean {
 	return d.jobs.every(job => job?.status === "running");
 }
 /** Coordination details retained by wait and background job operations. */
-export type CoordinationOp = "send" | "wait" | "jobs" | "cancel";
+export type CoordinationOp = "send" | "wait" | "cancel";
 
-/** Background-job row surfaced by `wait`/`cancel`/`jobs` results. */
+/** Background-job row surfaced by `wait`/`cancel` results and `proc://` listings. */
 export interface JobSnapshot {
 	id: string;
 	type: "bash" | "task" | "eval";
 	status: "running" | "completed" | "failed" | "cancelled";
 	label: string;
+	/** What the job is for, in the model's words (a process job's `label` is its command line). */
+	intent?: string;
 	durationMs: number;
 	/** Process exit status when the job reports one. */
 	exitCode?: number;
@@ -67,6 +69,14 @@ export interface JobSnapshot {
 	completionPercent?: number;
 	/** The task agent's latest stage in its own words; see `AgentProgress.stage`. */
 	stage?: string;
+	/** Running task only: assistant requests so far; see `AgentProgress.requests`. */
+	requests?: number;
+	/** Running task only: cumulative cost in USD; see `AgentProgress.cost`. */
+	cost?: number;
+	/** Running task only: latest per-turn context size; see `AgentProgress.contextTokens`. */
+	contextTokens?: number;
+	/** Running task only: the model's context window; see `AgentProgress.contextWindow`. */
+	contextWindow?: number;
 	/** The job's live widget, while one is being drawn; frozen at its last state once the job settles. */
 	widget?: JobWidgetView;
 	resultText?: string;
@@ -82,6 +92,12 @@ export interface JobSnapshot {
 	 * on collision, else the job id itself. See {@link AsyncJob.agentId}.
 	 */
 	agentUrlId?: string;
+	/**
+	 * Whether this job's turn published `<agentUrlId>.md`. False where the job
+	 * body reported that it wrote none, so `agent://` still holds an earlier
+	 * turn's output; undefined where the body does not report it.
+	 */
+	agentOutputPublished?: boolean;
 }
 
 /** Outcome of cancelling one background job. */
@@ -153,7 +169,7 @@ const PREVIEW_LINE_WIDTH = 80;
 function statusToIcon(status: JobSnapshot["status"]): ToolUIStatus {
 	switch (status) {
 		case "completed":
-			return "done";
+			return "success";
 		case "failed":
 			return "error";
 		case "cancelled":
@@ -200,9 +216,10 @@ function flattenStructuredPreview(text: string): string {
 	return text.slice(0, PREVIEW_LINES_EXPANDED * PREVIEW_LINE_WIDTH * 2).replace(/\s+/g, " ");
 }
 
-/** The row label: a running task's own stage line when it reports one, else the job's label. */
+/** The row label: a running task's own stage line when it reports one, else what the job is for, else its label. */
 function jobRowLabel(job: JobSnapshot): string {
-	return job.type === "task" && job.status === "running" && job.stage?.trim() ? job.stage : job.label;
+	if (job.type === "task" && job.status === "running" && job.stage?.trim()) return job.stage;
+	return job.intent || job.label;
 }
 
 /** A job as its tile; `live` while the card's clocks run. */
@@ -211,7 +228,7 @@ function jobTile(job: JobSnapshot, live: boolean): JobTile {
 		id: job.id,
 		type: job.type,
 		status: job.status,
-		label: job.label,
+		label: job.intent || job.label,
 		durationMs: job.durationMs,
 		live: live && job.status === "running",
 		...(job.widget ? { widget: job.widget } : {}),
@@ -410,7 +427,7 @@ function jobsRenderResult(
 	const widgetJobs = sortedJobs.filter(job => job.status === "running" && job.widget?.state === "live");
 	const compactJobLines = (width: number, live: boolean): string[] => {
 		const lines: string[] = [];
-		const indent = " ".repeat(visibleWidth(formatStatusIcon("done", uiTheme)) + 1);
+		const indent = " ".repeat(visibleWidth(formatStatusIcon("success", uiTheme)) + 1);
 		// Failures sort first, so the cap never hides one behind successes;
 		// Ctrl+O lists the rest.
 		for (const job of settledJobs.slice(0, PREVIEW_LIMITS.COLLAPSED_ITEMS)) {

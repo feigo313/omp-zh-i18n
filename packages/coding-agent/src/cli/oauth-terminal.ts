@@ -16,6 +16,7 @@ import {
 	PASTE_CODE_LOGIN_PROVIDERS,
 } from "@oh-my-pi/pi-ai";
 import { openPath } from "../utils/open";
+import { t } from "../i18n";
 
 /**
  * Interactive `readline` prompt that cleanly tears down on Ctrl-C / Escape so
@@ -171,7 +172,9 @@ export async function runTerminalOAuthLogin(
 				// Local shortcut for the machine running OMP. Terminals or
 				// screen-scrapers narrower than the full URL still get an
 				// unbroken copy target here.
-				process.stdout.write(`Local shortcut (this machine only): ${launchUrl}\n`);
+				process.stdout.write(
+					`${t("ui.setupSignIn.localShortcut", "Local shortcut (this machine only):")} ${launchUrl}\n`,
+				);
 			}
 			if (instructions) process.stdout.write(`${instructions}\n`);
 			process.stdout.write("\n");

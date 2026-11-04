@@ -14,6 +14,7 @@ import { framedToolCard } from "../render/tool-card";
 import {
 	formatExpandHint,
 	formatMoreItems,
+	formatStatusIcon,
 	getDomain,
 	PREVIEW_LIMITS,
 	sanitizeDisplayLines,
@@ -29,6 +30,7 @@ export interface ReadUrlToolDetails {
 	finalUrl: string;
 	contentType: string;
 	method: string;
+	raw?: boolean;
 	truncated: boolean;
 	notes: string[];
 	meta?: OutputMeta;
@@ -274,7 +276,7 @@ export function renderReadUrlResult(
 	metadataLines.push(`${uiTheme.fg("muted", "Lines:")} ${lineLabel}`);
 	metadataLines.push(`${uiTheme.fg("muted", "Chars:")} ${charCount}`);
 	if (truncated) {
-		metadataLines.push(uiTheme.fg("warning", `${uiTheme.status.warning} Output truncated`));
+		metadataLines.push(`${formatStatusIcon("warning", uiTheme)} ${uiTheme.fg("warning", "Output truncated")}`);
 		if (truncation?.artifactId) metadataLines.push(formatStyledArtifactReference(truncation.artifactId, uiTheme));
 	}
 	if (hasNotes) {

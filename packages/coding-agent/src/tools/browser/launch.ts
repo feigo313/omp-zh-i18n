@@ -41,6 +41,7 @@ import stealthCodecsScript from "../puppeteer/12_stealth_codecs.txt" with { type
 import stealthWorkerScript from "../puppeteer/13_stealth_worker.txt" with { type: "text" };
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import { withDownload } from "../../downloads/activity";
+import { probeCdpResponse } from "./attach";
 
 export const DEFAULT_VIEWPORT = { width: 1365, height: 768, deviceScaleFactor: 1.25 };
 
@@ -111,6 +112,8 @@ let puppeteerCwdFailed = false;
 let puppeteerCwdFailure: unknown;
 let jsHandleConstructor: typeof JSHandle | undefined;
 let timeoutErrorConstructor: typeof TimeoutError | undefined;
+/** Puppeteer exports `TargetCloseError` at runtime but leaves it out of its public types. */
+let targetCloseErrorConstructor: unknown;
 let knownDevices: Readonly<Record<string, Device>> | undefined;
 let predefinedNetworkConditions: Readonly<Record<string, NetworkConditions>> | undefined;
 
@@ -125,6 +128,11 @@ export function isPuppeteerHandle(value: unknown): value is JSHandle {
  */
 export function isPuppeteerTimeout(error: unknown): boolean {
 	return timeoutErrorConstructor !== undefined && error instanceof timeoutErrorConstructor;
+}
+
+/** Recognize Puppeteer's error for a command whose session closed under it, by class identity like {@link isPuppeteerTimeout}. */
+export function isPuppeteerTargetClose(error: unknown): boolean {
+	return typeof targetCloseErrorConstructor === "function" && error instanceof targetCloseErrorConstructor;
 }
 
 /**
@@ -162,6 +170,7 @@ async function importPuppeteerWithSafeCwd(safeDir: string): Promise<typeof Puppe
 			loaded = module.default;
 			jsHandleConstructor = module.JSHandle;
 			timeoutErrorConstructor = module.TimeoutError;
+			targetCloseErrorConstructor = Reflect.get(module, "TargetCloseError");
 			knownDevices = module.KnownDevices;
 			predefinedNetworkConditions = module.PredefinedNetworkConditions;
 		} catch (error) {
@@ -229,10 +238,35 @@ export async function connectPuppeteer(puppeteer: typeof Puppeteer, options: Con
 	} catch (error) {
 		// The WebSocket transports can reject with ErrorEvent rather than Error.
 		// Its message includes the actual debugger endpoint and handshake failure.
-		if (!(error instanceof Error) && isRecord(error) && typeof error.message === "string") {
-			throw new Error(error.message, { cause: error });
+		const failure =
+			!(error instanceof Error) && isRecord(error) && typeof error.message === "string"
+				? new Error(error.message, { cause: error })
+				: toError(error);
+		// Bun's `ws` shim (1.4.4+) rejects a refused upgrade with only "Unexpected server response: <status>";
+		// name the debugger endpoint the way Bun's native WebSocket error does.
+		if (failure.message.startsWith("Unexpected server response: ")) {
+			const endpoint =
+				options.browserWSEndpoint ??
+				(options.browserURL && (await debuggerEndpointOf(options.browserURL))) ??
+				options.browserURL;
+			if (endpoint)
+				throw new Error(`WebSocket connection to '${endpoint}' failed: ${failure.message}`, { cause: failure });
 		}
-		throw toError(error);
+		throw failure;
+	}
+}
+
+/** The `webSocketDebuggerUrl` a CDP HTTP endpoint advertises, or undefined when it does not answer with one. */
+async function debuggerEndpointOf(browserURL: string): Promise<string | undefined> {
+	const response = await probeCdpResponse(`${browserURL.replace(/\/+$/, "")}/json/version`, { timeoutMs: 1500 });
+	if (response?.status !== 200) return undefined;
+	try {
+		const parsed: unknown = JSON.parse(response.body);
+		return isRecord(parsed) && typeof parsed.webSocketDebuggerUrl === "string"
+			? parsed.webSocketDebuggerUrl
+			: undefined;
+	} catch {
+		return undefined;
 	}
 }
 

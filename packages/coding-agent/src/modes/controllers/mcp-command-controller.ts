@@ -175,7 +175,9 @@ export class MCPAuthorizationLinkPrompt implements Component {
 					actions: { click: "open", menu: ["open", "copy"] },
 				}),
 				urlCopyRow("Copy URL:", this.#fullUrl),
-				...(this.#launchUrl ? [urlCopyRow("Local shortcut (this machine only):", this.#launchUrl)] : []),
+				...(this.#launchUrl
+					? [urlCopyRow(t("ui.setupSignIn.localShortcut", "Local shortcut (this machine only):"), this.#launchUrl)]
+					: []),
 			],
 			{ gap: "xs" },
 		);
@@ -190,7 +192,13 @@ export class MCPAuthorizationLinkPrompt implements Component {
 			...wrapUrlRows("Copy URL:", this.#fullUrl, width),
 		];
 		if (this.#launchUrl) {
-			lines.push(...wrapUrlRows("Local shortcut (this machine only):", this.#launchUrl, width));
+			lines.push(
+				...wrapUrlRows(
+					t("ui.setupSignIn.localShortcut", "Local shortcut (this machine only):"),
+					this.#launchUrl,
+					width,
+				),
+			);
 		}
 		return lines;
 	}

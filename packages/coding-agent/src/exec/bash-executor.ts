@@ -3,7 +3,6 @@
  *
  * Uses brush-core via native bindings for shell execution.
  */
-import { ExponentialYield } from "@oh-my-pi/pi-agent-core/utils/yield";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import {
 	type MinimizerOptions,
@@ -16,6 +15,7 @@ import {
 import { $env } from "@oh-my-pi/pi-utils/env";
 import { isCmdShell, isExecutable, type ShellConfig } from "@oh-my-pi/pi-utils/procmgr";
 import { Settings } from "../config/settings";
+import type { MinimizedMeta } from "@oh-my-pi/pi-tui/tools/output-meta";
 import { type OutputArtifactError, OutputSink, type OutputSummary } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import {
 	resolveOutputMaxColumns,
@@ -112,6 +112,11 @@ export interface BashPtyOptions {
 	rows: number;
 	/** Receives raw PTY bytes (ANSI intact) for virtual-terminal rendering. */
 	onChunk: (chunk: string) => void;
+	/**
+	 * Receives a writer for the PTY's stdin once the command starts, so the user
+	 * can answer prompts (`read`, shell-startup questions). Writes after exit are dropped.
+	 */
+	onStdin?: (write: (data: string) => void) => void;
 }
 
 export interface BashResult {
@@ -129,6 +134,8 @@ export interface BashResult {
 	/** Bytes the artifact cap dropped from the saved file's middle (the artifact is a head/tail sample). */
 	artifactElidedBytes?: number;
 	artifactError?: OutputArtifactError;
+	/** The native minimizer's rewrite, set when its output replaced the raw stream. */
+	minimized?: MinimizedMeta;
 	workingDir?: string;
 	/** Terminal graphics extracted from raw stdout before sanitization or truncation. */
 	images?: ImageContent[];
@@ -511,6 +518,16 @@ async function executeUserShellPty(run: {
 			const clean = run.graphics.push(chunk);
 			if (clean) run.sink.push(clean.replace(/\r\n?/gu, "\n"));
 		},
+		err => {
+			if (err) return;
+			run.pty.onStdin?.(data => {
+				try {
+					session.write(data);
+				} catch {
+					// The command exited between the keystroke and the write.
+				}
+			});
+		},
 	);
 	if (result.timedOut) {
 		return {
@@ -759,8 +776,7 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 		);
 		options?.onStart?.(() => executionShell.pids());
 
-		const ey = new ExponentialYield();
-		const winner = await ey.race<
+		const winner = await Promise.race<
 			{ kind: "result"; result: ShellRunResult } | { kind: "timeout" } | { kind: "abort" }
 		>([
 			runPromise.then(result => ({ kind: "result" as const, result })),
@@ -838,15 +854,18 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 		// (or an unavailable allocator) must keep the raw stream rather than
 		// silently dropping the diagnostics the summary elided.
 		const minimized = winner.result.minimized;
+		let minimizedMeta: MinimizedMeta | undefined;
 		if (minimized && minimized.text !== minimized.originalText) {
+			const info = {
+				filter: minimized.filter,
+				inputBytes: minimized.inputBytes,
+				outputBytes: minimized.outputBytes,
+			};
 			const artifactId = options?.onMinimizedSave
-				? await options.onMinimizedSave(minimized.originalText, {
-						filter: minimized.filter,
-						inputBytes: minimized.inputBytes,
-						outputBytes: minimized.outputBytes,
-					})
+				? await options.onMinimizedSave(minimized.originalText, info)
 				: undefined;
 			if (artifactId) {
+				minimizedMeta = { ...info, artifactId };
 				// The decoder above already owns image extraction from the streamed
 				// lossless output. Scrub any graphics frames repeated by the native
 				// minimizer without feeding them back into that decoder.
@@ -863,6 +882,7 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 			exitCode: winner.result.exitCode,
 			cancelled: false,
 			workingDir: winner.result.workingDir,
+			...(minimizedMeta ? { minimized: minimizedMeta } : {}),
 			...(await dump()),
 		};
 	} catch (err) {

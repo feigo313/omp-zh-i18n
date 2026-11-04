@@ -20,6 +20,7 @@ import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { tuiT } from "../i18n-host";
 import { type Theme } from "../theme/theme";
 import type {
+	AnnotationOverlayDraft,
 	CodeReviewAnnotation,
 	CodeReviewOverlayResult,
 	ReviewDiffFile,
@@ -176,8 +177,14 @@ const MIN_BODY_ROWS = 3;
 const SIDEBAR_MIN_TOTAL_WIDTH = 64;
 const SIDEBAR_MIN_BODY_WIDTH = 40;
 const MAX_ANNOTATION_EDITOR_ROWS = 6;
-const CODE_REVIEW_ACTIONS = [CONTINUE_CODE_REVIEW_ACTION, PASTE_CODE_REVIEW_ACTION] as const;
-const TEXT_REVIEW_ACTIONS = [PASTE_CODE_REVIEW_ACTION] as const;
+/** Clears every note and closes; the host then has nothing to keep. Needs a second confirm. */
+export const DISCARD_ANNOTATIONS_ACTION = "Discard notes and close";
+const CODE_REVIEW_ACTIONS = [
+	CONTINUE_CODE_REVIEW_ACTION,
+	PASTE_CODE_REVIEW_ACTION,
+	DISCARD_ANNOTATIONS_ACTION,
+] as const;
+const TEXT_REVIEW_ACTIONS = [PASTE_CODE_REVIEW_ACTION, DISCARD_ANNOTATIONS_ACTION] as const;
 
 function isSourceRow(row: ReviewDiffRow): row is ReviewSourceRow {
 	return row.kind === "context" || row.kind === "added" || row.kind === "removed";
@@ -280,6 +287,8 @@ export class AnnotationOverlay implements Focusable {
 	/** Set once {@link replaceTextSource} runs; the paste result then carries the edited text. */
 	#textSourceEdited = false;
 	#finished = false;
+	/** Discard was chosen once; choosing it again discards, any other input disarms it. */
+	#discardArmed = false;
 	#annotations: CommittedAnnotation[] = [];
 	#textAnnotations: CommittedTextAnnotation[] = [];
 	/** Annotation lists before each create/edit/delete, restored by `u`. */
@@ -346,6 +355,8 @@ export class AnnotationOverlay implements Focusable {
 			this.#files = filesOrSource;
 			this.#mode = modeOrCallbacks as string;
 			this.#callbacks = maybeCallbacks!;
+			// Start on Paste, not the LLM review: a stray Enter must not submit (it does nothing until a note exists).
+			this.#actionIndex = 1;
 		}
 		const symbols = {
 			cursor: theme.nav.cursor,
@@ -406,6 +417,60 @@ export class AnnotationOverlay implements Focusable {
 
 	dispose(): void {
 		this.#finished = true;
+	}
+
+	/** Notes, the unfinished note, and any source edit, in the form {@link restoreDraft} replays. */
+	getDraft(): AnnotationOverlayDraft {
+		const editing =
+			this.#editingAnnotationIndex === undefined ? {} : { editingAnnotationIndex: this.#editingAnnotationIndex };
+		const text = this.#editor.getExpandedText();
+		if (this.#textSource) {
+			const scope = this.#annotationScope === "text" ? "text" : "line";
+			const sourceIndex = scope === "text" ? -1 : this.#sourceIndex;
+			return {
+				kind: "text",
+				annotations: this.#textAnnotations.map(entry => ({ ...entry, annotation: { ...entry.annotation } })),
+				...(this.#textSourceEdited ? { editedText: this.#textSource.text } : {}),
+				...(this.#annotating ? { editor: { sourceIndex, scope, ...editing, text } } : {}),
+			};
+		}
+		const scope = this.#annotationScope === "file" ? "file" : "line";
+		const editor = { fileIndex: this.#fileIndex, sourceIndex: this.#sourceIndex, scope, ...editing, text } as const;
+		return {
+			kind: "diff",
+			annotations: this.#annotations.map(entry => ({ ...entry, annotation: { ...entry.annotation } })),
+			...(this.#annotating ? { editor } : {}),
+		};
+	}
+
+	/** Replay a draft taken from this same source; anything anchored outside it is dropped. */
+	restoreDraft(draft: AnnotationOverlayDraft): void {
+		const rows = (fileIndex: number) =>
+			this.#textSource ? this.#textLines.length : (this.#files[fileIndex]?.rows.filter(isSourceRow).length ?? -1);
+		const fits = (fileIndex: number, sourceIndex: number, whole: boolean) =>
+			rows(fileIndex) >= 0 && (whole ? sourceIndex === -1 : sourceIndex >= 0 && sourceIndex < rows(fileIndex));
+		if (draft.kind === "text" && this.#textSource) {
+			if (draft.editedText !== undefined) this.replaceTextSource(draft.editedText);
+			this.#textAnnotations = draft.annotations.filter(e => fits(0, e.sourceIndex, e.annotation.scope === "text"));
+		} else if (draft.kind === "diff" && !this.#textSource) {
+			this.#annotations = draft.annotations.filter(e =>
+				fits(e.fileIndex, e.sourceIndex, e.annotation.scope === "file"),
+			);
+		} else return;
+		const editor = draft.editor;
+		const fileIndex = editor && "fileIndex" in editor ? editor.fileIndex : 0;
+		if (editor && fits(fileIndex, editor.sourceIndex, editor.scope === "text" || editor.scope === "file")) {
+			this.#fileIndex = fileIndex;
+			if (editor.sourceIndex >= 0) this.#sourceIndex = editor.sourceIndex;
+			this.#annotationScope = editor.scope;
+			const count = this.#textSource ? this.#textAnnotations.length : this.#annotations.length;
+			this.#editingAnnotationIndex =
+				(editor.editingAnnotationIndex ?? count) < count ? editor.editingAnnotationIndex : undefined;
+			this.#annotating = true;
+			this.#editor.setText(editor.text);
+		}
+		this.#annotationRev++;
+		this.#nativeBody = undefined;
 	}
 
 	getAnnotations(): CodeReviewAnnotation[] {
@@ -473,6 +538,8 @@ export class AnnotationOverlay implements Focusable {
 
 	handleInput(data: string): void {
 		if (this.#finished || this.#externalOperation) return;
+		const discardArmed = this.#discardArmed;
+		this.#discardArmed = false;
 		if (this.#annotationChooser) {
 			this.#handleAnnotationChooser(data);
 			return;
@@ -482,8 +549,9 @@ export class AnnotationOverlay implements Focusable {
 				void this.#openAnnotationEditor();
 				return;
 			}
+			// Close, keeping the unfinished note in the draft so it reopens in the editor.
 			if (this.#keybindings.matches(data, "tui.select.cancel")) {
-				this.#cancelAnnotation();
+				this.#finish(undefined);
 				return;
 			}
 			this.#editor.handleInput(data);
@@ -527,7 +595,7 @@ export class AnnotationOverlay implements Focusable {
 		}
 		if (this.#focus === "files") this.#handleFiles(data);
 		else if (this.#focus === "diff") this.#handleDiff(data);
-		else this.#handleActions(data);
+		else this.#handleActions(data, discardArmed);
 	}
 
 	/** Primary key bound to `action` in this overlay's keybindings, formatted for footer hints. */
@@ -546,10 +614,9 @@ export class AnnotationOverlay implements Focusable {
 		}
 	}
 
-	/** Esc, by state: leave the note chooser, drop the note draft, else close the review. */
+	/** Esc, by state: leave the note chooser, else close the review; the host keeps the draft. */
 	#escape(): void {
 		if (this.#annotationChooser) this.#annotationChooser = undefined;
-		else if (this.#annotating) this.#cancelAnnotation();
 		else this.#finish(undefined);
 	}
 
@@ -653,33 +720,41 @@ export class AnnotationOverlay implements Focusable {
 		}
 	}
 
-	#handleActions(data: string): void {
-		const actionCount = this.#actions.length;
-		if (actionCount === 0) return;
-		const hasAnnotations = this.#textSource ? this.#textAnnotations.length > 0 : this.#annotations.length > 0;
-		if (this.#keybindings.matches(data, "tui.select.up") || matchesKey(data, "k")) {
-			this.#actionIndex = this.#textSource ? (this.#actionIndex - 1 + actionCount) % actionCount : 0;
-			return;
-		}
-		if (this.#keybindings.matches(data, "tui.select.down") || matchesKey(data, "j")) {
-			if (this.#textSource) {
-				this.#actionIndex = (this.#actionIndex + 1) % actionCount;
-			} else if (hasAnnotations) {
-				this.#actionIndex = Math.min(actionCount - 1, this.#actionIndex + 1);
+	#handleActions(data: string, discardArmed: boolean): void {
+		const up = this.#keybindings.matches(data, "tui.select.up") || matchesKey(data, "k");
+		if (up || this.#keybindings.matches(data, "tui.select.down") || matchesKey(data, "j")) {
+			const step = up ? -1 : 1;
+			for (let index = this.#actionIndex + step; index >= 0 && index < this.#actions.length; index += step) {
+				if (this.#actionDisabled(index)) continue;
+				this.#actionIndex = index;
+				break;
 			}
 			return;
 		}
-		if (this.#keybindings.matches(data, "tui.select.confirm")) this.#confirmAction();
+		if (this.#keybindings.matches(data, "tui.select.confirm")) this.#confirmAction(discardArmed);
 	}
 
 	#actionDisabled(index: number): boolean {
+		if (this.#actions[index] === DISCARD_ANNOTATIONS_ACTION) return false;
 		const hasAnnotations = this.#textSource ? this.#textAnnotations.length > 0 : this.#annotations.length > 0;
 		return this.#textSource ? !hasAnnotations : index === 1 && !hasAnnotations;
 	}
 
-	#confirmAction(): void {
+	#confirmAction(discardArmed = false): void {
 		if (this.#actionDisabled(this.#actionIndex)) return;
-		if (this.#textSource) {
+		if (this.#actions[this.#actionIndex] === DISCARD_ANNOTATIONS_ACTION) {
+			if (!discardArmed) {
+				this.#discardArmed = true;
+				return;
+			}
+			this.#annotations = [];
+			this.#textAnnotations = [];
+			this.#textSourceEdited = false;
+			this.#annotating = false;
+			this.#editingAnnotationIndex = undefined;
+			this.#editor.setText("");
+			this.#finish(undefined);
+		} else if (this.#textSource) {
 			this.#finish({
 				action: "paste",
 				annotations: this.getTextAnnotations(),
@@ -770,12 +845,6 @@ export class AnnotationOverlay implements Focusable {
 		this.#editingAnnotationIndex = existingIndex;
 		this.#annotating = true;
 		this.#editor.setText(existing?.annotation.note ?? "");
-	}
-
-	#cancelAnnotation(): void {
-		this.#annotating = false;
-		this.#editingAnnotationIndex = undefined;
-		this.#editor.setText("");
 	}
 
 	#commitAnnotation(value: string): void {
@@ -978,7 +1047,6 @@ export class AnnotationOverlay implements Focusable {
 		this.#annotationRev++;
 		this.#annotations = snapshot.annotations;
 		this.#textAnnotations = snapshot.textAnnotations;
-		if (this.#annotations.length === 0 && this.#actionIndex === 1) this.#actionIndex = 0;
 	}
 
 	async #openAnnotationEditor(): Promise<void> {
@@ -1222,10 +1290,12 @@ export class AnnotationOverlay implements Focusable {
 	}
 
 	#renderActions(): string[] {
-		const hasAnnotations = this.#textSource ? this.#textAnnotations.length > 0 : this.#annotations.length > 0;
 		return this.#actions.map((action, index) => {
-			const label = actionLabel(action);
-			const disabled = this.#textSource ? !hasAnnotations : index === 1 && !hasAnnotations;
+			const label =
+				action === DISCARD_ANNOTATIONS_ACTION && this.#discardArmed
+					? "Confirm: discard all notes"
+					: actionLabel(action);
+			const disabled = this.#actionDisabled(index);
 			const selected = index === this.#actionIndex;
 			const cursor = selected ? `${this.#theme.nav.cursor} ` : "  ";
 			const text = disabled
@@ -1302,7 +1372,7 @@ export class AnnotationOverlay implements Focusable {
 			const hints = [
 				`${editorKey("tui.input.submit")} ${hintSave()}`,
 				`${editorKey("tui.input.newLine")} ${hintNewline()}`,
-				`${this.#key("tui.select.cancel")} ${hintCancel()}`,
+				`${this.#key("tui.select.cancel")} ${tuiT("ui.annotation.hintCancel", "close, keep note")}`,
 			];
 			hints.push(`${formatKeyHint(appExternalEditorKey())} editor`);
 			return [caption, ...this.#editor.render(width), this.#theme.fg("dim", hints.join(" · "))];
@@ -1511,6 +1581,7 @@ export class AnnotationOverlay implements Focusable {
 			this.#bodyHeight,
 			this.#annotating ? `annotating:${this.#annotationScope}:${this.#editingAnnotationIndex}` : "",
 			chooser ? `chooser:${chooser.selected}:${chooser.entries.join()}` : "",
+			this.#discardArmed ? "discard-armed" : "",
 		].join("|");
 		if (this.#nativeRoot && sig === this.#nativeSig && body === this.#nativeRootBody) return this.#nativeRoot;
 
@@ -1545,6 +1616,8 @@ export class AnnotationOverlay implements Focusable {
 
 	handleNativeEvent(event: NativeUiEvent): void {
 		if (this.#finished || this.#externalOperation) return;
+		const discardArmed = this.#discardArmed;
+		this.#discardArmed = false;
 		if (event.type === "action") {
 			if (event.act === "close") {
 				this.#escape();
@@ -1553,10 +1626,18 @@ export class AnnotationOverlay implements Focusable {
 			// A draft or the note chooser is open: finish or leave it first.
 			if (this.#annotating || this.#annotationChooser) return;
 			const index =
-				event.act === "review" && !this.#textSource ? 0 : event.act === "paste" ? (this.#textSource ? 0 : 1) : -1;
+				event.act === "discard"
+					? this.#actions.indexOf(DISCARD_ANNOTATIONS_ACTION)
+					: event.act === "review" && !this.#textSource
+						? 0
+						: event.act === "paste"
+							? this.#textSource
+								? 0
+								: 1
+							: -1;
 			if (index < 0 || this.#actionDisabled(index)) return;
 			this.#actionIndex = index;
-			this.#confirmAction();
+			this.#confirmAction(discardArmed);
 			return;
 		}
 		if (event.type !== "select" && event.type !== "activate") return;
@@ -1907,7 +1988,15 @@ export class AnnotationOverlay implements Focusable {
 			mark ? ({ ...button, p: { ...button.p, mark } } as NativeNode) : button;
 		const hasNotes = this.#textSource ? this.#textAnnotations.length > 0 : this.#annotations.length > 0;
 		const pasteTitle = hasNotes ? PASTE_CODE_REVIEW_ACTION : "Add a note to paste it into the prompt";
-		const buttons: NativeNode[] = [actionButton("Cancel", "close", { keys: "escape" })];
+		const buttons: NativeNode[] = [
+			actionButton("Cancel", "close", { keys: "escape" }),
+			marked(
+				actionButton(this.#discardArmed ? "Confirm discard" : "Discard", "discard", {
+					title: DISCARD_ANNOTATIONS_ACTION,
+				}),
+				pick(this.#actions.indexOf(DISCARD_ANNOTATIONS_ACTION)),
+			),
+		];
 		if (this.#textSource) {
 			buttons.push(
 				marked(actionButton("Paste into prompt", "paste", { tone: "accent", title: pasteTitle }), pick(0)),
@@ -1946,8 +2035,8 @@ export class AnnotationOverlay implements Focusable {
 		if (this.#annotating) {
 			return [
 				this.#hint("tui.input.submit", hintSave()),
-				this.#hint("tui.input.newLine", hintNewline()),
-				this.#hint("tui.select.cancel", hintDiscard()),
+				this.#hint("tui.input.newLine", tuiT("ui.annotation.hintNewline", "new line")),
+				this.#hint("tui.select.cancel", tuiT("ui.annotation.hintDiscard", "close, keep note")),
 				this.#callbacks.onAnnotationExternalEditor ? key(appExternalEditorKey(), hintEditor()) : undefined,
 			];
 		}

@@ -5,11 +5,12 @@ export interface SearchInputProps {
 	value: string;
 	onChange: (value: string) => void;
 	placeholder?: string;
+	label?: string;
 	width?: number;
 }
 
 /** Text filter with a leading search glyph. */
-export function SearchInput({ value, onChange, placeholder, width }: SearchInputProps) {
+export function SearchInput({ value, onChange, placeholder, label = "Filter", width }: SearchInputProps) {
 	const { t } = useTranslation();
 	return (
 		<label className="search">
@@ -17,6 +18,7 @@ export function SearchInput({ value, onChange, placeholder, width }: SearchInput
 			<input
 				className="input"
 				type="search"
+				aria-label={label}
 				value={value}
 				placeholder={placeholder ?? t("common.hint.filterPlaceholder")}
 				onChange={e => onChange(e.target.value)}

@@ -11,9 +11,15 @@ import { tuiT } from "../i18n-host";
 import { Loader } from "../components/loader";
 import { Text } from "../components/text";
 import { Container, type TUI } from "../tui";
-import { getSymbolTheme, theme } from "../theme/theme";
+import { theme } from "../theme/theme";
 import type { OutputArtifactError } from "../tools/streaming-output";
-import { formatArtifactErrorNotice, formatTruncationMetaNotice, type TruncationMeta } from "../tools/output-meta";
+import {
+	formatArtifactErrorNotice,
+	formatMinimizedMeta,
+	formatTruncationMetaNotice,
+	type MinimizedMeta,
+	type TruncationMeta,
+} from "../tools/output-meta";
 import { DynamicBorder } from "../chrome/dynamic-border";
 import { Ellipsis, truncateToWidth, visibleWidth } from "../utils";
 import { interruptKey } from "../chrome/keybinding-hints";
@@ -47,14 +53,15 @@ export type ExecutionColorKey = "dim" | "bashMode" | "pythonMode";
 /**
  * Build the spacer + top border + content container + bottom border scaffold
  * that bash and eval execution components share. The caller appends the
- * header (command vs `>>>` prompt) and the returned loader to
- * `contentContainer` so per-mode order is preserved.
+ * header (command vs `>>>` prompt) to `contentContainer` and keeps the run's
+ * state in `bottomBorder` ({@link executionStatusLabel}); the returned loader
+ * animates that label rather than taking a row of its own.
  */
 export function buildExecutionFrame(
 	parent: Container,
 	ui: TUI,
 	colorKey: ExecutionColorKey,
-): { contentContainer: Container; loader: Loader } {
+): { contentContainer: Container; loader: Loader; bottomBorder: DynamicBorder } {
 	const borderColor = (str: string) => theme.fg(colorKey, str);
 
 	parent.addChild(new DynamicBorder(borderColor));
@@ -67,23 +74,35 @@ export function buildExecutionFrame(
 		spinner => theme.fg(colorKey, spinner),
 		text => theme.fg("muted", text),
 		tuiT("ui.runningCancel", `Running… (${interruptKey()} to cancel)`),
-		getSymbolTheme().spinnerFrames,
+		// The status spinner, as on a running tool card's header.
+		theme.spinnerFrames,
 	);
 
-	parent.addChild(new DynamicBorder(borderColor));
-	return { contentContainer, loader };
+	const bottomBorder = new DynamicBorder(borderColor);
+	bottomBorder.setLabel(() => loader.inlineText());
+	parent.addChild(bottomBorder);
+	return { contentContainer, loader, bottomBorder };
+}
+
+/** The bottom-border marker of a settled run: `exit N` for a failure, `cancelled` for a cancel. */
+export function executionStatusLabel(
+	status: Exclude<ExecutionStatus, "running">,
+	exitCode: number | undefined,
+): string | undefined {
+	if (status === "cancelled") return theme.fg("warning", tuiT("ui.cancelled", "cancelled"));
+	if (status === "error") return theme.fg("error", tuiT("ui.exitCode", `exit ${exitCode}`, { code: exitCode }));
+	return undefined;
 }
 
 /**
- * Build the post-run status block (hidden-line hint, exit/cancel marker,
- * truncation notice). Returns undefined when there is nothing to display so
- * callers can skip appending a stray Text child.
+ * Build the post-run status block (hidden-line hint, truncation notice).
+ * Returns undefined when there is nothing to display so callers can skip
+ * appending a stray Text child.
  */
 export function buildStatusFooter(opts: {
-	status: ExecutionStatus;
-	exitCode: number | undefined;
 	truncation: TruncationMeta | undefined;
 	artifactError?: OutputArtifactError;
+	minimized?: MinimizedMeta;
 	hiddenLineCount: number;
 	/** Suppress the "… N more lines" hint (used when sixel passthrough renders the full output). */
 	suppressHiddenCount?: boolean;
@@ -100,16 +119,14 @@ export function buildStatusFooter(opts: {
 			),
 		);
 	}
-	if (opts.status === "cancelled") {
-		parts.push(theme.fg("warning", tuiT("ui.cancelled", "(cancelled)")));
-	} else if (opts.status === "error") {
-		parts.push(theme.fg("error", tuiT("ui.exitCode", "(exit {code})", { code: opts.exitCode })));
-	}
 	if (opts.truncation) {
 		parts.push(theme.fg("warning", formatTruncationMetaNotice(opts.truncation)));
 	}
 	if (opts.artifactError) {
 		parts.push(theme.fg("warning", formatArtifactErrorNotice(opts.artifactError)));
+	}
+	if (opts.minimized) {
+		parts.push(theme.fg("dim", `Minimized: ${formatMinimizedMeta(opts.minimized)}`));
 	}
 
 	if (parts.length === 0) return undefined;
@@ -141,6 +158,7 @@ export interface ExecutionCardInput {
 	readonly exitCode: number | undefined;
 	readonly truncation: TruncationMeta | undefined;
 	readonly artifactError?: OutputArtifactError;
+	readonly minimized?: MinimizedMeta;
 }
 
 /**
@@ -178,6 +196,7 @@ export function describeExecutionCard(input: ExecutionCardInput): NativeNode {
 	if (input.status === "cancelled") note("(cancelled)", "warning");
 	else if (input.status === "error") note(`(exit ${input.exitCode})`, "error");
 	if (input.truncation) note(formatTruncationMetaNotice(input.truncation), "warning");
+	if (input.minimized) note(`Minimized: ${formatMinimizedMeta(input.minimized)}`, "muted");
 	if (input.artifactError) note(formatArtifactErrorNotice(input.artifactError), "warning");
 	if (notes.length > 0) children.push(text(notes, { wrap: "word", key: "notes" }));
 	return card(
@@ -215,6 +234,7 @@ export interface ExecutionToolInput {
 	readonly exitCode: number | undefined;
 	readonly truncation: TruncationMeta | undefined;
 	readonly artifactError?: OutputArtifactError;
+	readonly minimized?: MinimizedMeta;
 }
 
 const EXECUTION_RUN_STATE: Record<ExecutionStatus, RunState> = {
@@ -252,6 +272,7 @@ export function describeExecutionTool(input: ExecutionToolInput): NativeNode {
 				state,
 				exitCode: input.exitCode,
 				elapsedMs: ms,
+				facts: input.minimized ? [`Minimized ${formatMinimizedMeta(input.minimized)}`] : undefined,
 				meta: { truncation: input.truncation, artifactError: input.artifactError },
 			}),
 		],

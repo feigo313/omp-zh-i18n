@@ -33,6 +33,8 @@ export interface TimelineCanvasProps {
 	collapsed: ReadonlySet<string>;
 	onToggleCollapse: (trackId: string) => void;
 	traceStart: number;
+	/** Live route focuses immediately; embedded viewers wait for user interaction. */
+	autoFocus?: boolean;
 }
 
 const RULER_H = 28;
@@ -233,6 +235,7 @@ export function TimelineCanvas({
 	collapsed,
 	onToggleCollapse,
 	traceStart,
+	autoFocus = true,
 }: TimelineCanvasProps) {
 	const colors = useTraceTheme();
 	const { t } = useTranslation();
@@ -475,12 +478,12 @@ export function TimelineCanvas({
 				return;
 		}
 		event.preventDefault();
+		event.stopPropagation();
 	};
 
-	// Focus the canvas on mount so keyboard navigation works immediately.
 	useEffect(() => {
-		canvasRef.current?.focus({ preventScroll: true });
-	}, []);
+		if (autoFocus) canvasRef.current?.focus({ preventScroll: true });
+	}, [autoFocus]);
 
 	// Scene: everything except hover/selection, so pointer moves never repaint it.
 	useEffect(() => {
@@ -615,7 +618,13 @@ export function TimelineCanvas({
 				)}
 			</div>
 
-			{tooltip && createPortal(tooltip, document.body)}
+			{tooltip &&
+				createPortal(
+					tooltip,
+					containerRef.current?.getRootNode() instanceof ShadowRoot
+						? (containerRef.current.getRootNode() as ShadowRoot)
+						: document.body,
+				)}
 		</div>
 	);
 }

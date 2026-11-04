@@ -1,9 +1,7 @@
 {
   "type": "module",
   "name": "@oh-my-pi/snapcompact",
-  "version": "18.12.6-zh",
-
-
+  "version": "18.16.0-zh",
   "description": "Bitmap-frame context compression for vision-capable LLMs",
   "homepage": "https://omp.sh",
   "author": { "name": "Stencil Labs, Inc.", "url": "https://stencil.so" },
@@ -33,6 +31,7 @@
     "fmt": "oxfmt --no-error-on-unmatched-pattern 'src/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts'"
   },
   "dependencies": {
+    "@oh-my-pi/omptype": "catalog:",
     "@oh-my-pi/pi-ai": "catalog:",
     "@oh-my-pi/pi-catalog": "catalog:",
     "@oh-my-pi/pi-natives": "catalog:",
@@ -43,7 +42,7 @@
     "@types/bun": "catalog:"
   },
   "engines": {
-    "bun": ">=1.3.14"
+    "bun": ">=1.4.4"
   },
   "files": [
     "src",

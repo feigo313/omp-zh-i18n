@@ -41,9 +41,11 @@ interface AppKeybindings {
 	"app.ask.hide": true;
 	"app.approval.approve": true;
 	"app.editor.external": true;
+	"app.local.open": true;
 	"app.message.followUp": true;
 	"app.retry": true;
 	"app.message.dequeue": true;
+	"app.btw.inject": true;
 	"app.clipboard.pasteImage": true;
 	"app.clipboard.pasteTextRaw": true;
 	"app.clipboard.copyLine": true;
@@ -59,10 +61,13 @@ interface AppKeybindings {
 	"app.session.rename": true;
 	"app.session.delete": true;
 	"app.session.deleteNoninvasive": true;
+	"app.session.pin": true;
+	"app.session.unpin": true;
 	"app.tree.previousBranch": true;
 	"app.tree.nextBranch": true;
 	"app.plan.toggle": true;
 	"app.history.search": true;
+	"app.links.hint": true;
 	"app.stt.pushToTalk": true;
 	"app.stt.toggle": true;
 	"app.live.toggle": true;
@@ -155,6 +160,10 @@ export const KEYBINDINGS = {
 		defaultKeys: "ctrl+g",
 		description: tuiT("keybindings.app.editor.external", "Open external editor"),
 	},
+	"app.local.open": {
+		defaultKeys: "alt+g",
+		description: "Open a local:// file in external editor",
+	},
 	"app.message.followUp": {
 		// Ctrl+Enter is preserved for terminals that deliver it (Kitty/iTerm2/WezTerm/Ghostty),
 		// but Windows Terminal does not emit a distinct event for Ctrl+Enter — Ctrl+Q is listed
@@ -174,6 +183,10 @@ export const KEYBINDINGS = {
 		// for character composition, leaving Alt+Up unreachable there.
 		defaultKeys: ["alt+up", "shift+up"],
 		description: tuiT("keybindings.app.message.dequeue", "Dequeue message"),
+	},
+	"app.btw.inject": {
+		defaultKeys: "alt+i",
+		description: "Send a /btw answer's steering prompt to the main session",
 	},
 	"app.clipboard.pasteImage": {
 		defaultKeys: getDefaultPasteImageKeys(),
@@ -238,6 +251,14 @@ export const KEYBINDINGS = {
 		defaultKeys: "ctrl+backspace",
 		description: tuiT("keybindings.app.session.deleteNoninvasive", "Delete session (non-invasive)"),
 	},
+	"app.session.pin": {
+		defaultKeys: "alt+k",
+		description: "Pin the selected session in the resume picker",
+	},
+	"app.session.unpin": {
+		defaultKeys: "alt+shift+k",
+		description: "Unpin the selected session in the resume picker",
+	},
 	"app.tree.previousBranch": {
 		defaultKeys: [],
 		description: tuiT("keybindings.app.tree.previousBranch", "Jump to the previous branch in /tree"),
@@ -253,6 +274,10 @@ export const KEYBINDINGS = {
 	"app.history.search": {
 		defaultKeys: "ctrl+r",
 		description: tuiT("keybindings.app.history.search", "Search history"),
+	},
+	"app.links.hint": {
+		defaultKeys: "alt+o",
+		description: "Pick an extension link on screen by its hint tag",
 	},
 	"app.stt.pushToTalk": {
 		defaultKeys: "space",
