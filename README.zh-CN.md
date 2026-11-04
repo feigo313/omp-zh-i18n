@@ -1,3 +1,11 @@
+> [!IMPORTANT]
+> **本仓库是 [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi) 的中文界面汉化 fork，由 木乙创设 MYC丨AIGC 维护。** 下面的正文是上游 README 原文，介绍的是**上游 omp**，不是本项目：
+>
+> - 本仓库 Releases 只发布**一个产物：`omp-windows-x64.exe`**，即仅 Windows x64。**没有 Linux / macOS 的中文版构建。**
+> - `curl -fsSL https://omp.sh/install`、`brew install can1357/tap/omp`、`@oh-my-pi/*` npm 包装进去的都是**上游英文 omp**，不是中文版。要装中文版：从 [Releases](../../releases) 下载产物，或在本仓库自行构建。
+> - 汉化范围：TUI/GUI 界面（欢迎页与提示、聊天渲染器、覆盖层、设置界面、斜杠命令反馈）、`--help` 输出、`omp stats` 仪表盘全部页面。引擎、工具与模型提供商均为上游实现。
+> - 当前对齐：官方 **v18.16.0**（commit `650f3a10`），已发布为 tag `v18.16.0-zh`。发布历史与质量校验见 [CHANGELOG.zh.md](CHANGELOG.zh.md)。
+
 <p align="center">
   <img src="https://github.com/can1357/oh-my-pi/blob/main/assets/hero.png?raw=true" alt="omp">
 </p>
@@ -25,6 +33,27 @@
 <p align="center">
   由 <a href="https://stencil.so">Stencil Labs</a> 打造 · 派生自 <a href="https://github.com/mariozechner">@mariozechner</a> 的 <a href="https://github.com/badlogic/pi-mono">Pi</a>
 </p>
+
+## 中文界面实拍
+
+这些截图是**本 fork 的中文界面**（欢迎页与常用设置页），拍摄于 `v18.11.0-zh`（2026-09）。当前 `v18.16.0-zh` 的会话列表、后台任务等界面在上游 18.13–18.16 周期有增量变化，以实际运行为准。
+
+### 欢迎页
+
+![中文欢迎页](./assets/screenshots/welcome.png)
+
+### 设置页
+
+![外观设置](./assets/screenshots/settings-appearance.png)
+
+![模型设置](./assets/screenshots/settings-model.png)
+
+![交互设置](./assets/screenshots/settings-interaction.png)
+
+![工具设置](./assets/screenshots/settings-tools.png)
+
+> [!NOTE]
+> 从这里往下是**上游 omp 官方 README 原文**：其中的安装方式（`omp.sh/install`、Homebrew、npm）装的是**上游英文 omp**，截图也都是**上游英文界面**，不是本 fork 的中文版。
 
 目前能力最强的编程智能体。在真实使用中持续打磨——开箱即用，从里到外完全开放。
 

@@ -22,24 +22,25 @@
     GitHub releases（`/releases/latest`，只接受带 `-zh` 的 tag，并按平台挑 release asset）。
   - `main.ts` 的 `checkForNewVersion` 与 `cli/update-cli.ts` 的 `runUpdateCommand` 按
     `isLocalizedVersion` 分流：本地化构建只报告更新的 `-zh` 版本和下载地址，**不自我替换**。
-  - 读 GitHub 走两级：先 `fetch`（经 `wrapFetchForExtraCa`，跟 model-registry 等调用点同一约定，
-    认 `NODE_EXTRA_CA_CERTS`），失败（本机到 `api.github.com` 的链 Bun 自带 CA 不认、或匿名 API
-    限流）再退回 `gh api`（系统信任库、带鉴权）。两级都失败才报错，并把两个通道的原因都打出来；
-    `gh` 通道共用同一份超时预算（超时按 exit 124 记失败，不拖启动），并把 `gh` 的 stderr 首行带进
-    报错，实测形如：`api.github.com: unable to verify the first certificate; gh api: exit 1:
-    gh: Not Found (HTTP 404)`。
-  - 新增 `packages/coding-agent/test/update-localized-release.test.ts`（11 用例）：更新源必须是
+  - 读 GitHub 走两级**并行竞速**（不是串行兜底）：`fetch`（经 `wrapFetchForExtraCa`，跟 model-registry
+    等调用点同一约定，认 `NODE_EXTRA_CA_CERTS`）与 `gh api`（系统信任库、带鉴权）同时发，谁先答谁赢。
+    串行在这台机器上会把整段 HTTP 预算排在前面——实测排队版 `omp update --check` 要 **10.2s**（HTTP 腿
+    耗尽 10s 超时才轮到 gh 的 ~2s），启动检查也吃这个钱。两级都失败才报错，并把两个通道各自的原因打出来；
+    `gh` 腿共用同一份超时预算（超时按 exit 124 记失败，不拖启动），并把 `gh` 的 stderr 首行带进报错，
+    实测形如：`api.github.com: … ; gh api: exit 1: gh: Not Found (HTTP 404)`。
+  - 新增 `packages/coding-agent/test/update-localized-release.test.ts`（12 用例）：更新源必须是
     fork releases、只有真正的 `-zh` 新版本才算可更新、非本地化 tag 直接拒绝、asset 按平台挑选、
-    HTTP 通道挂掉时 gh 通道能顶上、两通道都挂才报错、gh 自带原因会出现在报错里。
+    HTTP 通道报错或**永不返回**时 gh 通道都能答（竞速不排队）、缺 gh 时 HTTP 能答、两通道都挂才报错、
+    gh 自带原因会出现在报错里。
   - 文案：`cli.update.localizedSource`、`cli.update.localizedDownload`（en/zh 同步补齐）。
   - 知识库：`docs/local/knowledge/LESSONS.md` L-2026-11-04-49（假更新根因）、L-2026-11-04-50（本机
     `api.github.com` 的链 Bun fetch 验不过，`gh`/curl 走系统信任库可用）。
-  - 验证：新增用例 11 通过；翻译资源契约 10 通过(12767 断言)；`check:types` 通过；oxlint 0 warning、
+  - 验证：新增用例 12 通过；翻译资源契约 10 通过(12767 断言)；`check:types` 通过；oxlint 0 warning、
     oxfmt 无需改动；`update-cli.test.ts` 84 通过 / 7 失败 —— 与改动前 stash 基线逐条相同（Windows 既有
     环境性失败，非本次引入）。本机 `omp update --check` 从「有新版本可用：18.16.0」变为「✔ 已是最新版本」。
-  - 本机已装：`C:\Users\MYCAIGC\.bun\bin\omp.exe` 253,756,416 字节，SHA-256
-    `d29b838684190eceae817ec319d4eb709a8a5a686b87d87ed4b0f98be632b982`（`--version` / `--smoke-test` 通过，
-    `omp update --check` 已是最新版本）。**这是宿主构建（不设 `CROSS_TARGET`，零网络，产物 `dist/omp.exe`），
+  - 本机已装：`C:\Users\MYCAIGC\.bun\bin\omp.exe` 253,762,560 字节，SHA-256 `650f34ce442a…`
+    （`--version` / `--smoke-test` 通过；`omp update --check` 由排队版的 **10.2s** 降到 **1.2–1.6s**，
+    结果 `✔ 已是最新版本`）。**这是宿主构建（不设 `CROSS_TARGET`，零网络，产物 `dist/omp.exe`），
     只做本机救济，不是发布 asset**：跨目标编译要先下载 `bun-windows-x64-baseline` 运行时模板，本机
     GitHub 下载通道 ~68 KB/s 下不完（L-2026-11-04-47、L-2026-11-04-52）。发布仍须按 Step 5 先 commit、
     在模板缓存热的时候跨目标构建重建对拍，别拿这个指纹当 asset。
@@ -47,6 +48,12 @@
     v18.16.0-zh asset）；`.bun\bin\omp-18.16.0-zh-old.exe` / `omp-18.16.0-zh-mid.exe` 是在跑进程的映像，
     重启 omp 后可删。本地构建命令固化在 `.tools/build-zh-local.ps1`（PATH 里 `bun` 是 1.3.14，
     构建必须钉 `.tools/bun-1.4.4`，否则在 `gen:export-viewer` 就挂）。
+
+- **门面纠偏（README）**：仓库首页渲染的是上游英文 README，看上去像"这就是 omp，mac/linux 都能装"。
+  现在 `README.md` 与 `README.zh-CN.md` 顶部都加了 fork 身份告示：本项目是什么、汉化范围、**Releases 只有
+  `omp-windows-x64.exe` 一个产物（无 Linux/macOS 中文版）**、`omp.sh/install` / Homebrew / npm 装的是上游
+  英文 omp、当前对齐 v18.16.0。中文界面实拍图集补进 `README.zh-CN.md`（此前只有英文 README 有），并在上游
+  正文前加分界说明；图集标题注明截图拍摄于 `v18.11.0-zh`，避免被当成当前版界面。
 
 ## [v18.16.0-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.16.0-zh) — 2026-11-04
 

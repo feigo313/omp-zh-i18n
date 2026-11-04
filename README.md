@@ -1,3 +1,11 @@
+> [!IMPORTANT]
+> **This repository is the Chinese UI localization fork of [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi), maintained by 木乙创设 MYC丨AIGC.** Everything below this box is upstream's README and describes **upstream omp**, not this fork:
+>
+> - Releases here publish **one asset: `omp-windows-x64.exe`** — Windows x64 only. This fork ships **no Linux or macOS** builds.
+> - `curl -fsSL https://omp.sh/install`, `brew install can1357/tap/omp`, and the `@oh-my-pi/*` npm packages install **upstream English omp**, never this fork. Get the localized build from [Releases](../../releases) (or build it here).
+> - Localization scope: the TUI/GUI (welcome screen, chat renderers, overlays, settings, slash-command feedback), `--help` output, and every `omp stats` dashboard page. The engine, tools, and providers are upstream's.
+> - Current alignment: official **v18.16.0** (`650f3a10`), published as tag `v18.16.0-zh`. Release history and quality gates: [CHANGELOG.zh.md](CHANGELOG.zh.md).
+
 <p align="center">
   <img src="https://github.com/can1357/oh-my-pi/blob/main/assets/hero.png?raw=true" alt="omp">
 </p>
@@ -26,9 +34,11 @@
   Built by <a href="https://stencil.so">Stencil Labs</a> · Fork of <a href="https://github.com/badlogic/pi-mono">Pi</a> by <a href="https://github.com/mariozechner">@mariozechner</a>
 </p>
 
-## 中文界面预览
+## 中文界面预览 / Chinese UI gallery
 
-以下截图来自本项目的中文汉化运行界面，覆盖欢迎页和常用设置页。
+这些截图是**本 fork 的中文界面**（欢迎页与常用设置页），拍摄于 `v18.11.0-zh`（2026-09）。
+当前版本 `v18.16.0-zh` 的会话列表、后台任务等界面在上游 18.13–18.16 周期有增量变化，以实际运行为准。
+These shots show **this fork's Chinese UI**; they were captured on `v18.11.0-zh` (Sep 2026).
 
 ### 欢迎页
 
@@ -43,6 +53,10 @@
 ![交互设置](./assets/screenshots/settings-interaction.png)
 
 ![工具设置](./assets/screenshots/settings-tools.png)
+
+> [!NOTE]
+> 从这里往下是**上游 omp 官方 README 原文**：其中的安装方式（`omp.sh/install`、Homebrew、npm）安装的是**上游英文 omp**，截图也是**上游英文界面**，都不是本 fork 的中文版。本 fork 的安装方式只有上面 [Releases](../../releases) 里的 `omp-windows-x64.exe`。
+> Everything below is upstream's README: its install commands fetch upstream **English** omp, and its screenshots show upstream's **English** UI.
 
 The most capable agent surface that ships. Continuously tuned by real-world use — complete out of the box, open all the way down.
 
