@@ -34,6 +34,13 @@ import {
 } from "../utils/fetch-timeout";
 import { type BuildAnswer, type BuildPatch, type Fetch, fetchBuild, type UpdateChannel } from "./build-service";
 import {
+	getLatestLocalizedRelease,
+	isLocalizedVersion,
+	LOCALIZED_RELEASE_REPO,
+	LOCALIZED_SUFFIX,
+	type LocalizedRelease,
+} from "./localized-release";
+import {
 	DEFAULT_NPM_REGISTRY,
 	loadNpmRegistryResolver,
 	type NpmRegistry,
@@ -2311,12 +2318,59 @@ async function runManagedUpdate(
 }
 
 /**
+ * `omp update` on a localized (`-zh`) build: report this fork's newest release
+ * and where to get it, and install nothing. The npm registry and the build
+ * service carry only the official English artifacts, and the bare `X.Y.Z` they
+ * serve outranks this build's own version in semver, so following them would
+ * overwrite the localization under the name of an update.
+ */
+async function runLocalizedUpdate(): Promise<void> {
+	let release: LocalizedRelease;
+	try {
+		release = await getLatestLocalizedRelease();
+	} catch (err) {
+		console.error(
+			chalk.red(t("cli.update.checkFailed", "Failed to check for updates: {error}", { error: String(err) })),
+		);
+		process.exit(1);
+	}
+	if (compareVersions(release.version, VERSION) <= 0) {
+		const icon = theme?.status?.success ?? "✔";
+		console.log(chalk.green(t("cli.update.alreadyCurrent", "{icon} Already up to date", { icon })));
+		return;
+	}
+	console.log(
+		chalk.cyan(t("cli.update.newVersion", "New version available: {version}", { version: release.version })),
+	);
+	console.log(
+		chalk.yellow(
+			t(
+				"cli.update.localizedSource",
+				"This is a localized (-{suffix}) build, published only to {repo}: {app} cannot self-update it from the official feed.",
+				{ suffix: LOCALIZED_SUFFIX, repo: LOCALIZED_RELEASE_REPO, app: APP_NAME },
+			),
+		),
+	);
+	console.log(
+		chalk.dim(
+			t("cli.update.localizedDownload", "Download {version} from: {url}", {
+				version: release.version,
+				url: release.assetUrl ?? release.url,
+			}),
+		),
+	);
+	if (release.assetName) console.log(chalk.dim(`  ${release.assetName}`));
+}
+
+/**
  * Run the update command.
  *
  * The installer that owns the PATH `omp` decides where the version comes
  * from: a standalone binary asks the build service, a package-manager install
  * asks npm. When no target resolves, the running build's kind decides, so
  * `--check` still answers; installing then fails on the unresolved target.
+ * A localized (`-zh`) build answers from this fork's GitHub releases instead
+ * ({@link runLocalizedUpdate}) and installs nothing.
  */
 export async function runUpdateCommand(opts: {
 	force: boolean;
@@ -2334,6 +2388,10 @@ export async function runUpdateCommand(opts: {
 	// `update.channel` picks the channel; --canary/--stable switch and persist it.
 	await Settings.init({ cwd: getProjectDir() });
 	console.log(chalk.dim(`Current version: ${VERSION}`));
+	if (isLocalizedVersion(VERSION)) {
+		await runLocalizedUpdate();
+		return;
+	}
 	const persistedChannel = readPersistedChannel() ?? "stable";
 	const channel = opts.channel ?? persistedChannel;
 	if (channel === "canary") console.log(chalk.dim("Current channel: canary"));

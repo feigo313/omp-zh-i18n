@@ -42,6 +42,7 @@ import { buildInitialMessage } from "./cli/initial-message";
 import { formatKeyHint, KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import type { SessionPickerOptions } from "@oh-my-pi/pi-tui/apps/session-picker";
 import { fetchBuild } from "./cli/build-service";
+import { getLatestLocalizedRelease, isLocalizedVersion } from "./cli/localized-release";
 import { applyStartupCwd } from "./cli/startup-cwd";
 import { getLatestRelease, isSourceCheckout, managedInstallName } from "./cli/update-cli";
 import { findConfigFile } from "./config";
@@ -281,6 +282,13 @@ async function checkForNewVersion(currentVersion: string): Promise<string | unde
 		// Checkouts update through git and a manager (Tern) updates its omp itself:
 		// "run omp update" would be wrong advice for both.
 		if (isSourceCheckout() || (await managedInstallName(process.execPath))) return;
+		// A localized (-zh) build is on neither official feed: they serve the bare
+		// X.Y.Z, which semver ranks ABOVE its own prerelease, so asking them reports
+		// the installed version as an update forever. Ask the fork's releases.
+		if (isLocalizedVersion(currentVersion)) {
+			const { version } = await getLatestLocalizedRelease({ timeoutMs: 5_000 });
+			return Bun.semver.order(version, currentVersion) > 0 ? version : undefined;
+		}
 		const channel = cfgUpdateChannel.get(settings);
 		// A compiled binary updates from the build service; naming the running
 		// version lets the service prepare the patch `omp update` will then use.

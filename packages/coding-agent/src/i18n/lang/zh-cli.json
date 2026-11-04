@@ -727,6 +727,8 @@
   "cli.update.help.plugins": "更新已安装的插件",
   "cli.update.help.stable": "切回 stable 渠道",
   "cli.update.installing": "正在安装更新…",
+  "cli.update.localizedDownload": "从此地址下载 {version}：{url}",
+  "cli.update.localizedSource": "这是本地化版（-{suffix}），只发布在 {repo}：{app} 无法从官方渠道自行更新。",
   "cli.update.newVersion": "有新版本可用：{version}",
   "cli.update.nixHint": "更新提供 omp 的 flake 输入或配置，然后重新构建。",
   "cli.update.nixUnsupported": "此安装由 Nix 管理，无法自行更新。",

@@ -727,6 +727,8 @@
   "cli.update.help.plugins": "Update installed plugins",
   "cli.update.help.stable": "Switch back to the stable channel",
   "cli.update.installing": "Installing update...",
+  "cli.update.localizedDownload": "Download {version} from: {url}",
+  "cli.update.localizedSource": "This is a localized (-{suffix}) build, published only to {repo}: {app} cannot self-update it from the official feed.",
   "cli.update.newVersion": "New version available: {version}",
   "cli.update.nixHint": "Update the flake input or profile that provides omp, then rebuild.",
   "cli.update.nixUnsupported": "This installation is managed by Nix and cannot update itself.",

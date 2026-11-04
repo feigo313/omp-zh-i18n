@@ -12,6 +12,42 @@
 等的说明文案为中文;`OMP_LANG=en` 或未开语言开关时全部保持英文。参数名(`--model`)、品牌名、
 模型 id 任何情况下都不翻译。
 
+## 未发布的本地修复（v18.16.0-zh 之后）
+
+- **汉化版永远弹「有新版本可用：18.16.0」**。编译版二进制的启动检查与 `omp update` 都问官方渠道
+  （`build.stencil.so` / npm），那里只有裸 `18.16.0`；semver 把 prerelease `-zh` 排在同名 release
+  **之下**（`Bun.semver.order("18.16.0", "18.16.0-zh") = +1`），所以 `18.16.0-zh` 恒被判成落后，
+  上游每发一个 patch 就再弹一次。按提示跑 `omp update` 更糟：它会拿官方英文二进制覆盖汉化安装。
+  - 新增 `packages/coding-agent/src/cli/localized-release.ts`：本地化构建的更新源改为本 fork 的
+    GitHub releases（`/releases/latest`，只接受带 `-zh` 的 tag，并按平台挑 release asset）。
+  - `main.ts` 的 `checkForNewVersion` 与 `cli/update-cli.ts` 的 `runUpdateCommand` 按
+    `isLocalizedVersion` 分流：本地化构建只报告更新的 `-zh` 版本和下载地址，**不自我替换**。
+  - 读 GitHub 走两级：先 `fetch`（经 `wrapFetchForExtraCa`，跟 model-registry 等调用点同一约定，
+    认 `NODE_EXTRA_CA_CERTS`），失败（本机到 `api.github.com` 的链 Bun 自带 CA 不认、或匿名 API
+    限流）再退回 `gh api`（系统信任库、带鉴权）。两级都失败才报错，并把两个通道的原因都打出来；
+    `gh` 通道共用同一份超时预算（超时按 exit 124 记失败，不拖启动），并把 `gh` 的 stderr 首行带进
+    报错，实测形如：`api.github.com: unable to verify the first certificate; gh api: exit 1:
+    gh: Not Found (HTTP 404)`。
+  - 新增 `packages/coding-agent/test/update-localized-release.test.ts`（11 用例）：更新源必须是
+    fork releases、只有真正的 `-zh` 新版本才算可更新、非本地化 tag 直接拒绝、asset 按平台挑选、
+    HTTP 通道挂掉时 gh 通道能顶上、两通道都挂才报错、gh 自带原因会出现在报错里。
+  - 文案：`cli.update.localizedSource`、`cli.update.localizedDownload`（en/zh 同步补齐）。
+  - 知识库：`docs/local/knowledge/LESSONS.md` L-2026-11-04-49（假更新根因）、L-2026-11-04-50（本机
+    `api.github.com` 的链 Bun fetch 验不过，`gh`/curl 走系统信任库可用）。
+  - 验证：新增用例 11 通过；翻译资源契约 10 通过(12767 断言)；`check:types` 通过；oxlint 0 warning、
+    oxfmt 无需改动；`update-cli.test.ts` 84 通过 / 7 失败 —— 与改动前 stash 基线逐条相同（Windows 既有
+    环境性失败，非本次引入）。本机 `omp update --check` 从「有新版本可用：18.16.0」变为「✔ 已是最新版本」。
+  - 本机已装：`C:\Users\MYCAIGC\.bun\bin\omp.exe` 253,756,416 字节，SHA-256
+    `d29b838684190eceae817ec319d4eb709a8a5a686b87d87ed4b0f98be632b982`（`--version` / `--smoke-test` 通过，
+    `omp update --check` 已是最新版本）。**这是宿主构建（不设 `CROSS_TARGET`，零网络，产物 `dist/omp.exe`），
+    只做本机救济，不是发布 asset**：跨目标编译要先下载 `bun-windows-x64-baseline` 运行时模板，本机
+    GitHub 下载通道 ~68 KB/s 下不完（L-2026-11-04-47、L-2026-11-04-52）。发布仍须按 Step 5 先 commit、
+    在模板缓存热的时候跨目标构建重建对拍，别拿这个指纹当 asset。
+    被替换的旧镜像备份在 `.tools/omp-18.16.0-zh-pre-update-fix.exe`（253,713,408 字节，即已发布
+    v18.16.0-zh asset）；`.bun\bin\omp-18.16.0-zh-old.exe` / `omp-18.16.0-zh-mid.exe` 是在跑进程的映像，
+    重启 omp 后可删。本地构建命令固化在 `.tools/build-zh-local.ps1`（PATH 里 `bun` 是 1.3.14，
+    构建必须钉 `.tools/bun-1.4.4`，否则在 `gen:export-viewer` 就挂）。
+
 ## [v18.16.0-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.16.0-zh) — 2026-11-04
 
 对齐官方 **v18.16.0**(commit `650f3a10`)。上一中文版为
