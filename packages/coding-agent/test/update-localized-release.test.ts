@@ -6,6 +6,7 @@ import {
 	LOCALIZED_RELEASE_REPO,
 	localizedReleaseApiUrl,
 	type GhRunner,
+	type LocalizedRelease,
 } from "@oh-my-pi/pi-coding-agent/cli/localized-release";
 import { compareVersions } from "@oh-my-pi/pi-utils";
 
@@ -33,6 +34,13 @@ const ghAnswer =
 	async () => ({ code: 0, stdout: JSON.stringify(body) });
 const ghUnavailable: GhRunner = async () => ({ code: 1, stdout: "" });
 
+/** Run the check with the `gh` leg pinned off, so only the injected HTTP answer can win. */
+function checkOverHttp(
+	fetchImpl: (input: string | URL | Request, init?: RequestInit) => Promise<Response>,
+): Promise<LocalizedRelease> {
+	return getLatestLocalizedRelease({ fetchImpl, gh: ghUnavailable });
+}
+
 const RELEASE_V18_17 = { tag_name: "v18.17.0-zh", html_url: "https://github.com/x/releases/tag/v18.17.0-zh" };
 
 describe("isLocalizedVersion", () => {
@@ -53,6 +61,7 @@ describe("getLatestLocalizedRelease", () => {
 				requested.push(String(url));
 				return jsonResponse(RELEASE_V18_17);
 			},
+			gh: ghUnavailable,
 		});
 		expect(requested).toEqual([`https://api.github.com/repos/${LOCALIZED_RELEASE_REPO}/releases/latest`]);
 		expect(localizedReleaseApiUrl()).toBe(requested[0]);
@@ -60,7 +69,7 @@ describe("getLatestLocalizedRelease", () => {
 	});
 
 	it("reports a newer localized tag as newer than the installed one", async () => {
-		const release = await getLatestLocalizedRelease({ fetchImpl: httpAnswer(RELEASE_V18_17) });
+		const release = await checkOverHttp(httpAnswer(RELEASE_V18_17));
 		expect(release.tag).toBe("v18.17.0-zh");
 		expect(release.version).toBe("18.17.0-zh");
 		expect(release.url).toBe("https://github.com/x/releases/tag/v18.17.0-zh");
@@ -68,15 +77,15 @@ describe("getLatestLocalizedRelease", () => {
 	});
 
 	it("keeps an older localized tag from looking like an update", async () => {
-		const release = await getLatestLocalizedRelease({
-			fetchImpl: httpAnswer({ tag_name: "v18.12.6-zh", html_url: "https://github.com/x/releases/tag/v18.12.6-zh" }),
-		});
+		const release = await checkOverHttp(
+			httpAnswer({ tag_name: "v18.12.6-zh", html_url: "https://github.com/x/releases/tag/v18.12.6-zh" }),
+		);
 		expect(compareVersions(release.version, "18.16.0-zh")).toBeLessThan(0);
 	});
 
 	it("selects the asset built for this host", async () => {
-		const release = await getLatestLocalizedRelease({
-			fetchImpl: httpAnswer({
+		const release = await checkOverHttp(
+			httpAnswer({
 				...RELEASE_V18_17,
 				assets: [
 					{ name: "checksums.txt", browser_download_url: "https://example.invalid/checksums" },
@@ -85,7 +94,7 @@ describe("getLatestLocalizedRelease", () => {
 					{ name: "omp-windows-x64.exe", browser_download_url: "https://example.invalid/windows" },
 				],
 			}),
-		});
+		);
 		const osToken =
 			process.platform === "win32" ? "omp-windows" : process.platform === "darwin" ? "omp-darwin" : "omp-linux";
 		expect(release.assetName?.startsWith(osToken)).toBe(true);
@@ -96,18 +105,18 @@ describe("getLatestLocalizedRelease", () => {
 	});
 
 	it("falls back to the release page when no host asset exists", async () => {
-		const release = await getLatestLocalizedRelease({
-			fetchImpl: httpAnswer({
+		const release = await checkOverHttp(
+			httpAnswer({
 				...RELEASE_V18_17,
 				assets: [{ name: "SOURCE_CODE.zip", browser_download_url: "https://example.invalid/src" }],
 			}),
-		});
+		);
 		expect(release.assetName).toBeUndefined();
 		expect(release.assetUrl).toBeUndefined();
 		expect(release.url).toBe("https://github.com/x/releases/tag/v18.17.0-zh");
 	});
 
-	it("reads the release through gh when the HTTP transport cannot verify GitHub", async () => {
+	it("takes the gh answer when the HTTP transport cannot verify GitHub", async () => {
 		// This box's path to api.github.com presents a chain Bun's bundled CA store
 		// rejects; `gh` (system trust store, authenticated) still answers, and the
 		// check must not turn into a startup failure or a wrong "up to date".
@@ -118,10 +127,34 @@ describe("getLatestLocalizedRelease", () => {
 		expect(release.version).toBe("18.17.0-zh");
 	});
 
-	it("reads the release through gh when the anonymous API is rate limited", async () => {
+	it("answers from gh and cancels the stalled HTTP leg", async () => {
+		// The legs race, and the loser must actually stop: a stalled HTTP path
+		// (this box, or a black-hole proxy) may not gate the answer behind its
+		// timeout, nor keep the process alive after the answer arrived.
+		let aborted = false;
+		const stalling = (_input: string | URL | Request, init?: RequestInit) => {
+			const { promise, reject } = Promise.withResolvers<Response>();
+			init?.signal?.addEventListener("abort", () => {
+				aborted = true;
+				reject(new Error("aborted"));
+			});
+			return promise;
+		};
 		const release = await getLatestLocalizedRelease({
-			fetchImpl: httpAnswer({ message: "API rate limit exceeded" }, { status: 403 }),
+			fetchImpl: stalling,
+			timeoutMs: 60_000,
 			gh: ghAnswer(RELEASE_V18_17),
+		});
+		expect(release.version).toBe("18.17.0-zh");
+		expect(aborted).toBe(true);
+	});
+
+	it("takes the HTTP answer when the gh CLI is missing", async () => {
+		const release = await getLatestLocalizedRelease({
+			fetchImpl: httpAnswer(RELEASE_V18_17),
+			gh: async () => {
+				throw new Error("spawn gh ENOENT");
+			},
 		});
 		expect(release.version).toBe("18.17.0-zh");
 	});
@@ -140,22 +173,15 @@ describe("getLatestLocalizedRelease", () => {
 				fetchImpl: httpAnswer({ message: "API rate limit exceeded" }, { status: 403 }),
 				gh: async () => ({ code: 1, stdout: "", error: "please run: gh auth login" }),
 			}),
-		).rejects.toThrow(/gh api: exit 1: please run: gh auth login/);
+		).rejects.toThrow(/exit 1: please run: gh auth login/);
 	});
 
 	it("refuses an answer that is not a usable localized release", async () => {
-		// `gh` stays injected: a rejected answer must not fall through to the real
-		// CLI and turn a contract failure into a live network call.
-		const ghOff: GhRunner = async () => ({ code: 1, stdout: "" });
-		await expect(
-			getLatestLocalizedRelease({ fetchImpl: httpAnswer({ html_url: "https://github.com/x" }), gh: ghOff }),
-		).rejects.toThrow(/tag_name/);
+		await expect(checkOverHttp(httpAnswer({ html_url: "https://github.com/x" }))).rejects.toThrow(/tag_name/);
 
 		// A tag without the localized suffix (an official release reaching this
 		// feed by mistake) must never be offered as this build's update.
-		await expect(
-			getLatestLocalizedRelease({ fetchImpl: httpAnswer({ tag_name: "v18.17.0" }), gh: ghOff }),
-		).rejects.toThrow(/localized/);
+		await expect(checkOverHttp(httpAnswer({ tag_name: "v18.17.0" }))).rejects.toThrow(/localized/);
 
 		await expect(
 			getLatestLocalizedRelease({

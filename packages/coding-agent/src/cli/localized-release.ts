@@ -57,29 +57,43 @@ export function localizedReleaseApiUrl(repo: string = LOCALIZED_RELEASE_REPO): s
 /** One `gh` leg: exit code, stdout, and the first stderr line when it failed. */
 export type GhResult = { code: number; stdout: string; error?: string };
 
-/** Runs `gh <args>` under a deadline. Test/DI seam. */
-export type GhRunner = (args: readonly string[], timeoutMs: number) => Promise<GhResult>;
+/** Runs `gh <args>` under a deadline and abort signal. Test/DI seam. */
+export type GhRunner = (args: readonly string[], timeoutMs: number, signal?: AbortSignal) => Promise<GhResult>;
 
-/** Exit code reported when `gh` outlives the check's budget (124, as timeout(1) does). */
-const GH_TIMEOUT_CODE = 124;
-
-async function runGh(args: readonly string[], timeoutMs: number): Promise<GhResult> {
-	const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
-	// The startup check is awaited before the TUI settles, so a `gh` that hangs —
-	// an auth prompt, a stalled network path — must not stall the launch.
-	const outcome = await Promise.race([
-		proc.exited.then(code => ({ code, timedOut: false })),
-		Bun.sleep(timeoutMs).then(() => ({ code: GH_TIMEOUT_CODE, timedOut: true })),
-	]);
-	if (outcome.timedOut) proc.kill();
+async function readGhResult(proc: Bun.Subprocess<"ignore", "pipe", "pipe">, code: number): Promise<GhResult> {
 	const stdout = await new Response(proc.stdout).text();
 	// `gh api` explains itself on stderr; without it a failure is just "exit 1".
 	const firstStderrLine = (await new Response(proc.stderr).text()).trim().split("\n")[0];
-	return {
-		code: outcome.code,
-		stdout,
-		error: outcome.timedOut ? `timed out after ${timeoutMs}ms` : firstStderrLine || undefined,
+	return { code, stdout, error: firstStderrLine || undefined };
+}
+
+/**
+ * `gh <args>` bounded by a deadline and an optional abort. The startup check is
+ * awaited before the TUI settles, so a `gh` that hangs — an auth prompt, a dead
+ * network path — must not stall the launch, and a leg that already lost the
+ * race must not hold the process open either.
+ */
+async function runGh(args: readonly string[], timeoutMs: number, signal?: AbortSignal): Promise<GhResult> {
+	const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
+	const { promise, resolve, reject } = Promise.withResolvers<GhResult>();
+	const stop = (reason: string) => {
+		proc.kill();
+		reject(new Error(reason));
 	};
+	const timer = setTimeout(() => stop(`timed out after ${timeoutMs}ms`), timeoutMs);
+	const onAbort = () => stop("cancelled: the other transport answered first");
+	signal?.addEventListener("abort", onAbort, { once: true });
+	proc.exited
+		.then(async code => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			resolve(await readGhResult(proc, code));
+		})
+		.catch((err: unknown) => {
+			clearTimeout(timer);
+			reject(err instanceof Error ? err : new Error(String(err)));
+		});
+	return promise;
 }
 
 /** Filename prefix of this platform's release asset (`omp-windows-x64.exe`). */
@@ -133,9 +147,11 @@ function parseLocalizedRelease(answer: unknown, repo: string): LocalizedRelease 
 }
 
 /**
- * The fork's newest localized release, read over HTTP and, when that transport
- * fails (TLS the bundled CA store will not verify, a proxy, a 403 rate limit),
- * through the `gh` CLI. Throws naming both failures when neither answers.
+ * The fork's newest localized release, read over BOTH transports at once.
+ * Queuing them would put the HTTP leg's whole budget in front of an answer the
+ * `gh` CLI gives in a couple of seconds (this box's path to `api.github.com`
+ * stalls rather than failing fast), and the check runs on every launch.
+ * Whichever leg answers first wins; when both fail, the error names each.
  */
 export async function getLatestLocalizedRelease(
 	options: {
@@ -150,24 +166,37 @@ export async function getLatestLocalizedRelease(
 	const repo = options.repo ?? LOCALIZED_RELEASE_REPO;
 	const budget = options.timeoutMs ?? LOCALIZED_RELEASE_TIMEOUT_MS;
 	const failures: string[] = [];
-	try {
+	// One controller cancels whichever leg is still running once the other wins,
+	// so a stalled transport cannot hold the CLI (or the launch) open.
+	const cancel = new AbortController();
+	const httpLeg = (async () => {
 		// The shim is per call site (no global fetch patch), so a plain `fetch`
 		// here would ignore NODE_EXTRA_CA_CERTS on a TLS-intercepting network.
 		const response = await (options.fetchImpl ?? wrapFetchForExtraCa(fetch))(localizedReleaseApiUrl(repo), {
 			headers: { Accept: "application/vnd.github+json", "User-Agent": USER_AGENT },
-			signal: withTimeoutSignal(budget),
+			signal: withTimeoutSignal(budget, cancel.signal),
 		});
-		if (response.ok) return parseLocalizedRelease(await response.json(), repo);
-		failures.push(`api.github.com: HTTP ${response.status} ${response.statusText}`);
-	} catch (err) {
+		if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+		return parseLocalizedRelease(await response.json(), repo);
+	})().catch((err: unknown) => {
+		// Stay rejected: `Promise.any` must keep waiting for the other leg.
 		failures.push(`api.github.com: ${(err as Error).message}`);
-	}
-	try {
-		const gh = await (options.gh ?? runGh)(["api", `repos/${repo}/releases/latest`], budget);
-		if (gh.code === 0) return parseLocalizedRelease(JSON.parse(gh.stdout), repo);
-		failures.push(`gh api: exit ${gh.code}${gh.error ? `: ${gh.error}` : ""}`);
-	} catch (err) {
+		throw err;
+	});
+	const ghLeg = (async () => {
+		const gh = await (options.gh ?? runGh)(["api", `repos/${repo}/releases/latest`], budget, cancel.signal);
+		if (gh.code !== 0) throw new Error(`exit ${gh.code}${gh.error ? `: ${gh.error}` : ""}`);
+		return parseLocalizedRelease(JSON.parse(gh.stdout), repo);
+	})().catch((err: unknown) => {
 		failures.push(`gh api: ${(err as Error).message}`);
+		throw err;
+	});
+	try {
+		return await Promise.any([httpLeg, ghLeg]);
+	} catch {
+		// Reaching a rejection means both legs failed, so `failures` holds both reasons.
+		throw new Error(`Could not read ${repo} releases — ${failures.join("; ")}`);
+	} finally {
+		cancel.abort();
 	}
-	throw new Error(`Could not read ${repo} releases — ${failures.join("; ")}`);
 }
