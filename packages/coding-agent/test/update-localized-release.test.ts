@@ -176,6 +176,14 @@ describe("getLatestLocalizedRelease", () => {
 		).rejects.toThrow(/exit 1: please run: gh auth login/);
 	});
 
+	it("points at the repository this fork actually publishes to", async () => {
+		// The slug is baked into the shipped binary, so a rename (planned:
+		// `oh-my-pi-zh` for v18.17.0-zh) must move this constant in the same
+		// commit as the release manifest. The manifest is the source of truth.
+		const manifest = await Bun.file(new URL("../../../i18n.release.json", import.meta.url)).json();
+		expect(LOCALIZED_RELEASE_REPO).toBe(manifest.github.repo);
+	});
+
 	it("refuses an answer that is not a usable localized release", async () => {
 		await expect(checkOverHttp(httpAnswer({ html_url: "https://github.com/x" }))).rejects.toThrow(/tag_name/);
 

@@ -55,6 +55,12 @@
   英文 omp、当前对齐 v18.16.0。中文界面实拍图集补进 `README.zh-CN.md`（此前只有英文 README 有），并在上游
   正文前加分界说明；图集标题注明截图拍摄于 `v18.11.0-zh`，避免被当成当前版界面。
 
+- **命名（决定，尚未执行）**：`omp-zh-i18n` 路人看不出是 `oh-my-pi` 的汉化版。Boss 定：**改名到
+  `oh-my-pi-zh`，在 v18.17.0-zh 周期 Step 5 之前切换**，本周期不半路切。本轮先把门面讲清楚
+  （上一条），并加测试把 `localized-release.ts` 里编译进二进制的 slug 常量与 `i18n.release.json`
+  的 `github.repo` 钉在一起——切换时漏改常量，测试直接 FAIL。7 步切换清单见
+  `docs/local/I18N-RELEASE-WORKFLOW.md` §3.1.1（GitHub 旧 URL 有 301，gitee 没有）。
+
 ## [v18.16.0-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.16.0-zh) — 2026-11-04
 
 对齐官方 **v18.16.0**(commit `650f3a10`)。上一中文版为

@@ -19,7 +19,12 @@
 import { isRecord, USER_AGENT, wrapFetchForExtraCa } from "@oh-my-pi/pi-utils";
 import { withTimeoutSignal } from "../utils/fetch-timeout";
 
-/** GitHub repository publishing the localized releases. */
+/**
+ * GitHub repository publishing the localized releases. Renaming this repo must
+ * change this constant in the same commit as `i18n.release.json`'s
+ * `github.repo` — it is compiled into the shipped binary, and an installed
+ * build asks this slug for its update feed. A test pins the two together.
+ */
 export const LOCALIZED_RELEASE_REPO = "feigo313/omp-zh-i18n";
 
 /** The prerelease suffix every localized build carries. */
