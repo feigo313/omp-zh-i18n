@@ -36,9 +36,8 @@
 
 ## 中文界面预览 / Chinese UI gallery
 
-这些截图是**本 fork 的中文界面**（欢迎页与常用设置页），拍摄于 `v18.11.0-zh`（2026-09）。
-当前版本 `v18.16.0-zh` 的会话列表、后台任务等界面在上游 18.13–18.16 周期有增量变化，以实际运行为准。
-These shots show **this fork's Chinese UI**; they were captured on `v18.11.0-zh` (Sep 2026).
+这些截图是**本 fork 的中文界面**（欢迎页与常用设置页），实拍于 `v18.16.0-zh`（2026-11）。
+These shots show **this fork's Chinese UI** (welcome page and the settings tabs), captured live from `v18.16.0-zh` (Nov 2026): a real `omp` process was driven through a ConPTY and its 110×34 byte stream was replayed into a cell grid — no mockups, no redrawn text.
 
 ### 欢迎页
 
