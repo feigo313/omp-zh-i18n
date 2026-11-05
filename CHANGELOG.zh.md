@@ -68,11 +68,11 @@
   编译进二进制的更新源常量 `packages/coding-agent/src/cli/localized-release.ts`、发布清单的
   `github.repo`/`remotes.origin`、发布与推送脚本、本日志里全部 release 链接、本地 `origin` 远端，
   并新增门禁检查把「远端 URL 的 slug」与发布清单钉死（漏改一边就 FAIL，正是半迁移会出的事故：
-  二进制已经问新仓库，代码却还往旧仓库推）。**旧 GitHub 链接继续有效**——改名后网页与 API 都有 301，
-  已装上的汉化版照样能查到更新（实测旧 slug 仍解析到新仓库）。
-  唯一没跟上的是 **gitee 镜像**：gitee 的改名只支持网页端，API 的 PATCH 会 200 返回但**静默忽略 `name`**，
-  所以镜像仍是 `atrix313/omp-zh-i18n`（旧名不失效，推送照常）；你在网页端改名后我需要跑一次
-  `git remote set-url gitee https://gitee.com/atrix313/oh-my-pi-zh.git`。
+  二进制已经问新仓库，代码却还往旧仓库推）。**已装上的汉化版不会被切断**，实测两条：改名前那个装机映像
+  跑 `omp update --check` 仍答「已是最新版本」（GitHub 旧 slug 有 301），旧下载链接也照样 301 到新地址。
+  **gitee 镜像同一天也改完了**：它的 v5 API 不支持改名（PATCH 会 200 返回但静默忽略 `name`），只能在网页端
+  「仓库设置 → 路径」改。改完实测 gitee 的旧链接同样不失效——网页 302 到新地址、旧 API 路径返回新仓库、
+  旧 git URL 仍可 fetch。
 
 - **下一周期范围（已出清单，本轮未实施）**：输入框/命令行内容的汉化。实测：斜杠补全菜单的 **218 条
   `description:` 全是硬编码英文、一条都没走 i18n**（`src/slash-commands/`），输入框右侧的快捷键提示行
