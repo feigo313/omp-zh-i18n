@@ -209,5 +209,8 @@ describe("zh-only translations", () => {
 			}
 		}
 		expect(leaks).toEqual([]);
-	});
+		// The callsite scan walks every source file in two packages; while the rest
+		// of the gate is running alongside it, that overruns bun's 5s default — one
+		// gate run failed at 5000.67ms and three solo reruns passed in ~300ms.
+	}, 30_000);
 });
