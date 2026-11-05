@@ -69,6 +69,12 @@
   的 `github.repo` 钉在一起——切换时漏改常量，测试直接 FAIL。7 步切换清单见
   `docs/local/I18N-RELEASE-WORKFLOW.md` §3.1.1（GitHub 旧 URL 有 301，gitee 没有）。
 
+- **下一周期范围（已出清单，本轮未实施）**：输入框/命令行内容的汉化。实测：斜杠补全菜单的 **218 条
+  `description:` 全是硬编码英文、一条都没走 i18n**（`src/slash-commands/`），输入框右侧的快捷键提示行
+  （`to change thinking effort` 等）与 MCP 启动通知同样写死；composer 组件族本身已无用户可见英文。
+  运行时探针另查出 112 个 key 在中文资源里缺失（界面直接显示英文）。清单与建议 key 组见
+  `docs/local/I18N-NEXT-CYCLE-COMPOSER.md`；汉化时命令令牌保持英文（上一条门禁会拦）。
+
 ## [v18.16.0-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.16.0-zh) — 2026-11-04
 
 对齐官方 **v18.16.0**(commit `650f3a10`)。上一中文版为
