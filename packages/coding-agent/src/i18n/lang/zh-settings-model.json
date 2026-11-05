@@ -288,7 +288,7 @@
   "settings.providers.autoThinkingMaxEffort.options.max.label": "max",
   "settings.providers.autoThinkingMaxEffort.options.xhigh.description": "分类器最高解析到 xhigh(默认)",
   "settings.providers.autoThinkingMaxEffort.options.xhigh.label": "xhigh",
-  "settings.providers.autoThinkingModel.description": "auto 思考级别的难度分类器模型",
+  "settings.providers.autoThinkingModel.description": "auto 思考级别的难度分类器：默认走在线（即 /models 里的 TINY 角色，否则 smol），也可用本地端侧模型",
   "settings.providers.autoThinkingModel.label": "自动 思考 模型",
   "settings.repetitionPenalty.description": "对重复 token 的惩罚（-1 = 提供方默认）",
   "settings.repetitionPenalty.label": "重复惩罚",

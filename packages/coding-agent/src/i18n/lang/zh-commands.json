@@ -287,7 +287,7 @@
   "flags.list.description": "列出提供商的 OAuth 账户（索引 + 身份）并退出",
   "flags.local.description": "操作本地插件目录",
   "flags.mode.description": "输出模式：text（默认）、json、rpc 或 rpc-ui",
-  "flags.model.description": "使用的模型（模糊匹配：\"opus\"、\"gpt-5.2\" 或 \"openai/gpt-5.2\"）",
+  "flags.model.description": "选择模型（模糊匹配：\"opus\"、\"gpt-5.2\" 或 \"openai/gpt-5.2\"，语法与 omp 的 --model 相同）",
   "flags.models.description": "用于 Ctrl+P 切换的逗号分隔模型模式",
   "flags.out.description": "将 WAV 写入此路径而非播放",
   "flags.par.description": "使用 N 个并行查询/请求执行运行",
