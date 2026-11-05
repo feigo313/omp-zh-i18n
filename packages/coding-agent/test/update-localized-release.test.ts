@@ -10,7 +10,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/cli/localized-release";
 import { compareVersions } from "@oh-my-pi/pi-utils";
 
-/** GitHub answers shaped like `feigo313/omp-zh-i18n` releases. */
+/** GitHub answers shaped like `feigo313/oh-my-pi-zh` releases. */
 function jsonResponse(body: unknown, init?: ResponseInit): Response {
 	return new Response(JSON.stringify(body), {
 		...init,

@@ -9,10 +9,10 @@
 | 项 | 值 |
 |---|---|
 | 路径 | `G:\oh-my-pi-i18n` |
-| 性质 | Oh My Pi 中文汉化工作区 / 公开项目 **omp-zh-i18n** |
+| 性质 | Oh My Pi 中文汉化工作区 / 公开项目 **oh-my-pi-zh** |
 | 主包 | `packages/coding-agent`（CLI 名 `omp`） |
 | 基线版本 | **17.1.0** |
-| GitHub | https://github.com/feigo313/omp-zh-i18n · `master` |
+| GitHub | https://github.com/feigo313/oh-my-pi-zh · `master` |
 | 更新节奏 | **不定期**（不承诺跟每个上游小版本） |
 
 ## 术语

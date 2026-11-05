@@ -1,4 +1,4 @@
-# 更新日志 — omp-zh-i18n
+# 更新日志 — oh-my-pi-zh
 
 本文件记录 **Oh My Pi 中文版**的发布情况。上游 `can1357/oh-my-pi` 自身的详细变更请见
 [上游 CHANGELOG](https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/CHANGELOG.md)。
@@ -63,11 +63,16 @@
   正文前加分界说明；图集改为 **`v18.16.0-zh` 实拍**（5 张：欢迎页 + 外观/模型/交互/工具设置页），
   并注明拍摄方式：用 ConPTY 驱动真实 omp 进程、抓 110×34 终端字节流后逐单元格重建，不是设计稿或贴图。
 
-- **命名（决定，尚未执行）**：`omp-zh-i18n` 路人看不出是 `oh-my-pi` 的汉化版。Boss 定：**改名到
-  `oh-my-pi-zh`，在 v18.17.0-zh 周期 Step 5 之前切换**，本周期不半路切。本轮先把门面讲清楚
-  （上一条），并加测试把 `localized-release.ts` 里编译进二进制的 slug 常量与 `i18n.release.json`
-  的 `github.repo` 钉在一起——切换时漏改常量，测试直接 FAIL。7 步切换清单见本 fork 的内部发布手册
-  §3.1.1（`docs/local/`，不随公开仓库发布；GitHub 旧 URL 有 301，gitee 没有）。
+- **命名（已执行，2026-11-05）**：GitHub 项目从 `omp-zh-i18n` 改名为 **`oh-my-pi-zh`**，让路人一眼看出这是
+  `can1357/oh-my-pi` 的中文界面版（旧 slug 里 `i18n` 是工程黑话、`omp` 没人认识）。一次改到位的地方：
+  编译进二进制的更新源常量 `packages/coding-agent/src/cli/localized-release.ts`、发布清单的
+  `github.repo`/`remotes.origin`、发布与推送脚本、本日志里全部 release 链接、本地 `origin` 远端，
+  并新增门禁检查把「远端 URL 的 slug」与发布清单钉死（漏改一边就 FAIL，正是半迁移会出的事故：
+  二进制已经问新仓库，代码却还往旧仓库推）。**旧 GitHub 链接继续有效**——改名后网页与 API 都有 301，
+  已装上的汉化版照样能查到更新（实测旧 slug 仍解析到新仓库）。
+  唯一没跟上的是 **gitee 镜像**：gitee 的改名只支持网页端，API 的 PATCH 会 200 返回但**静默忽略 `name`**，
+  所以镜像仍是 `atrix313/omp-zh-i18n`（旧名不失效，推送照常）；你在网页端改名后我需要跑一次
+  `git remote set-url gitee https://gitee.com/atrix313/oh-my-pi-zh.git`。
 
 - **下一周期范围（已出清单，本轮未实施）**：输入框/命令行内容的汉化。实测：斜杠补全菜单的 **218 条
   `description:` 全是硬编码英文、一条都没走 i18n**（`src/slash-commands/`），输入框右侧的快捷键提示行
@@ -75,10 +80,10 @@
   运行时探针另查出 112 个 key 在中文资源里缺失（界面直接显示英文）。清单与建议 key 组记录在本 fork 的
   内部发布手册（`docs/local/`，不随公开仓库发布）；汉化时命令令牌保持英文（上一条门禁会拦）。
 
-## [v18.16.0-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.16.0-zh) — 2026-11-04
+## [v18.16.0-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.16.0-zh) — 2026-11-04
 
 对齐官方 **v18.16.0**(commit `650f3a10`)。上一中文版为
-[v18.12.6-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.12.6-zh)。
+[v18.12.6-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.12.6-zh)。
 
 官方 18.13 → 18.16 的主线：`/resume` 直接列出带标题的会话；后台任务新增一行用途说明并把
 模型给的目的带到 `/jobs`/`proc://`/`wait`；`out://` 让 agent 在不结束任务的情况下给出阶段性
@@ -121,7 +126,7 @@ Chrome)修掉一批 tab/下载/富文本填字问题；启动时延通过延迟�
 ## [v18.12.6-zh] — 2026-10-24
 
 对齐官方 **v18.12.6**(commit `45c35e40`)。
-上一中文版为 [v18.12.5-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.12.5-zh)。
+上一中文版为 [v18.12.5-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.12.5-zh)。
 
 官方 v18.12.6 的主线是 **MCP OAuth 重授权重构**(`/mcp reauth` 支持 ACP/RPC/print 模式,
 流程抽成共享引擎,并修复第二次 OAuth 登录后 Esc 失效)、**扩展延迟加载**(只注册工具/命令的
@@ -155,7 +160,7 @@ Chrome)修掉一批 tab/下载/富文本填字问题；启动时延通过延迟�
 ## [v18.12.5-zh] — 2026-10-21
 
 对齐官方 **v18.12.5**(commit `d5cd750e`)。
-上一中文版为 [v18.12.3-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.12.3-zh)。
+上一中文版为 [v18.12.3-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.12.3-zh)。
 
 官方在 v18.12.3 之后发布了两个 patch(v18.12.4 / v18.12.5),内容以模型请求层与账号策略为主;
 界面侧的变化是**等待卡片重写**(新增紧凑视图),本轮据此重新接线了汉化。
@@ -182,7 +187,7 @@ Chrome)修掉一批 tab/下载/富文本填字问题；启动时延通过延迟�
 ## [v18.12.3-zh] — 2026-10-21
 
 对齐官方 **v18.12.3**(commit `53a0377db`)。
-上一中文版为 [v18.11.0-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.11.0-zh)。
+上一中文版为 [v18.11.0-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.11.0-zh)。
 
 本次官方跨了 7 个次版本(v18.11.1 → v18.12.3):新增"询问并记住"审批模式、
 后台任务实时组件、子代理在任务卡上显示当前步骤、模型选择器与用量仪表盘调整,
@@ -229,12 +234,12 @@ SHA-256: 942a4a96d4b6bb2896145e6bd2843f7ad2790b5c12eb34b71f968f5d4c80fc6b
 大小:    413809664 字节
 ```
 
-[下载页面](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.12.3-zh)
+[下载页面](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.12.3-zh)
 
 ## [v18.11.0-zh] — 2026-10-16
 
 对齐官方 **v18.11.0**(commit `c2cb79e4`)。
-上一中文版为 [v18.4.10-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.4.10-zh)。
+上一中文版为 [v18.4.10-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.4.10-zh)。
 
 本次官方跨了 7 个次版本(v18.5.0 → v18.11.0):MCP 向导重构、usage 仪表盘、
 欢迎页提示、autoresearch、4 个新 CLI 命令、大批新设置项与协议修复陆续落地,
@@ -300,12 +305,12 @@ SHA-256: D0688E3EF59C79F0BAEC929769DED22B41ACC4AD938FEF6B009FAECE8692F46E
 大小:    431777280 字节
 ```
 
-[下载页面](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.11.0-zh)
+[下载页面](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.11.0-zh)
 
 ## [v18.4.10-zh] — 2026-10-03
 
 对齐官方 **v18.4.10**(2026-10-02 发布,commit `cb0d5295`)。
-上一中文版为 [v18.3.1-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.3.1-zh)。
+上一中文版为 [v18.3.1-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.3.1-zh)。
 
 本次官方跨了 8 个补丁版本(18.3.2 → 18.4.10,共 1638 个提交),上游对 TUI 与
 `omp stats` 仪表盘做了较大重构,界面文案变动较多,因此本次汉化随上游同步重做了一轮。
@@ -359,14 +364,14 @@ SHA-256: a246752734afe86d49ac83071a23240008d665c090642e7a6651bb7131577364
 大小:    371436544 字节
 ```
 
-[下载页面](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.4.10-zh)
+[下载页面](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.4.10-zh)
 
 ## 历史版本
 
-- [v18.4.10-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.4.10-zh) — 2026-10-03
-- [v18.3.1-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.3.1-zh) — 2026-09-27
-- [v18.2.6-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.2.6-zh) — 2026-09-19
-- [v17.2.1-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v17.2.1-zh)
-- [v17.2.0-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v17.2.0-zh)
-- [v17.1.8-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v17.1.8-zh)
-- [v17.1.0-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v17.1.0-zh)
+- [v18.4.10-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.4.10-zh) — 2026-10-03
+- [v18.3.1-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.3.1-zh) — 2026-09-27
+- [v18.2.6-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v18.2.6-zh) — 2026-09-19
+- [v17.2.1-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v17.2.1-zh)
+- [v17.2.0-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v17.2.0-zh)
+- [v17.1.8-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v17.1.8-zh)
+- [v17.1.0-zh](https://github.com/feigo313/oh-my-pi-zh/releases/tag/v17.1.0-zh)

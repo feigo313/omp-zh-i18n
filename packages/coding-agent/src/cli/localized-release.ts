@@ -25,7 +25,7 @@ import { withTimeoutSignal } from "../utils/fetch-timeout";
  * `github.repo` — it is compiled into the shipped binary, and an installed
  * build asks this slug for its update feed. A test pins the two together.
  */
-export const LOCALIZED_RELEASE_REPO = "feigo313/omp-zh-i18n";
+export const LOCALIZED_RELEASE_REPO = "feigo313/oh-my-pi-zh";
 
 /** The prerelease suffix every localized build carries. */
 export const LOCALIZED_SUFFIX = "zh";

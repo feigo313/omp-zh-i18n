@@ -1,11 +1,11 @@
 # Development Rules
 
-## This Fork (omp-zh-i18n)
+## This Fork (oh-my-pi-zh)
 
 | | |
 |---|---|
 | What | Chinese localization fork of Oh My Pi — not upstream `can1357/oh-my-pi` |
-| Public | https://github.com/feigo313/omp-zh-i18n · branch `master` · also `gitee.com/atrix313/omp-zh-i18n` |
+| Public | https://github.com/feigo313/oh-my-pi-zh · branch `master` · mirror `gitee.com/atrix313/omp-zh-i18n`（gitee 改名只能网页端做，API 不支持；改名后此行改成 `atrix313/oh-my-pi-zh`，并把 `git remote set-url gitee …`） |
 | Upstream remote | `upstream` → `https://github.com/can1357/oh-my-pi.git` |
 | Current baseline | coding-agent **18.16.0-zh** (official tag `v18.16.0` = `650f3a10`; X/Y upstream change triggers a new zh release) |
 | Primary work | `packages/coding-agent/src/i18n/lang/zh-*.json` + required en SoT / wiring (`interceptor.ts`, settings UI) and the tui translation seam (`packages/tui/src/i18n-host.ts`) |
