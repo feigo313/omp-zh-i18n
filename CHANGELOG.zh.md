@@ -66,14 +66,14 @@
 - **命名（决定，尚未执行）**：`omp-zh-i18n` 路人看不出是 `oh-my-pi` 的汉化版。Boss 定：**改名到
   `oh-my-pi-zh`，在 v18.17.0-zh 周期 Step 5 之前切换**，本周期不半路切。本轮先把门面讲清楚
   （上一条），并加测试把 `localized-release.ts` 里编译进二进制的 slug 常量与 `i18n.release.json`
-  的 `github.repo` 钉在一起——切换时漏改常量，测试直接 FAIL。7 步切换清单见
-  `docs/local/I18N-RELEASE-WORKFLOW.md` §3.1.1（GitHub 旧 URL 有 301，gitee 没有）。
+  的 `github.repo` 钉在一起——切换时漏改常量，测试直接 FAIL。7 步切换清单见本 fork 的内部发布手册
+  §3.1.1（`docs/local/`，不随公开仓库发布；GitHub 旧 URL 有 301，gitee 没有）。
 
 - **下一周期范围（已出清单，本轮未实施）**：输入框/命令行内容的汉化。实测：斜杠补全菜单的 **218 条
   `description:` 全是硬编码英文、一条都没走 i18n**（`src/slash-commands/`），输入框右侧的快捷键提示行
   （`to change thinking effort` 等）与 MCP 启动通知同样写死；composer 组件族本身已无用户可见英文。
-  运行时探针另查出 112 个 key 在中文资源里缺失（界面直接显示英文）。清单与建议 key 组见
-  `docs/local/I18N-NEXT-CYCLE-COMPOSER.md`；汉化时命令令牌保持英文（上一条门禁会拦）。
+  运行时探针另查出 112 个 key 在中文资源里缺失（界面直接显示英文）。清单与建议 key 组记录在本 fork 的
+  内部发布手册（`docs/local/`，不随公开仓库发布）；汉化时命令令牌保持英文（上一条门禁会拦）。
 
 ## [v18.16.0-zh](https://github.com/feigo313/omp-zh-i18n/releases/tag/v18.16.0-zh) — 2026-11-04
 
